@@ -2,11 +2,19 @@
 # Environments
 .env
 
+# Ignore Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
 # Mac
 .DS_Store
 
 # Data folders
 data/datafinder/*
+!data/datafinder/loader.py
+!data/datafinder/__init__.py
 data/mathe/*
 data/gems_datasets_metadata/*
 

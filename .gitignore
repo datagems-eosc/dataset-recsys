@@ -1,0 +1,13 @@
+
+# Environments
+.env
+
+# Mac
+.DS_Store
+
+# Data folders
+data/datafinder/*
+data/mathe/*
+data/gems_datasets_metadata/*
+
+src/temp.py

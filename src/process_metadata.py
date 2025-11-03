@@ -102,11 +102,11 @@ def check_datasets_without_recordset(folder_path: str) -> list:
 if __name__ == "__main__":
     
     # # Examples:
-    # result = extract_format_and_fields(Path("development/datagems_dataset_recs/datasets_metadata/mathe_material.json"))
+    # result = extract_format_and_fields(Path("data/gems_datasets_metadata/mathe_material.json"))
     # print(json.dumps(result, indent=2))
 
     # formats_map = extract_formats_and_files(
-    #     "development/datagems_dataset_recs/datasets_metadata/"
+    #     "data/gems_datasets_metadata/"
     # )
 
-    missing = check_datasets_without_recordset("development/datagems_dataset_recs/datasets_metadata/")
+    missing = check_datasets_without_recordset("data/gems_datasets_metadata/")

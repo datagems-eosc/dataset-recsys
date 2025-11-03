@@ -1,0 +1,10 @@
+
+{
+  "python.terminal.executeInFileDir": false,
+
+  "python.envFile": "${workspaceFolder}/.env",
+
+  "jupyter.notebookFileRoot": "${workspaceFolder}",
+
+  "terminal.integrated.cwd": "${workspaceFolder}"
+}

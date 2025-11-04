@@ -1,0 +1,96 @@
+{
+  "404": {
+    "description": "Not Found",
+    "content": {
+      "application/json": {
+        "examples": {
+          "Dataset Not Found": {
+            "summary": "Dataset not found",
+            "value": {
+              "errors": [
+                {
+                  "code": 404,
+                  "detail": "Dataset 'movies' not found"
+                }
+              ]
+            }
+          },
+          "Item ID Not Found": {
+            "summary": "Item ID not found",
+            "value": {
+              "errors": [
+                {
+                  "code": 404,
+                  "detail": "Item ID './materials/666.pdf' not found in dataset 'mathe'"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "422": {
+    "content": {
+      "application/json": {
+        "examples": {
+          "Missing Required Field": {
+            "summary": "Missing required query parameter",
+            "value": {
+              "errors": [
+                {
+                  "code": 422,
+                  "detail": [
+                    {
+                      "type": "missing",
+                      "loc": ["query", "id"],
+                      "msg": "Field required",
+                      "input": null
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "Invalid Integer Parsing": {
+            "summary": "Invalid integer parsing for query parameter",
+            "value": {
+              "errors": [
+                {
+                  "code": 422,
+                  "detail": [
+                    {
+                      "type": "int_parsing",
+                      "loc": ["query", "n"],
+                      "msg": "Input should be a valid integer, unable to parse string as an integer",
+                      "input": "ten"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "Integer Above Maximum Limit": {
+            "summary": "Query parameter n exceeds the maximum allowed value (20)",
+            "value": {
+              "errors": [
+                {
+                  "code": 422,
+                  "detail": [
+                    {
+                      "type": "less_than_equal",
+                      "loc": ["query", "n"],
+                      "msg": "Input should be less than or equal to 20",
+                      "input": "21",
+                      "ctx": {"le": 20}
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

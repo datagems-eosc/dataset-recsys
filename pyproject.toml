@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "dataset-recsys"
+version = "0.1.0"
+description = "Dataset recommender for the DataGEMS project"
+authors = ["Stavroula Eleftherakis <selefth@yahoo.com>"]
+license = "MIT"
+readme = "README.md"
+packages = [{ include = "src", from = "." }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+huggingface-hub = "0.34.4"
+chonky = "0.1.7"
+sentence-transformers = "5.1.0"
+fastapi = "^0.121.0"
+boto3 = "^1.40.66"
+dotenv = "^0.9.9"
+pytest = "^8.4.2"
+pandas = "^2.3.3"
+
+
+[tool.poetry.group.dev.dependencies]
+jupyter = "^1.1.1"
+ipywidgets = "^8.1.8"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

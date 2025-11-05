@@ -13,9 +13,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("dataset_recs_api")
 
 app = FastAPI(
-    openapi_url="/api/datagems/dataset-recsys/openapi.json",
-    docs_url="/api/datagems/dataset-recsys/docs",
-    redoc_url="/api/datagems/dataset-recsys/redoc",
+    openapi_url="/dataset-recsys/openapi.json",
+    docs_url="/dataset-recsys/docs",
+    redoc_url="/dataset-recsys/redoc",
 )
 
 # Set up CORS middleware
@@ -77,7 +77,7 @@ class ItemToItemRecsResponse(BaseModel):
 
 
 @app.get(
-    "/api/datagems/dataset-recsys/recommend",
+    "/dataset-recsys/recommend",
     response_model=ItemToItemRecsResponse,
     summary="Get recommendations",
     description="""
@@ -161,5 +161,5 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 # uvicorn src.services.dataset_recs_api:app --reload
-# http://127.0.0.1:8000/api/datagems/dataset-recsys/redoc
-# http://127.0.0.1:8000/api/datagems/dataset-recsys/docs
+# http://127.0.0.1:8000/dataset-recsys/redoc
+# http://127.0.0.1:8000/dataset-recsys/docs

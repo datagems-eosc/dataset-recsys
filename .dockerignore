@@ -1,0 +1,25 @@
+
+# Python cache and virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+
+# system files
+.DS_Store
+
+# version control
+.git/
+.gitignore
+
+# notebooks and temporary files
+notebooks/
+*.ipynb
+*.log
+*.tmp
+
+data/*
+!data/mathe/mathe_top20_recommendations.json
+
+.env

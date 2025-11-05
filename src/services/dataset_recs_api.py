@@ -129,6 +129,21 @@ def get_recommendations(
         logger.error(f"Unexpected error while getting recommendations: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@app.get(
+    "/dataset-recsys/health",
+    summary="Health check",
+    description="Check if the recommender API is running and responsive.",
+    tags=["Service Health"],
+)
+async def health_check():
+    try:
+        if not recommendations_data:
+            raise HTTPException(status_code=500, detail="No recommendation data loaded")
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        raise HTTPException(status_code=500, detail="Service unavailable")
+
 # Global exception handlers
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):

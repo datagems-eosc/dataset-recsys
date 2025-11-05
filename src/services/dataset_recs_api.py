@@ -143,6 +143,15 @@ async def health_check():
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         raise HTTPException(status_code=500, detail="Service unavailable")
+    
+@app.get(
+    "/",
+    summary="Root endpoint",
+    description="Root endpoint to verify that the service is running.",
+    tags=["Service Health"],
+)
+async def root():
+    return {"status": "ok", "message": "Dataset Recommendation Service is running."}
 
 # Global exception handlers
 @app.exception_handler(HTTPException)

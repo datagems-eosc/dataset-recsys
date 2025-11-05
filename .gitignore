@@ -16,6 +16,7 @@ data/datafinder/*
 !data/datafinder/loader.py
 !data/datafinder/__init__.py
 data/mathe/*
+!data/mathe/mathe_top20_recommendations.json
 data/gems_datasets_metadata/*
 
 src/temp.py

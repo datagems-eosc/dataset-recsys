@@ -21,7 +21,7 @@
               "errors": [
                 {
                   "code": 404,
-                  "detail": "Item ID './materials/666.pdf' not found in dataset 'mathe'"
+                  "detail": "Item ID '666.pdf' not found in dataset 'mathe'"
                 }
               ]
             }
@@ -43,7 +43,7 @@
                   "detail": [
                     {
                       "type": "missing",
-                      "loc": ["query", "id"],
+                      "loc": ["query", "iid"],
                       "msg": "Field required",
                       "input": null
                     }

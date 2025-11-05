@@ -3,13 +3,13 @@
     "summary": "Top-5 recommendations for material 56 in the MathE dataset.",
     "value": {
       "dataset": "mathe",
-      "id": "./materials/56.pdf",
+      "iid": "56.pdf",
       "recommendations": [
-        "./materials/54.pdf",
-        "./materials/55.pdf",
-        "./materials/52.pdf",
-        "./materials/367.pdf",
-        "./materials/360.pdf"
+        "54.pdf",
+        "55.pdf",
+        "52.pdf",
+        "367.pdf",
+        "360.pdf"
       ]
     }
   }

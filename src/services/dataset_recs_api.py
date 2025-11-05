@@ -84,7 +84,7 @@ class ItemToItemRecsResponse(BaseModel):
 Retrieve the top-N recommendations for a given item in a dataset.
 
 The meaning of *item* varies by dataset:
-- **MathE** — items are educational materials (PDFs), whose identifiers correspond to their relative file paths under the materials/ directory (e.g., ./materials/{item_id}.pdf).
+- **MathE** — items are educational materials (PDFs), whose identifiers correspond to filenames with `.pdf` extension (e.g., `{item_id}.pdf`).
     """,
     tags=["Dataset Recommendation Service"],
     responses={
@@ -110,6 +110,7 @@ def get_recommendations(
             logger.warning(f"Dataset '{dataset}' not found")
             raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found")
 
+        # TODO: Replace the following JSON-based lookup with a database query when transitioning to DB storage.
         dataset_recs = recommendations_data[dataset]
         if iid not in dataset_recs:
             logger.warning(f"Item ID '{iid}' not found in dataset '{dataset}'")

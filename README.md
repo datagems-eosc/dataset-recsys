@@ -10,5 +10,5 @@ The item-to-item recommendation pipeline consists of four components:
 1. **Metadata ingestion layer**: the textual information associated with each item.
 2. **Representation module**: transforms this information into numerical embeddings.
 3. **Candidate generator**: retrieves a pool of potentially related items.
-4. **Re-ranking module**: orders the retrieved candidates according to their relevance.the textual information associated with each item.
+4. **Re-ranking module**: orders the retrieved candidates according to their relevance.
 

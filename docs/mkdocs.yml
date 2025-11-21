@@ -1,0 +1,58 @@
+site_name: Dataset Recommendation Service
+# site_url: 
+repo_url: https://github.com/datagems-eosc/dataset-recsys
+
+nav:
+  - System:
+    - Architecture: architecture.md
+  - API: index.md
+  - License: license.md
+  - DataGEMS Home: https://datagems-eosc.github.io/
+
+theme:
+  name: 'material'
+  favicon: images/favicon.jpg
+  logo: images/datagems-portal-icon.png
+  icon:
+    repo: fontawesome/brands/github
+  custom_dir: overrides
+  features:
+    - navigation.path
+    - navigation.top
+
+extra_css:
+  - stylesheets/custom-footer.css
+  - stylesheets/mkdocsoad.css
+
+docs_dir: source
+
+plugins:
+  - search
+  - mike
+  - neoteroi.mkdocsoad:
+      use_pymdownx: true
+
+markdown_extensions:
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+extra:
+  version:
+    provider: mike
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/datagems-eosc/
+    - icon: fontawesome/brands/instagram
+      link: https://www.instagram.com/datagems_eosc
+    - icon: fontawesome/brands/x-twitter
+      link: https://x.com/datagems_eosc
+    - icon: fontawesome/brands/youtube
+      link: https://www.youtube.com/@DataGEMS-65n
+    - icon: fontawesome/brands/linkedin
+      link: https://www.linkedin.com/company/eosc-datagems
+    - icon: fontawesome/brands/facebook
+      link: https://www.facebook.com/datagems.eosc/

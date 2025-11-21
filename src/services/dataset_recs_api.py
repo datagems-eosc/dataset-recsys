@@ -145,7 +145,7 @@ async def health_check():
         raise HTTPException(status_code=500, detail="Service unavailable")
     
 @app.get(
-    "/",
+    "/dataset-recsys/",
     summary="Root endpoint",
     description="Root endpoint to verify that the service is running.",
     tags=["Service Health"],

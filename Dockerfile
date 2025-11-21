@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime
+FROM python:3.11-slim
 
 WORKDIR /app
 
@@ -7,7 +7,7 @@ RUN pip install --no-cache-dir poetry
 COPY pyproject.toml poetry.lock ./
 
 RUN poetry config virtualenvs.create false && \
-  poetry install --without dev --no-interaction --no-ansi --no-root
+  poetry install --without dev --without train --without docs --no-interaction --no-ansi --no-root
 
 COPY src/ ./src/
 COPY data/mathe/mathe_top20_recommendations.json ./data/mathe/mathe_top20_recommendations.json

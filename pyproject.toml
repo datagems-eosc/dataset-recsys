@@ -11,6 +11,9 @@ packages = [{ include = "src", from = "." }]
 python = "^3.11"
 fastapi = "^0.121.0"
 dotenv = "^0.9.9"
+uvicorn = "^0.38.0"
+boto3 = "^1.40.66"
+pandas = "^2.3.3"
 
 [tool.poetry.group.train]
 optional = true
@@ -19,8 +22,6 @@ optional = true
 huggingface-hub = "0.34.4"
 chonky = "0.1.7"
 sentence-transformers = "5.1.0"
-boto3 = "^1.40.66"
-pandas = "^2.3.3"
 pyserini = "^1.3.0"
 
 [tool.poetry.group.docs]

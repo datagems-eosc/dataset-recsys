@@ -1,6 +1,6 @@
 import json
 import os
-from typing import List, Set, Dict, Optional
+from typing import List, Set, Optional
 import redis
 import os
 from dotenv import load_dotenv

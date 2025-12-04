@@ -1,45 +1,18 @@
-from huggingface_hub import snapshot_download
-from pathlib import Path
-import json, random
 import os
+import json
+import random
+from pathlib import Path
+
+import numpy as np
+import torch
 
 from transformers import AutoTokenizer
-import numpy as np
 from sentence_transformers import SentenceTransformer
 from chonky import ParagraphSplitter
 
-import torch
+from data.mathe import MathE
 
 #TODO: What about material in the form of videos?
-
-def download_mathe_assets():
-    """
-    Downloads MathE assets from Hugging Face (including PDFs, OCR, and indexes)
-    and returns the local path to the downloaded 'mathe' directory.
-    """
-    local_dir = snapshot_download(
-        repo_id="DARELab/cross-dataset-assets",
-        repo_type="dataset",
-        local_dir_use_symlinks=False,
-        allow_patterns=["mathe/**"],   # downloads PDFs + OCR + indexes
-    )
-    print("Assets stored under:", local_dir)
-    return Path(local_dir) / "mathe"
-
-def load_mathe_ocr_data(base):
-    """
-    Loads and returns the MathE OCR JSON data from the specified base directory.
-
-    Returns:
-        List[dict]: A list of dictionaries, where each dictionary represents one MathE material with:
-            - "id": The relative path to the source PDF file (e.g., "materials/56.pdf").
-            - "contents": The OCR-extracted text from that PDF.
-    """
-    ocr_path = base / "data.json"
-    with open(ocr_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    print(len(data), "materials found")
-    return data
 
 def compute_token_stats(data, tokenizer):
     """
@@ -65,9 +38,9 @@ def compute_token_stats(data, tokenizer):
     return over_limit_ids
 
 if __name__ == "__main__":
-
-    base = download_mathe_assets()
-    data = load_mathe_ocr_data(base)
+    mathe = MathE()
+    data = mathe.get_raw()
+    base = mathe._base_dir
 
     # Step 1: Compute embeddings for all materials
 

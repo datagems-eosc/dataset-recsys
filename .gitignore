@@ -15,8 +15,8 @@ __pycache__/
 data/datafinder/*
 !data/datafinder/loader.py
 !data/datafinder/__init__.py
-data/mathe/*
-!data/mathe/mathe_top20_recommendations.json
+data/mathe/mathe_embedding_index.json
+data/mathe/mathe_embeddings.npy
 data/gems_datasets_metadata/*
 
 src/temp.py

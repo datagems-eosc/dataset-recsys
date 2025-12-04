@@ -16,13 +16,10 @@ REQUIRED_FILES = [
 
 class DataFinder:
     """
-    **Usage**
-    ```python
-    from datafinder import DataFinder
-
-    datafinder = DataFinder()
-    data = datafinder.get()
-    ```
+    Usage:
+        from datafinder import DataFinder
+        datafinder = DataFinder()
+        data = datafinder.get()
     """
 
     def __init__(self, cache_dir: Optional[str] = None) -> None:

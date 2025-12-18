@@ -3,6 +3,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from src.recommendation_client import RecommendationClient
 from typing import List
 import json
 from pathlib import Path
@@ -17,6 +18,7 @@ app = FastAPI(
     docs_url="/dataset-recsys/docs",
     redoc_url="/dataset-recsys/redoc",
 )
+recs_client = RecommendationClient()
 
 # Set up CORS middleware
 app.add_middleware(
@@ -30,27 +32,6 @@ DATA_DIR = Path("data")
 DOCS_VALID_EXAMPLES_PATH = Path("src/services/api_docs/valid_examples.json")
 DOCS_ERROR_EXAMPLES_PATH = Path("src/services/api_docs/error_examples.json")
 
-def load_recommendations():
-    """
-    Load all recommendation JSON files from subdirectories of the data directory.
-    """
-    global recommendations_data
-    recommendations_data = {}
-    if not DATA_DIR.exists():
-        logger.warning(f"Data directory '{DATA_DIR}' does not exist.")
-        return
-
-    for dataset_path in DATA_DIR.iterdir():
-        if dataset_path.is_dir():
-            for file_path in dataset_path.glob("*_recommendations.json"):
-                try:
-                    with file_path.open("r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    recommendations_data.setdefault(dataset_path.name, {}).update(data)
-                except Exception as e:
-                    logger.error(f"Failed to load {file_path}: {e}")
-    logger.info(f"Loaded datasets: {list(recommendations_data.keys())}")
-
 def load_json_file(path: Path) -> dict:
     if not path.exists():
         logger.warning(f"File '{path}' does not exist.")
@@ -63,7 +44,6 @@ def load_json_file(path: Path) -> dict:
         logger.error(f"Failed to load file from {path}: {e}")
         return {}
 
-load_recommendations()
 examples_data, errors_data = (load_json_file(DOCS_VALID_EXAMPLES_PATH), load_json_file(DOCS_ERROR_EXAMPLES_PATH))
 SUPPORTED_DATASETS = ["mathe"]  # Extend this list to support more datasets
 
@@ -106,22 +86,22 @@ def get_recommendations(
     n: int = Query(10, le=20, description="Number of similar items to return")
 ):
     try:
-        if dataset not in recommendations_data:
+        available_usecases = recs_client.list_usecases()     
+        if dataset not in available_usecases:
             logger.warning(f"Dataset '{dataset}' not found")
             raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found")
 
-        # TODO: Replace the following JSON-based lookup with a database query when transitioning to DB storage.
-        dataset_recs = recommendations_data[dataset]
-        if iid not in dataset_recs:
+        recs_set = recs_client.get_recommendations(usecase=dataset, pdf=iid)
+        if not recs_set:
             logger.warning(f"Item ID '{iid}' not found in dataset '{dataset}'")
             raise HTTPException(status_code=404, detail=f"Item ID '{iid}' not found in dataset '{dataset}'")
 
-        recs = dataset_recs[iid][:n]
-        logger.info(f"Returning {len(recs)} recommendations for dataset={dataset}, iid={iid}")
+        recs_list = list(recs_set)[:n]
+        logger.info(f"Returning {len(recs_list)} recommendations for dataset={dataset}, iid={iid}")
         return ItemToItemRecsResponse(
             dataset=dataset,
             iid=iid,
-            recommendations=recs
+            recommendations=recs_list
         )
     except HTTPException:
         raise
@@ -132,17 +112,35 @@ def get_recommendations(
 @app.get(
     "/dataset-recsys/health",
     summary="Health check",
-    description="Check if the recommender API is running and responsive.",
+    description="Check if the API and the underlying Redis database are responsive.",
     tags=["Service Health"],
 )
 async def health_check():
     try:
-        if not recommendations_data:
-            raise HTTPException(status_code=500, detail="No recommendation data loaded")
-        return {"status": "ok"}
+        # 1. Check Redis connectivity via the client
+        is_redis_up = recs_client.check_connection()
+        
+        if not is_redis_up:
+            logger.error("Health check failed: Redis is unreachable.")
+            raise HTTPException(
+                status_code=503, 
+                detail="Service Unavailable: Database connection failed"
+            )
+
+        # 2. Optional: Check if any data exists at all
+        usecases = recs_client.list_usecases()
+        
+        return {
+            "status": "ok",
+            "database": "connected",
+            "available_datasets": len(usecases),
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        raise HTTPException(status_code=500, detail="Service unavailable")
+        logger.error(f"Health check encountered an unexpected error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
     
 @app.get(
     "/dataset-recsys/",
@@ -184,6 +182,17 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         }
     )
 
+# Enable port forwarding to Redis before running the app:
+# export KUBECONFIG=~/path/to/.kubeconfig
+# kubectl port-forward pod/dataset-recsys-redis-5547b598b7-mngqk -n athenarc 6380:6379
+
+# Run the API with:
 # uvicorn src.services.dataset_recs_api:app --reload
 # http://127.0.0.1:8000/dataset-recsys/redoc
 # http://127.0.0.1:8000/dataset-recsys/docs
+
+# Test api && redis connection:
+# curl -X GET "http://127.0.0.1:8000/dataset-recsys/health" -v
+
+# Test recommendations:
+# curl -G "http://127.0.0.1:8000/dataset-recsys/recommend" --data-urlencode "dataset=mathe" --data-urlencode "iid=6.pdf" --data-urlencode "n=10"

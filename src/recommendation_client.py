@@ -115,7 +115,7 @@ class RecommendationClient:
             try:
                 # ping() returns True if the connection is successful
                 if self.r.ping():
-                    print(f"✅ Successfully connected to Redis at {self.REDIS_URL}")
+                    print(f"✅ Successfully connected to Redis")
                     return True
                 else:
                     # Should not happen if ping() is successful, but for completeness

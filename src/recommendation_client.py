@@ -12,7 +12,15 @@ class RecommendationClient:
     """
 
     def __init__(self):
-        self.r = redis.Redis.from_url("redis://localhost:6380", decode_responses=True)
+        self.r = self.get_redis_client()
+
+    def get_redis_client(self) -> redis.Redis:
+        REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+        REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+        REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+
+        client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
+        return client        
 
     # -------------------------
     # INGESTION
@@ -107,7 +115,7 @@ class RecommendationClient:
             try:
                 # ping() returns True if the connection is successful
                 if self.r.ping():
-                    print("✅ Successfully connected to Redis at localhost:6380")
+                    print(f"✅ Successfully connected to Redis at {self.REDIS_URL}")
                     return True
                 else:
                     # Should not happen if ping() is successful, but for completeness

@@ -3,26 +3,6 @@ import os
 from typing import List, Set, Optional
 import redis
 import os
-from dotenv import load_dotenv
-
-def load_repo_env():
-    """Walk up directories until .env is found and load it."""
-    current_dir = os.path.abspath(os.path.dirname(__file__))
-    while True:
-        env_path = os.path.join(current_dir, ".env")
-        if os.path.exists(env_path):
-            load_dotenv(env_path)
-            break
-        parent_dir = os.path.dirname(current_dir)
-        if parent_dir == current_dir:
-            raise FileNotFoundError(".env file not found in any parent directory.")
-        current_dir = parent_dir
-
-# Load .env once when the module is imported
-load_repo_env()
-
-REDIS_URL = os.getenv("REDIS_URL")
-
 class RecommendationClient:
     """
     Client for ingesting and querying PDF recommendation mappings using Redis Sets.
@@ -32,7 +12,15 @@ class RecommendationClient:
     """
 
     def __init__(self):
-        self.r = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+        self.r = self.get_redis_client()
+
+    def get_redis_client(self) -> redis.Redis:
+        REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+        REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+        REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+
+        client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
+        return client        
 
     # -------------------------
     # INGESTION
@@ -121,8 +109,23 @@ class RecommendationClient:
                 referring_pdfs.add(source_pdf)
 
         return referring_pdfs
-    
 
+    def check_connection(self) -> bool:
+            """Pings the Redis server and returns True if successful."""
+            try:
+                # ping() returns True if the connection is successful
+                if self.r.ping():
+                    print(f"✅ Successfully connected to Redis at {self.REDIS_URL}")
+                    return True
+                else:
+                    # Should not happen if ping() is successful, but for completeness
+                    print("❌ Redis connection failed (Ping did not return True).")
+                    return False
+            except redis.exceptions.ConnectionError as e:
+                print(f"❌ Redis Connection Error: {e}")
+                print("\n🚨 Check that 'kubectl port-forward' is running and pointing to port 6380.")
+                return False
+    
     # -------------------------
     # INTERNAL UTILITIES
     # -------------------------

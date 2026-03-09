@@ -1,14 +1,14 @@
 import json
 import os
-from typing import List, Set, Optional
+from typing import List, Set, Optional, Union
 import redis
-import os
+
 class RecommendationClient:
     """
-    Client for ingesting and querying PDF recommendation mappings using Redis Sets.
+    Client for ingesting and querying item recommendation mappings using Redis Sets.
 
     Redis key pattern:
-        recommendations:<usecase>:<pdf_name>
+        recommendations:<dataset_id>:<item_id>
     """
 
     def __init__(self):
@@ -25,18 +25,19 @@ class RecommendationClient:
     # -------------------------
     # INGESTION
     # -------------------------
-    def ingest_json(self, json_path: str, usecase: Optional[str] = None):
+    def ingest_dataset(self, json_path: str, dataset_id: Optional[str] = None):
         """
-        Load a JSON file where keys are pdf names and values are lists of recommended PDFs.
+        Load a JSON file where keys are item_ids and values are lists of recommended item_ids.
 
         Example JSON:
         {
-            "6.pdf": ["7.pdf", "9.pdf"],
-            "65.pdf": ["67.pdf", "66.pdf"]
+            "item_123": ["item_456", "item_789"],
+            "item_999": ["item_100", "item_101"]
         }
         """
-        if usecase is None:
-            usecase = os.path.basename(json_path).split(".")[0]
+        # Default dataset_id to filename if not provided
+        if dataset_id is None:
+            dataset_id = os.path.basename(json_path).split(".")[0]
 
         with open(json_path, "r") as f:
             data = json.load(f)
@@ -45,90 +46,121 @@ class RecommendationClient:
             raise ValueError("JSON must contain a dictionary at its top level.")
 
         count = 0
-        for pdf, recs in data.items():
+        for item_id, recs in data.items():
             if not isinstance(recs, list):
-                raise ValueError(f"Value for '{pdf}' must be a list.")
+                raise ValueError(f"Value for '{item_id}' must be a list.")
 
-            key = self._key(usecase, pdf)
+            key = self._key(dataset_id, item_id)
 
             if recs:
+                # Add all recommended item_ids to the Redis set
                 self.r.sadd(key, *recs)
             else:
-                # ensure empty sets exist
+                # Ensure empty sets exist via a placeholder
                 self.r.sadd(key, "")
 
             count += 1
 
-        return f"Ingested {count} PDFs into usecase '{usecase}'."
+        return f"Ingested {count} items into dataset '{dataset_id}'."
 
     # -------------------------
     # QUERYING
     # -------------------------
-    def get_recommendations(self, usecase: str, pdf: str) -> Set[str]:
-        """Return all recommended PDFs for the given input PDF."""
-        key = self._key(usecase, pdf)
-        recs = self.r.smembers(key)
-        return {r for r in recs if r != ""}  # filter placeholder
+    def get_recommendations(self, dataset_id: Union[str, List[str]], item_id: str) -> Set[str]:
+        """
+        Return all recommended item_ids for the given input item.
+        Accepts a single dataset_id (str) or a list of dataset_ids (List[str]).
+        """
+        # Normalize input to a list
+        if isinstance(dataset_id, str):
+            dataset_ids = [dataset_id]
+        else:
+            dataset_ids = dataset_id
 
-    def list_pdfs(self, usecase: str) -> List[str]:
-        """List all PDFs in a given usecase."""
-        pattern = f"recommendations:{usecase}:*"
+        all_recommendations = set()
+
+        for ds in dataset_ids:
+            key = self._key(ds, item_id)
+            recs = self.r.smembers(key)
+            
+            # Aggregate unique recommendations (filtering out the empty placeholder)
+            all_recommendations.update({r for r in recs if r != ""})
+
+        return all_recommendations
+
+    def list_items(self, dataset_id: str) -> List[str]:
+        """List all item_ids in a given dataset."""
+        pattern = f"recommendations:{dataset_id}:*"
         keys = self.r.keys(pattern)
+        # Split by ':' and take the last part (item_id)
         return [key.split(":", 2)[-1] for key in keys]
 
-    def list_usecases(self) -> List[str]:
-        """List all available usecases."""
+    def list_datasets(self) -> List[str]:
+        """List all available dataset IDs."""
         keys = self.r.keys("recommendations:*")
-        usecases = {key.split(":")[1] for key in keys}
-        return sorted(usecases)
+        datasets = {key.split(":")[1] for key in keys}
+        return sorted(datasets)
 
-    def find_entries_recommending(self, usecase: str, pdf: str) -> Set[str]:
+    def find_items_recommending(self, dataset_id: str, target_item_id: str) -> Set[str]:
         """
-        Return a set of all PDFs that list `pdf` as a recommendation.
-
-        Example:
-            If 7.pdf appears inside:
-                - recommendations:taxguides:6.pdf
-                - recommendations:taxguides:22.pdf
-
-            then calling:
-                find_entries_recommending("taxguides", "7.pdf")
-            returns:
-                {"6.pdf", "22.pdf"}
+        Return a set of all item_ids that list `target_item_id` as a recommendation.
         """
-        pattern = f"recommendations:{usecase}:*"
+        pattern = f"recommendations:{dataset_id}:*"
         keys = self.r.keys(pattern)
 
-        referring_pdfs = set()
+        referring_items = set()
 
         for key in keys:
-            source_pdf = key.split(":", 2)[-1]
+            source_item_id = key.split(":", 2)[-1]
             recs = self.r.smembers(key)
 
-            if pdf in recs:
-                referring_pdfs.add(source_pdf)
+            if target_item_id in recs:
+                referring_items.add(source_item_id)
 
-        return referring_pdfs
+        return referring_items
 
     def check_connection(self) -> bool:
-            """Pings the Redis server and returns True if successful."""
-            try:
-                # ping() returns True if the connection is successful
-                if self.r.ping():
-                    print(f"✅ Successfully connected to Redis")
-                    return True
-                else:
-                    # Should not happen if ping() is successful, but for completeness
-                    print("❌ Redis connection failed (Ping did not return True).")
-                    return False
-            except redis.exceptions.ConnectionError as e:
-                print(f"❌ Redis Connection Error: {e}")
-                print("\n🚨 Check that 'kubectl port-forward' is running and pointing to port 6380.")
+        """Pings the Redis server and returns True if successful."""
+        try:
+            if self.r.ping():
+                print(f"✅ Successfully connected to Redis")
+                return True
+            else:
+                print("❌ Redis connection failed.")
                 return False
+        except redis.exceptions.ConnectionError as e:
+            print(f"❌ Redis Connection Error: {e}")
+            return False
+        
+    def remove_old_recommendations(self, dataset_id: str) -> int:
+        """
+        Removes all keys following the old pattern 'recommendations:<dataset_id>:*'.
+        Returns the total number of keys deleted.
+        """
+        pattern = f"recommendations:{dataset_id}:*"
+        cursor = 0
+        total_deleted = 0
+        
+        print(f"🧹 Starting cleanup for dataset: {dataset_id}...")
+
+        while True:
+            # SCAN is safer than KEYS in production as it doesn't block the server
+            cursor, keys = self.r.scan(cursor=cursor, match=pattern, count=100)
+            
+            if keys:
+                # Delete the batch of keys
+                deleted_count = self.r.delete(*keys)
+                total_deleted += deleted_count
+            
+            if cursor == 0:
+                break
+                
+        print(f"✅ Cleanup complete. Removed {total_deleted} keys.")
+        return total_deleted
     
     # -------------------------
     # INTERNAL UTILITIES
     # -------------------------
     @staticmethod
-    def _key(usecase: str, pdf: str) -> str:
-        return f"recommendations:{usecase}:{pdf}"
+    def _key(dataset_id: str, item_id: str) -> str:
+        return f"recommendations:{dataset_id}:{item_id}"

@@ -1,0 +1,16 @@
+{
+  "MathE Example 1": {
+    "summary": "Top-5 recommendations for material 56 in the MathE dataset.",
+    "value": {
+      "dataset": "mathe",
+      "iid": "56.pdf",
+      "recommendations": [
+        "54.pdf",
+        "55.pdf",
+        "52.pdf",
+        "367.pdf",
+        "360.pdf"
+      ]
+    }
+  }
+}

@@ -1,17 +1,41 @@
+import time
+from datetime import datetime
 import logging
-from fastapi import FastAPI, HTTPException, Query, Request
+import structlog
+from fastapi import Depends, FastAPI, HTTPException, Request, status, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from src.recommendation_client import RecommendationClient
-from typing import List
+from src.legacy_client import LegacyClient
+from src.configs.logging_config import (
+    request_response_logging_middleware,
+    correlation_id_middleware,
+    setup_logging,
+)
+from src.configs.exceptions import (
+    ErrorResponse,
+    ValidationErrorDetail,
+    ValidationErrorResponse,
+    FailedDependencyMessage,
+    FailedDependencyResponse,
+    FailedDependencyException,
+)
+from src.configs import security
+from src.services.models import SearchRequest, RecommendationResponse
+from src.services.legacy_models import ItemToItemRecsResponse
 import json
 from pathlib import Path
-from pydantic import BaseModel, Field
 
 # Configure logging
+setup_logging()
+logger = structlog.get_logger(__name__)
+accounting_logger = structlog.get_logger("accounting")
+app_state = {}
+
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("dataset_recs_api")
+legacy_logger = logging.getLogger("dataset_recs_api")
+SUPPORTED_DATASETS = ["mathe"]
 
 app = FastAPI(
     openapi_url="/dataset-recsys/openapi.json",
@@ -19,6 +43,11 @@ app = FastAPI(
     redoc_url="/dataset-recsys/redoc",
 )
 recs_client = RecommendationClient()
+legacy_recs_client = LegacyClient()
+
+# --- Middleware ---
+app.middleware("http")(request_response_logging_middleware)
+app.middleware("http")(correlation_id_middleware)
 
 # Set up CORS middleware
 app.add_middleware(
@@ -31,6 +60,8 @@ app.add_middleware(
 DATA_DIR = Path("data")
 DOCS_VALID_EXAMPLES_PATH = Path("src/services/api_docs/valid_examples.json")
 DOCS_ERROR_EXAMPLES_PATH = Path("src/services/api_docs/error_examples.json")
+LEGACY_VALID_EXAMPLES_PATH = Path("src/services/api_docs/legacy_valid_examples.json")
+LEGACY_ERROR_EXAMPLES_PATH = Path("src/services/api_docs/legacy_error_examples.json")
 
 def load_json_file(path: Path) -> dict:
     if not path.exists():
@@ -45,17 +76,9 @@ def load_json_file(path: Path) -> dict:
         return {}
 
 examples_data, errors_data = (load_json_file(DOCS_VALID_EXAMPLES_PATH), load_json_file(DOCS_ERROR_EXAMPLES_PATH))
-SUPPORTED_DATASETS = ["mathe"]  # Extend this list to support more datasets
+legacy_examples_data, legacy_errors_data = (load_json_file(LEGACY_VALID_EXAMPLES_PATH), load_json_file(LEGACY_ERROR_EXAMPLES_PATH))
 
-class ItemToItemRecsResponse(BaseModel):
-    dataset: str = Field(..., description="The dataset/application name")
-    iid: str = Field(..., description="The item identifier within the selected dataset")
-    recommendations: List[str] = Field(
-        ...,
-        description="List of recommended item identifiers"
-    )
-
-
+# --- API Endpoints ---
 @app.get(
     "/dataset-recsys/recommend",
     response_model=ItemToItemRecsResponse,
@@ -72,32 +95,32 @@ The meaning of *item* varies by dataset:
             # "description": "Successful response examples for supported datasets",
             "content": {
                 "application/json": {
-                    "examples": examples_data
+                    "examples": legacy_examples_data
                 }
             }
         },
-        404: errors_data.get("404"),
-        422: errors_data.get("422")
+        404: legacy_errors_data.get("404"),
+        422: legacy_errors_data.get("422")
     }
 )
-def get_recommendations(
+def get_recommendations_legacy(
     dataset: str = Query(..., description="The dataset/application name", enum=SUPPORTED_DATASETS),
     iid: str = Query(..., description="The item identifier within the selected dataset"),
     n: int = Query(10, le=20, description="Number of similar items to return")
 ):
     try:
-        available_usecases = recs_client.list_usecases()     
+        available_usecases = legacy_recs_client.list_usecases()     
         if dataset not in available_usecases:
-            logger.warning(f"Dataset '{dataset}' not found")
+            legacy_logger.warning(f"Dataset '{dataset}' not found")
             raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found")
 
-        recs_set = recs_client.get_recommendations(usecase=dataset, pdf=iid)
+        recs_set = legacy_recs_client.get_recommendations(usecase=dataset, pdf=iid)
         if not recs_set:
-            logger.warning(f"Item ID '{iid}' not found in dataset '{dataset}'")
+            legacy_logger.warning(f"Item ID '{iid}' not found in dataset '{dataset}'")
             raise HTTPException(status_code=404, detail=f"Item ID '{iid}' not found in dataset '{dataset}'")
 
         recs_list = list(recs_set)[:n]
-        logger.info(f"Returning {len(recs_list)} recommendations for dataset={dataset}, iid={iid}")
+        legacy_logger.info(f"Returning {len(recs_list)} recommendations for dataset={dataset}, iid={iid}")
         return ItemToItemRecsResponse(
             dataset=dataset,
             iid=iid,
@@ -106,8 +129,63 @@ def get_recommendations(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error while getting recommendations: {e}")
+        legacy_logger.error(f"Unexpected error while getting recommendations: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/dataset-recsys/v2/recommend", response_model=RecommendationResponse, tags=["V2 Recommendation Service"])
+async def get_recommendations_v2(
+    request: SearchRequest,
+    claims: dict = Depends(security.require_role(["user", "dg_user"])),
+    token: str = Depends(security.oauth2_scheme), 
+):
+    start_time = time.time()
+    user_subject = claims.get("sub")
+    log = logger.bind(item_id=request.iid, UserId=user_subject)
+    accounting_logger.info(
+        "Recommendation Request Received",
+        UserId=user_subject,
+        Action="get_recommendations",
+        Resource="DatasetRecommendations",
+        Type="+",
+        Value=1,
+        Measure="Unit",
+        Timestamp=datetime.utcnow().isoformat() + "Z",
+    )
+    iid = request.iid
+    n = request.n
+    try:
+        authorized_dataset_ids = await security.get_authorized_dataset_ids(token)
+        
+        target_datasets = list(set(request.dataset_ids).intersection(authorized_dataset_ids)) if request.dataset_ids else authorized_dataset_ids
+        if not target_datasets:
+            log = log.bind(requested_dataset_ids=request.dataset_ids)
+            log.warning(
+                    "User requested datasets they are not authorized for. Returning empty results."
+                )
+            return RecommendationResponse(query_time=0, dataset_ids=request.dataset_ids, item_ids=[])
+
+        recs_set = recs_client.get_recommendations(dataset_ids=target_datasets, item_id=iid)
+        if not recs_set:
+            logger.info(f"No recommendations found for item_id='{iid}'")
+            return RecommendationResponse(query_time=time.time() - start_time, dataset_ids=target_datasets, item_ids=[])
+
+        recs_list = list(recs_set)
+        query_time = time.time() - start_time
+        final_response = RecommendationResponse(
+            query_time=query_time,
+            dataset_ids=target_datasets,
+            item_ids=recs_list[:n]
+        )
+        logger.info(f"Found {len(recs_list)} total recommendations for item_id='{iid} in datasets {target_datasets}' (returning top {n}) in {query_time:.2f} seconds")
+        return final_response
+
+    except Exception as e:
+        log.error(
+            "An unexpected error occurred during search.", error=str(e), exc_info=True
+        )
+        raise HTTPException(
+            status_code=500, detail=f"An unexpected error occurred: {e}"
+        )
 
 @app.get(
     "/dataset-recsys/health",
@@ -118,7 +196,7 @@ def get_recommendations(
 async def health_check():
     try:
         # 1. Check Redis connectivity via the client
-        is_redis_up = recs_client.check_connection()
+        is_redis_up = legacy_recs_client.check_connection()
         
         if not is_redis_up:
             logger.error("Health check failed: Redis is unreachable.")
@@ -127,13 +205,9 @@ async def health_check():
                 detail="Service Unavailable: Database connection failed"
             )
 
-        # 2. Optional: Check if any data exists at all
-        usecases = recs_client.list_usecases()
-        
         return {
             "status": "ok",
             "database": "connected",
-            "available_datasets": len(usecases),
         }
         
     except HTTPException:
@@ -151,35 +225,46 @@ async def health_check():
 async def root():
     return {"status": "ok", "message": "Dataset Recommendation Service is running."}
 
-# Global exception handlers
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    logger.error(f"HTTPException: {exc.status_code} - {exc.detail} (path: {request.url.path})")
+# --- Exception Handlers ---
+@app.exception_handler(FailedDependencyException)
+async def failed_dependency_exception_handler(
+    request: Request, exc: FailedDependencyException
+):
+    response_content = FailedDependencyResponse(
+        code=104,
+        error="error communicating with underpinning service",
+        message=FailedDependencyMessage(
+            statusCode=exc.downstream_status_code,
+            source=exc.source,
+            correlationId=exc.correlation_id,
+            payload=exc.downstream_payload,
+        ),
+    )
     return JSONResponse(
         status_code=exc.status_code,
-        content={
-            "errors": [
-                {
-                    "code": exc.status_code,
-                    "detail": exc.detail
-                }
-            ]
-        }
+        content=response_content.model_dump(exclude_none=True),
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=ErrorResponse(code=exc.status_code, error=exc.detail).model_dump(),
     )
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    logger.error(f"RequestValidationError: {exc.errors()} (path: {request.url.path})")
+    details = [
+        ValidationErrorDetail(
+            Key=".".join(map(str, err.get("loc", []))), Value=[err.get("msg", "")]
+        )
+        for err in exc.errors()
+    ]
+    response_content = ValidationErrorResponse(
+        code=102, error="Validation Error", message=details
+    )
     return JSONResponse(
-        status_code=422,
-        content={
-            "errors": [
-                {
-                    "code": 422,
-                    "detail": exc.errors()
-                }
-            ]
-        }
+        status_code=status.HTTP_400_BAD_REQUEST, content=response_content.model_dump()
     )
 
 # Enable port forwarding to Redis before running the app:
@@ -194,5 +279,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Test api && redis connection:
 # curl -X GET "http://127.0.0.1:8000/dataset-recsys/health" -v
 
-# Test recommendations:
+# Test legacy recommendations:
 # curl -G "http://127.0.0.1:8000/dataset-recsys/recommend" --data-urlencode "dataset=mathe" --data-urlencode "iid=6.pdf" --data-urlencode "n=10"
+
+# Test v2 recommendations:
+# curl -X POST "http://127.0.0.1:8000/dataset-recsys/v2/recommend" -H "Content-Type: application/json" -H "Authorization: Bearer YOUR_TOKEN_HERE" -d '{"iid": "56.pdf", "n": 5, "dataset_ids": ["9b25bc46-8bd3-4f7f-94b4-52dbc38c130f"]}'

@@ -1,15 +1,18 @@
 {
-  "MathE Example 1": {
-    "summary": "Top-5 recommendations for material 56 in the MathE dataset.",
+  "Multi-Dataset Success": {
+    "summary": "Top recommendations for item 56.pdf across authorized datasets.",
     "value": {
-      "dataset": "mathe",
-      "iid": "56.pdf",
-      "recommendations": [
+      "query_time": 0.0125,
+      "dataset_ids": [
+        "mathe-uuid-101",
+        "physics-uuid-202"
+      ],
+      "item_ids": [
         "54.pdf",
         "55.pdf",
-        "52.pdf",
         "367.pdf",
-        "360.pdf"
+        "gravity_laws.pdf",
+        "52.pdf"
       ]
     }
   }

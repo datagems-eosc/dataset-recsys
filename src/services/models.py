@@ -16,11 +16,6 @@ class SearchRequest(BaseModel):
         if not v:
             raise ValueError("dataset_ids cannot be an empty list.")
         return v
-
-class LegacyResponse(BaseModel):
-    query_time: float = Field(..., description="Time taken to process the recommendation request in seconds")
-    item_ids: List[str] = Field(..., description="List of recommended items")
-
 class RecommendationResponse(BaseModel):
     query_time: float = Field(..., description="Time taken to process the recommendation request in seconds")
     dataset_ids: List[str] = Field(..., description="List of dataset identifiers that were searched to generate the recommendations")

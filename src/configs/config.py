@@ -23,7 +23,6 @@ class Settings(BaseSettings):
 
     # Database
     IdpClientSecret: str
-
     ROOT_PATH: str = ""
 
 

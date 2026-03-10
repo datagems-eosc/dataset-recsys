@@ -15,8 +15,8 @@ class RecommendationClient:
         self.r = self.get_redis_client()
 
     def get_redis_client(self) -> redis.Redis:
-        REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-        REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+        REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+        REDIS_PORT = int(os.getenv("REDIS_PORT", "6380"))
         REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 
         client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
@@ -66,27 +66,15 @@ class RecommendationClient:
     # -------------------------
     # QUERYING
     # -------------------------
-    def get_recommendations(self, dataset_id: Union[str, List[str]], item_id: str) -> Set[str]:
+    def get_recommendations(self, dataset_id: str, item_id: str) -> Set[str]:
         """
         Return all recommended item_ids for the given input item.
-        Accepts a single dataset_id (str) or a list of dataset_ids (List[str]).
+        Accepts a single dataset_id (str).
         """
-        # Normalize input to a list
-        if isinstance(dataset_id, str):
-            dataset_ids = [dataset_id]
-        else:
-            dataset_ids = dataset_id
-
-        all_recommendations = set()
-
-        for ds in dataset_ids:
-            key = self._key(ds, item_id)
-            recs = self.r.smembers(key)
-            
-            # Aggregate unique recommendations (filtering out the empty placeholder)
-            all_recommendations.update({r for r in recs if r != ""})
-
-        return all_recommendations
+        print(f"🔍 Fetching recommendations for dataset_id='{dataset_id}', item_id='{item_id}'...")
+        key = self._key(dataset_id, item_id)
+        recs = self.r.smembers(key)
+        return {r for r in recs if r != ""}
 
     def list_items(self, dataset_id: str) -> List[str]:
         """List all item_ids in a given dataset."""

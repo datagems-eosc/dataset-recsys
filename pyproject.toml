@@ -19,6 +19,7 @@ structlog = "^25.5.0"
 httpx = "^0.28.1"
 python-jose = "^3.5.0"
 pydantic-settings = "^2.13.1"
+iniconfig = "^2.3.0"
 
 [tool.poetry.group.train]
 optional = true

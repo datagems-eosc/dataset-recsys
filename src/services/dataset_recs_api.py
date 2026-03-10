@@ -1,3 +1,4 @@
+from ast import Dict
 import time
 from datetime import datetime
 import logging
@@ -22,8 +23,9 @@ from src.configs.exceptions import (
     FailedDependencyException,
 )
 from src.configs import security
-from src.services.models import SearchRequest, RecommendationResponse
+from src.services.models import SearchRequest, SearchResponse, API_SearchResult
 from src.services.legacy_models import ItemToItemRecsResponse
+from src.ap_handling import parse_recommendation_request_ap, create_recommendation_response_ap
 import json
 from pathlib import Path
 
@@ -132,7 +134,7 @@ def get_recommendations_legacy(
         legacy_logger.error(f"Unexpected error while getting recommendations: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.post("/dataset-recsys/v2/recommend", response_model=RecommendationResponse, tags=["V2 Recommendation Service"])
+@app.post("/dataset-recsys/v2/recommend", response_model=SearchResponse, tags=["V2 Recommendation Service"])
 async def get_recommendations_v2(
     request: SearchRequest,
     claims: dict = Depends(security.require_role(["user", "dg_user"])),
@@ -156,27 +158,27 @@ async def get_recommendations_v2(
     try:
         authorized_dataset_ids = await security.get_authorized_dataset_ids(token)
         
-        target_datasets = list(set(request.dataset_ids).intersection(authorized_dataset_ids)) if request.dataset_ids else authorized_dataset_ids
-        if not target_datasets:
-            log = log.bind(requested_dataset_ids=request.dataset_ids)
+        target_dataset = list(set([request.dataset_id]).intersection(authorized_dataset_ids)) if request.dataset_id else authorized_dataset_ids
+        if not target_dataset:
+            log = log.bind(requested_dataset_ids=request.dataset_id)
             log.warning(
                     "User requested datasets they are not authorized for. Returning empty results."
                 )
-            return RecommendationResponse(query_time=0, dataset_ids=request.dataset_ids, item_ids=[])
+            return SearchResponse(query_time=0, dataset_id=request.dataset_id, recommendations=[])
 
-        recs_set = recs_client.get_recommendations(dataset_ids=target_datasets, item_id=iid)
+        recs_set = recs_client.get_recommendations(dataset_id=target_dataset, item_id=iid)
         if not recs_set:
             logger.info(f"No recommendations found for item_id='{iid}'")
-            return RecommendationResponse(query_time=time.time() - start_time, dataset_ids=target_datasets, item_ids=[])
+            return SearchResponse(query_time=time.time() - start_time, dataset_id=target_dataset, recommendations=[])
 
         recs_list = list(recs_set)
         query_time = time.time() - start_time
-        final_response = RecommendationResponse(
+        final_response = SearchResponse(
             query_time=query_time,
-            dataset_ids=target_datasets,
-            item_ids=recs_list[:n]
+            dataset_id=target_dataset,
+            recommendations= [API_SearchResult(dataset_id=target_dataset, item_id=rec) for rec in recs_list[:n]]
         )
-        logger.info(f"Found {len(recs_list)} total recommendations for item_id='{iid} in datasets {target_datasets}' (returning top {n}) in {query_time:.2f} seconds")
+        logger.info(f"Found {len(recs_list)} total recommendations for item_id='{iid}' in dataset '{target_dataset}' (returning top {n}) in {query_time:.2f} seconds")
         return final_response
 
     except Exception as e:
@@ -186,6 +188,23 @@ async def get_recommendations_v2(
         raise HTTPException(
             status_code=500, detail=f"An unexpected error occurred: {e}"
         )
+
+@app.post("/dataset-recsys/recommend/ap", response_model=dict, tags=["Analytical Pattern Handling"])
+async def get_recommendations_ap(
+    analytical_pattern: dict,
+    claims: dict = Depends(security.require_role(["user", "dg_user"])),
+    token: str = Depends(security.oauth2_scheme),
+):
+    try:
+        search_request = parse_recommendation_request_ap(analytical_pattern)
+        search_response = await get_recommendations_v2(search_request, claims, token)
+        updated_ap = create_recommendation_response_ap(analytical_pattern, search_response)
+        return updated_ap
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing recommendation AP request: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 @app.get(
     "/dataset-recsys/health",

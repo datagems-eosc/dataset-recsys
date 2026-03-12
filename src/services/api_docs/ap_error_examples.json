@@ -1,0 +1,18 @@
+{
+  "422": {
+    "summary": "Malformed AP Graph",
+    "value": {
+      "code": 422,
+      "error": "Unprocessable Entity",
+      "message": "The Analytical Pattern is missing a 'DatasetRecommender_Operator' node with a valid 'dataset_id'."
+    }
+  },
+  "403": {
+    "summary": "Unauthorized Dataset Access",
+    "value": {
+      "code": 403,
+      "error": "Forbidden",
+      "message": "The user does not have permission to run recommendations on the provided dataset_id."
+    }
+  }
+}

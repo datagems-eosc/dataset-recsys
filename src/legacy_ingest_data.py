@@ -25,21 +25,11 @@ def run_ingestion(file_path: str, dataset_id: str):
     except Exception as e:
         print(f"❌ Ingestion failed: {e}")
 
-    # 3. List all datasets
-    all_ds = client.list_datasets()
-    print(f"All datasets in Redis: {all_ds}")
-    
-    # 4. Reverse lookup
-    # Find who recommends 'a36dde9d-7f95-40ff-8a9b-f687d0a72318'
-    sources = client.find_items_recommending("a36dde9d-7f95-40ff-8a9b-f687d0a72318")
-    print(f"Datasets recommending 'a36dde9d-7f95-40ff-8a9b-f687d0a72318': {sources}")
-        
-
 if __name__ == "__main__":
     # Update these paths/IDs as needed
     src_base = os.path.dirname(os.path.abspath(__file__))
     repo_base = os.path.dirname(src_base)
-    DATA_FILE = os.path.join(repo_base, "data", "dummy_input.json")
+    DATA_FILE = os.path.join(repo_base, "data", "mathe", "mathe_top20_recommendations.json")
     NEW_DATASET_ID = "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f"
     
-    run_ingestion(DATA_FILE, NEW_DATASET_ID)   
+    run_ingestion(DATA_FILE, NEW_DATASET_ID)

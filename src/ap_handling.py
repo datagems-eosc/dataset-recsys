@@ -75,10 +75,6 @@ def parse_recommendation_request_ap(analytical_pattern: Dict) -> SearchRequest:
     # 2. Extract 'n' and 'iid' from operator properties
     # In your JSON, seed_item_id is the 'iid' for the SearchRequest
     n_value = props.get("n", 10) # check for 'n' in properties, if not found default to 10
-    item_id = props.get("item_id")
-    
-    if not item_id:
-        raise ValueError("Operator missing 'item_id' in properties.")
 
     # 3. Extract 'dataset_id' from the incoming 'input' edge
     # This finds the node ID of the sc:Dataset connected to the operator
@@ -99,7 +95,6 @@ def parse_recommendation_request_ap(analytical_pattern: Dict) -> SearchRequest:
     # n: from the operator properties
     return SearchRequest(
         dataset_id=source_dataset_id,
-        iid=item_id,
         n=n_value
     )
 
@@ -109,7 +104,7 @@ def create_recommendation_response_ap(
 ) -> Dict:
     """
     Updates the Analytical Pattern with item-to-item recommendations.
-    Maps SearchResponse.recommendations to cr:FileObject nodes.
+    Maps SearchResponse.recommendations to sc:Dataset nodes.
     """
     # 1. Locate the Operator
     operator_node = get_node_from_label(analytical_pattern, "DatasetRecommender_Operator")
@@ -132,15 +127,13 @@ def create_recommendation_response_ap(
     # search_response.recommendations is a List[API_SearchResult]
     for rank, rec in enumerate(search_response.recommendations, start=1):
         item_id = rec.item_id
-        parent_ds_id = rec.dataset_id
 
-        # Create the Item Node (cr:FileObject)
+        # Create the Item Node (sc:Dataset)
         new_item_node = {
             "id": item_id,
-            "labels": ["cr:FileObject"],
+            "labels": ["sc:Dataset"],
             "properties": {
                 "item_id": item_id,
-                "dataset_id": parent_ds_id,  # Factored in for future dataset-level logic
                 "name": f"Recommended Item {rank}"
             }
         }
@@ -152,14 +145,6 @@ def create_recommendation_response_ap(
             "to": item_id,
             "labels": ["output"],
             "properties": {"rank": rank}
-        })
-
-        # Edge: Dataset -> Distribution -> Item
-        # This establishes the parent-child relationship
-        analytical_pattern["ap"]["edges"].append({
-            "from": parent_ds_id,
-            "to": item_id,
-            "labels": ["distribution"]
         })
 
     # 4. Attach Metadata

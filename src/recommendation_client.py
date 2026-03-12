@@ -15,8 +15,8 @@ class RecommendationClient:
         self.r = self.get_redis_client()
 
     def get_redis_client(self) -> redis.Redis:
-        REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-        REDIS_PORT = int(os.getenv("REDIS_PORT", "6380"))
+        REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+        REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
         REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 
         client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
@@ -27,128 +27,69 @@ class RecommendationClient:
     # -------------------------
     def ingest_dataset(self, json_path: str, dataset_id: Optional[str] = None):
         """
-        Load a JSON file where keys are item_ids and values are lists of recommended item_ids.
-
-        Example JSON:
-        {
-            "item_123": ["item_456", "item_789"],
-            "item_999": ["item_100", "item_101"]
-        }
+        Load a JSON file. The key in Redis will be the dataset_id, 
+        and the value will be a Set of recommended dataset IDs found in the JSON.
         """
-        # Default dataset_id to filename if not provided
         if dataset_id is None:
             dataset_id = os.path.basename(json_path).split(".")[0]
 
         with open(json_path, "r") as f:
             data = json.load(f)
 
-        if not isinstance(data, dict):
-            raise ValueError("JSON must contain a dictionary at its top level.")
+        # Extract unique recommended IDs from the JSON (works for lists or dict values)
+        recs = []
+        if isinstance(data, list):
+            recs = data
+        elif isinstance(data, dict):
+            # If the JSON is still in the old item_id: [recs] format, 
+            # we flatten all recommendations into a single set for the dataset.
+            for value in data.values():
+                if isinstance(value, list):
+                    recs.extend(value)
+                else:
+                    recs.append(value)
 
-        count = 0
-        for item_id, recs in data.items():
-            if not isinstance(recs, list):
-                raise ValueError(f"Value for '{item_id}' must be a list.")
+        # Filter out empty strings/None and cast to set for uniqueness
+        recs_to_add = {str(r) for r in recs if r}
 
-            key = self._key(dataset_id, item_id)
-
-            if recs:
-                # Add all recommended item_ids to the Redis set
-                self.r.sadd(key, *recs)
-            else:
-                # Ensure empty sets exist via a placeholder
-                self.r.sadd(key, "")
-
-            count += 1
-
-        return f"Ingested {count} items into dataset '{dataset_id}'."
+        if recs_to_add:
+            # Use the dataset_id directly as the key
+            self.r.sadd(dataset_id, *recs_to_add)
+        
+        return f"Ingested {len(recs_to_add)} recommendations into dataset key '{dataset_id}'."
 
     # -------------------------
     # QUERYING
     # -------------------------
-    def get_recommendations(self, dataset_id: str, item_id: str) -> Set[str]:
-        """
-        Return all recommended item_ids for the given input item.
-        Accepts a single dataset_id (str).
-        """
-        print(f"🔍 Fetching recommendations for dataset_id='{dataset_id}', item_id='{item_id}'...")
-        key = self._key(dataset_id, item_id)
-        recs = self.r.smembers(key)
-        return {r for r in recs if r != ""}
-
-    def list_items(self, dataset_id: str) -> List[str]:
-        """List all item_ids in a given dataset."""
-        pattern = f"recommendations:{dataset_id}:*"
-        keys = self.r.keys(pattern)
-        # Split by ':' and take the last part (item_id)
-        return [key.split(":", 2)[-1] for key in keys]
+    def get_recommendations(self, dataset_id: str) -> Set[str]:
+        """Return all recommended IDs stored under this dataset_id key."""
+        return self.r.smembers(dataset_id)
 
     def list_datasets(self) -> List[str]:
-        """List all available dataset IDs."""
-        keys = self.r.keys("recommendations:*")
-        datasets = {key.split(":")[1] for key in keys}
-        return sorted(datasets)
+        """List all keys in the current Redis DB."""
+        # Note: In a dedicated DB, this returns all dataset_ids.
+        return sorted(self.r.keys("*"))
 
-    def find_items_recommending(self, dataset_id: str, target_item_id: str) -> Set[str]:
-        """
-        Return a set of all item_ids that list `target_item_id` as a recommendation.
-        """
-        pattern = f"recommendations:{dataset_id}:*"
-        keys = self.r.keys(pattern)
+    def find_items_recommending(self, target_dataset_id: str) -> Set[str]:
+        """Find which dataset keys contain target_dataset_id in their Set."""
+        all_keys = self.r.keys("*")
+        referring_datasets = set()
 
-        referring_items = set()
+        for key in all_keys:
+            if self.r.sismember(key, target_dataset_id):
+                referring_datasets.add(key)
 
-        for key in keys:
-            source_item_id = key.split(":", 2)[-1]
-            recs = self.r.smembers(key)
-
-            if target_item_id in recs:
-                referring_items.add(source_item_id)
-
-        return referring_items
+        return referring_datasets
+   
+    # -------------------------
+    # UTILITIES
+    # -------------------------
+    def remove_old_recommendations(self, dataset_id: str) -> bool:
+        """Deletes the dataset key."""
+        return bool(self.r.delete(dataset_id))
 
     def check_connection(self) -> bool:
-        """Pings the Redis server and returns True if successful."""
         try:
-            if self.r.ping():
-                print(f"✅ Successfully connected to Redis")
-                return True
-            else:
-                print("❌ Redis connection failed.")
-                return False
-        except redis.exceptions.ConnectionError as e:
-            print(f"❌ Redis Connection Error: {e}")
+            return bool(self.r.ping())
+        except redis.exceptions.ConnectionError:
             return False
-        
-    def remove_old_recommendations(self, dataset_id: str) -> int:
-        """
-        Removes all keys following the old pattern 'recommendations:<dataset_id>:*'.
-        Returns the total number of keys deleted.
-        """
-        pattern = f"recommendations:{dataset_id}:*"
-        cursor = 0
-        total_deleted = 0
-        
-        print(f"🧹 Starting cleanup for dataset: {dataset_id}...")
-
-        while True:
-            # SCAN is safer than KEYS in production as it doesn't block the server
-            cursor, keys = self.r.scan(cursor=cursor, match=pattern, count=100)
-            
-            if keys:
-                # Delete the batch of keys
-                deleted_count = self.r.delete(*keys)
-                total_deleted += deleted_count
-            
-            if cursor == 0:
-                break
-                
-        print(f"✅ Cleanup complete. Removed {total_deleted} keys.")
-        return total_deleted
-    
-    # -------------------------
-    # INTERNAL UTILITIES
-    # -------------------------
-    @staticmethod
-    def _key(dataset_id: str, item_id: str) -> str:
-        return f"recommendations:{dataset_id}:{item_id}"

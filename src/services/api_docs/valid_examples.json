@@ -1,19 +1,30 @@
 {
-  "Multi-Dataset Success": {
-    "summary": "Top recommendations for item 56.pdf across authorized datasets.",
+  "Dataset Relationship Success": {
+    "summary": "Successful Dataset-to-Dataset recommendation",
+    "description": "Returns a list of authorized dataset IDs related to the input dataset.",
     "value": {
       "query_time": 0.0125,
-      "dataset_ids": [
-        "mathe-uuid-101",
-        "physics-uuid-202"
-      ],
-      "item_ids": [
-        "54.pdf",
-        "55.pdf",
-        "367.pdf",
-        "gravity_laws.pdf",
-        "52.pdf"
+      "dataset_id": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
+      "recommendations": [
+        {
+          "item_id": "67f22d91-2b1a-4e8c-8f92-52dbc38c130f"
+        },
+        {
+          "item_id": "climate-data-v2"
+        },
+        {
+          "item_id": "european-soil-maps-2023"
+        }
       ]
+    }
+  },
+  "Empty Recommendations": {
+    "summary": "No Recommendations Found",
+    "description": "The dataset exists, but no relationships are defined in the database.",
+    "value": {
+      "query_time": 0.005,
+      "dataset_id": "new-empty-dataset-id",
+      "recommendations": []
     }
   }
 }

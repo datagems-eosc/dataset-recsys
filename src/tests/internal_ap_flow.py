@@ -17,14 +17,13 @@ async def internal_recommend_logic(request: SearchRequest):
     The core recommendation engine logic without authorization checks.
     """
     start_time = time.time()
-    iid = request.iid
     n = request.n
     # In testing, we treat the requested dataset_id as the target directly
     target_dataset = request.dataset_id
 
     try:
         # Fetch from your Redis/Database client
-        recs_set = recs_client.get_recommendations(dataset_id=target_dataset, item_id=iid)
+        recs_set = recs_client.get_recommendations(dataset_id=target_dataset)
         
         if not recs_set:
             return SearchResponse(
@@ -41,7 +40,7 @@ async def internal_recommend_logic(request: SearchRequest):
             query_time=query_time,
             dataset_id=target_dataset,
             recommendations=[
-                API_SearchResult(dataset_id=target_dataset, item_id=rec) 
+                API_SearchResult(item_id=rec) 
                 for rec in recs_list[:n]
             ]
         )
@@ -75,6 +74,13 @@ async def test_get_recommendations_ap(analytical_pattern: Dict):
         
         # 3. Inject the results back into the Graph JSON
         updated_ap = create_recommendation_response_ap(analytical_pattern, search_response)
+        
+        print(f"AP processing complete. Found {len(search_response.recommendations)} recommendations for dataset_id='{search_response.dataset_id}' in {search_response.query_time:.2f} seconds.")
+        
+        # Print pretty JSON for debugging
+        import json
+        print("Updated Analytical Pattern with Recommendations:")
+        print(json.dumps(updated_ap, indent=2))
         
         return updated_ap
         

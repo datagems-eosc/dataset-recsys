@@ -18,7 +18,7 @@ async def test_recommendation_ap_flow(sample_ap_request):
     """
     Test the full AP flow: 
     1. Send AP JSON to /test/recommend/ap
-    2. Verify the Operator added cr:FileObject nodes
+    2. Verify the Operator added sc:Dataset nodes
     3. Verify the distribution edges link to the correct dataset_id
     """
     async with httpx.AsyncClient(base_url=BASE_URL) as client:
@@ -33,25 +33,19 @@ async def test_recommendation_ap_flow(sample_ap_request):
         edges = updated_ap["ap"]["edges"]
 
         # 2. Verify Output Nodes (Items)
-        # We expect cr:FileObject nodes to exist now
-        item_nodes = [n for n in nodes if "cr:FileObject" in n["labels"]]
-        assert len(item_nodes) > 0, "No recommendation items (cr:FileObject) were added to the AP."
+        # We expect sc:Dataset nodes to exist now
+        item_nodes = [n for n in nodes if "sc:Dataset" in n["labels"]]
+        assert len(item_nodes) > 0, "No recommendation items (sc:Dataset) were added to the AP."
         
         # Check that the first item has the required properties
-        first_item = item_nodes[0]
+        first_item = item_nodes[1]
         assert "item_id" in first_item["properties"]
-        assert "dataset_id" in first_item["properties"]
 
-        # 3. Verify Graph Topology (Edges)
-        # Look for the 'distribution' edges we talked about
-        dist_edges = [e for e in edges if "distribution" in e["labels"]]
-        assert len(dist_edges) > 0, "The 'distribution' edges linking items to datasets are missing."
-        
         # Verify the Operator has 'output' edges
         output_edges = [e for e in edges if "output" in e["labels"]]
         assert len(output_edges) > 0, "The operator is not linked to the results via 'output' edges."
 
-        # 4. Verify Metadata
+        # 3. Verify Metadata
         assert "metadata" in updated_ap
         assert "recommendations" in updated_ap["metadata"]
         print(f"\n✅ Success: Found {len(item_nodes)} items in the updated Analytical Pattern.")

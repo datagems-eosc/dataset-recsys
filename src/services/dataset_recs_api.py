@@ -3,7 +3,7 @@ import time
 from datetime import datetime
 import logging
 import structlog
-from fastapi import Depends, FastAPI, HTTPException, Request, status, Query
+from fastapi import Depends, FastAPI, HTTPException, Request, status, Query, Body
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -62,6 +62,9 @@ app.add_middleware(
 DATA_DIR = Path("data")
 DOCS_VALID_EXAMPLES_PATH = Path("src/services/api_docs/valid_examples.json")
 DOCS_ERROR_EXAMPLES_PATH = Path("src/services/api_docs/error_examples.json")
+AP_DOCS_VALID_EXAMPLES_PATH = Path("src/services/api_docs/ap_valid_examples.json")
+AP_DOCS_ERROR_EXAMPLES_PATH = Path("src/services/api_docs/ap_error_examples.json")
+AP_DOCS_REQ_EXAMPLE_PATH = Path("src/services/api_docs/ap_request_example.json")
 LEGACY_VALID_EXAMPLES_PATH = Path("src/services/api_docs/legacy_valid_examples.json")
 LEGACY_ERROR_EXAMPLES_PATH = Path("src/services/api_docs/legacy_error_examples.json")
 
@@ -79,7 +82,8 @@ def load_json_file(path: Path) -> dict:
 
 examples_data, errors_data = (load_json_file(DOCS_VALID_EXAMPLES_PATH), load_json_file(DOCS_ERROR_EXAMPLES_PATH))
 legacy_examples_data, legacy_errors_data = (load_json_file(LEGACY_VALID_EXAMPLES_PATH), load_json_file(LEGACY_ERROR_EXAMPLES_PATH))
-
+ap_examples_data, ap_errors_data = (load_json_file(AP_DOCS_VALID_EXAMPLES_PATH), load_json_file(AP_DOCS_ERROR_EXAMPLES_PATH))
+ap_request_example = load_json_file(AP_DOCS_REQ_EXAMPLE_PATH)
 # --- API Endpoints ---
 @app.get(
     "/dataset-recsys/recommend",
@@ -134,7 +138,58 @@ def get_recommendations_legacy(
         legacy_logger.error(f"Unexpected error while getting recommendations: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.post("/dataset-recsys/v2/recommend", response_model=SearchResponse, tags=["V2 Recommendation Service"])
+@app.post(
+    "/dataset-recsys/v2/recommend",
+    response_model=SearchResponse,
+    tags=["V2 Recommendation Service"],
+    summary="Get Related Datasets",
+    description="""
+Given a source `dataset_id`, retrieve a list of related or recommended **datasets**.
+All results are filtered based on the user's authorization claims.
+    """,
+    responses={
+        200: {
+            "description": "Successful retrieval of related datasets",
+            "content": {
+                "application/json": {
+                    "examples": examples_data  # Loaded from valid_examples.json
+                }
+            }
+        },
+        422: {
+            "description": "Validation Error",
+            "content": {
+                "application/json": {
+                    "examples": errors_data.get("422")
+                }
+            }
+        },
+        401: {
+            "description": "Unauthorized - Invalid or missing token",
+            "content": {
+                "application/json": {
+                    "examples": errors_data.get("401")
+                }
+            }
+        },
+        403: {
+            "description": "Forbidden - Insufficient permissions for the requested dataset",
+            "content": {
+                "application/json": {
+                    "examples": errors_data.get("403")
+                }
+            }
+        },
+        500: {
+            "description": "Internal Server Error",
+            "content": {
+                "application/json": {
+                    "examples": errors_data.get("500")
+                }
+            }
+        }
+    }
+)
 async def get_recommendations_v2(
     request: SearchRequest,
     claims: dict = Depends(security.require_role(["user", "dg_user"])),
@@ -142,7 +197,7 @@ async def get_recommendations_v2(
 ):
     start_time = time.time()
     user_subject = claims.get("sub")
-    log = logger.bind(item_id=request.iid, UserId=user_subject)
+    log = logger.bind(item_id=request.dataset_id, UserId=user_subject)
     accounting_logger.info(
         "Recommendation Request Received",
         UserId=user_subject,
@@ -153,32 +208,40 @@ async def get_recommendations_v2(
         Measure="Unit",
         Timestamp=datetime.utcnow().isoformat() + "Z",
     )
-    iid = request.iid
+    dataset_id = request.dataset_id
     n = request.n
     try:
         authorized_dataset_ids = await security.get_authorized_dataset_ids(token)
         
-        target_dataset = list(set([request.dataset_id]).intersection(authorized_dataset_ids)) if request.dataset_id else authorized_dataset_ids
+        target_dataset = list(set([dataset_id]).intersection(authorized_dataset_ids)) if request.dataset_id else authorized_dataset_ids
         if not target_dataset:
-            log = log.bind(requested_dataset_ids=request.dataset_id)
+            log = log.bind(requested_dataset_ids=dataset_id)
             log.warning(
                     "User requested datasets they are not authorized for. Returning empty results."
                 )
             return SearchResponse(query_time=0, dataset_id=request.dataset_id, recommendations=[])
 
-        recs_set = recs_client.get_recommendations(dataset_id=target_dataset, item_id=iid)
+        recs_set = recs_client.get_recommendations(dataset_id=target_dataset)
         if not recs_set:
-            logger.info(f"No recommendations found for item_id='{iid}'")
+            logger.info(f"No recommendations found for dataset_id='{dataset_id}'")
             return SearchResponse(query_time=time.time() - start_time, dataset_id=target_dataset, recommendations=[])
 
-        recs_list = list(recs_set)
+        recs_list = list(recs_set).intersection(authorized_dataset_ids)
+        if not recs_list:
+            log = log.bind(recommended_datasets=recs_list)
+            log.warning(
+                    "Recommendations found but user is not authorized to access any of them. Returning empty results."
+                )
+            return SearchResponse(query_time=time.time() - start_time, dataset_id=target_dataset, recommendations=[])
+
+
         query_time = time.time() - start_time
         final_response = SearchResponse(
             query_time=query_time,
             dataset_id=target_dataset,
-            recommendations= [API_SearchResult(dataset_id=target_dataset, item_id=rec) for rec in recs_list[:n]]
+            recommendations= [API_SearchResult(item_id=rec) for rec in recs_list[:n]]
         )
-        logger.info(f"Found {len(recs_list)} total recommendations for item_id='{iid}' in dataset '{target_dataset}' (returning top {n}) in {query_time:.2f} seconds")
+        logger.info(f"Found {len(recs_list)} total recommendations for dataset_id='{dataset_id}' in dataset '{target_dataset}' (returning top {n}) in {query_time:.2f} seconds")
         return final_response
 
     except Exception as e:
@@ -189,9 +252,61 @@ async def get_recommendations_v2(
             status_code=500, detail=f"An unexpected error occurred: {e}"
         )
 
-@app.post("/dataset-recsys/recommend/ap", response_model=dict, tags=["Analytical Pattern Handling"])
+@app.post(
+    "/dataset-recsys/recommend/ap", 
+    response_model=dict, 
+    tags=["Analytical Pattern Handling"],
+    summary="Get recommendations via Analytical Pattern",
+    description="""
+Processes a graph-based **Analytical Pattern (AP)** request. 
+
+1. Extracts the `dataset_id` and `n` from the **DatasetRecommender_Operator** node.
+2. Queries the recommendation engine.
+3. Injects the recommended datasets as new **sc:Dataset** nodes.
+4. Links the Operator to the new nodes via **output** edges with a `rank` property.
+    """,
+    responses={
+        200: {
+            "description": "Successful graph transformation",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "Dataset-to-Dataset AP Success": {
+                            "summary": "Successful AP transformation",
+                            "value": ap_examples_data  # Ensure this variable loads your AP valid JSON
+                        }
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Authorization Failure",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": 403,
+                        "error": "Forbidden",
+                        "message": "User not authorized for the requested dataset."
+                    }
+                }
+            }
+        },
+        422: {
+            "description": "Malformed AP Graph",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": 422,
+                        "error": "Unprocessable Entity",
+                        "message": "Required Operator node or dataset_id property missing in AP."
+                    }
+                }
+            }
+        }
+    }    
+)
 async def get_recommendations_ap(
-    analytical_pattern: dict,
+    analytical_pattern: dict = Body(..., description="The Analytical Pattern graph in JSON format", example=ap_request_example),  # Ensure this variable loads your AP valid JSON
     claims: dict = Depends(security.require_role(["user", "dg_user"])),
     token: str = Depends(security.oauth2_scheme),
 ):

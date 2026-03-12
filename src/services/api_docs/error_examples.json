@@ -1,68 +1,38 @@
 {
-  "404": {
-    "description": "Not Found",
-    "content": {
-      "application/json": {
-        "examples": {
-          "Item Not Found": {
-            "summary": "Item ID not found in the specified datasets",
-            "value": {
-              "errors": [
-                {
-                  "code": 404,
-                  "detail": "Item ID '999.pdf' not found in requested datasets."
-                }
-              ]
-            }
-          }
+  "422": {
+    "summary": "Validation Error",
+    "value": {
+      "code": 102,
+      "error": "Validation Error",
+      "message": [
+        {
+          "Key": "body.dataset_id",
+          "Value": ["field required"]
         }
-      }
+      ]
     }
   },
-  "422": {
-    "description": "Unprocessable Entity",
-    "content": {
-      "application/json": {
-        "examples": {
-          "Empty Dataset List": {
-            "summary": "Triggered by Pydantic field_validator",
-            "value": {
-              "errors": [
-                {
-                  "code": 422,
-                  "detail": [
-                    {
-                      "type": "value_error",
-                      "loc": ["body", "dataset_ids"],
-                      "msg": "Value error, dataset_ids cannot be an empty list.",
-                      "input": []
-                    }
-                  ]
-                }
-              ]
-            }
-          },
-          "N-Limit Exceeded": {
-            "summary": "Validation error for n exceeding 20",
-            "value": {
-              "errors": [
-                {
-                  "code": 422,
-                  "detail": [
-                    {
-                      "type": "less_than_equal",
-                      "loc": ["body", "n"],
-                      "msg": "Input should be less than or equal to 20",
-                      "input": 50,
-                      "ctx": {"le": 20}
-                    }
-                  ]
-                }
-              ]
-            }
-          }
-        }
-      }
+  "401": {
+    "summary": "Invalid Token",
+    "value": {
+      "code": 401,
+      "error": "Could not validate credentials"
+    }
+  },
+  "403": {
+    "summary": "Authorization Failure",
+    "value": {
+      "code": 403,
+      "error": "Forbidden",
+      "message": "User is not authorized to access dataset: 9b25bc46-xxxx-xxxx"
+    }
+  },
+  "500": {
+    "summary": "Internal Server Error",
+    "value": {
+      "code": 500,
+      "error": "Internal server error",
+      "message": "Connection to Redis timed out."
     }
   }
 }

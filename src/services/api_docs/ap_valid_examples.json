@@ -1,0 +1,27 @@
+{
+  "Dataset Recommendation AP": {
+    "summary": "Graph-based dataset recommendation",
+    "description": "An example showing a full AP graph transformation where a seed dataset results in 3 recommended dataset nodes.",
+    "value": {
+      "ap": {
+        "nodes": [
+          { "id": "user-node-id", "labels": ["User"] },
+          { "id": "op-node-id", "labels": ["DatasetRecommender_Operator"], "properties": { "dataset_id": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f", "n": 3 } },
+          { "id": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f", "labels": ["sc:Dataset"], "properties": { "description": "Seed" } },
+          { "id": "rec-1", "labels": ["sc:Dataset"], "properties": { "item_id": "rec-1", "name": "Recommended Dataset 1" } },
+          { "id": "rec-2", "labels": ["sc:Dataset"], "properties": { "item_id": "rec-2", "name": "Recommended Dataset 2" } }
+        ],
+        "edges": [
+          { "from": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f", "to": "op-node-id", "labels": ["input"] },
+          { "from": "op-node-id", "to": "rec-1", "labels": ["output"], "properties": { "rank": 1 } },
+          { "from": "op-node-id", "to": "rec-2", "labels": ["output"], "properties": { "rank": 2 } }
+        ]
+      },
+      "metadata": {
+        "query_time": 0.55,
+        "dataset_id": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
+        "recommendations": [{"item_id": "rec-1"}, {"item_id": "rec-2"}]
+      }
+    }
+  }
+}

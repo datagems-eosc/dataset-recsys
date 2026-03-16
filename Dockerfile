@@ -14,4 +14,4 @@ COPY data/mathe/mathe_top20_recommendations.json ./data/mathe/mathe_top20_recomm
 
 EXPOSE 8000
 
-CMD ["uvicorn", "src.services.dataset_recs_api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "src.dataset_recsys.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

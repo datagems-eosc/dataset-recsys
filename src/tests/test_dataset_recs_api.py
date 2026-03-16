@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from fastapi.testclient import TestClient
-from src.services.dataset_recs_api import app
+from src.dataset_recsys.api.main import app
 import pytest
 
 client = TestClient(app)

@@ -14,6 +14,7 @@ from data.mathe import MathE
 
 #TODO: What about material in the form of videos?
 
+# Small pipeline-local helper used to inspect token lengths before embedding.
 def compute_token_stats(data, tokenizer):
     """
     Computes token statistics for the given data using the provided tokenizer.

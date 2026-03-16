@@ -19,7 +19,7 @@ data/mathe/mathe_embedding_index.json
 data/mathe/mathe_embeddings.npy
 data/gems_datasets_metadata/*
 
-src/temp.py
+src/dataset_recsys/pipelines/temp.py
 
 # VSCode settings
 .vscode/settings.json

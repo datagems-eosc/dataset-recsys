@@ -1,3 +1,20 @@
+"""
+Utility script for exploratory analysis of DataGEMS Croissant metadata profiles.
+
+Purpose:
+    This file was used to inspect and understand the structure of dataset
+    metadata profiles stored in `data/gems_datasets_metadata/`.
+
+What it helps analyze:
+    - Encoding formats used by datasets (from `distribution.encodingFormat`)
+    - Available field names inside `recordSet`
+    - Which datasets are missing a `recordSet`
+
+Notes:
+    - This is **not part of the production ingestion or recommendation pipeline**.
+    - Functions here may be reused later for metadata inspection or debugging.
+"""
+
 import json
 from pathlib import Path
 from collections import defaultdict

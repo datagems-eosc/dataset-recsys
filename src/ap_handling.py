@@ -2,7 +2,7 @@
 
 from typing import Dict, Union, List
 
-from src.services.models import SearchRequest, SearchResponse
+from dataset_recsys.api.models import SearchRequest, SearchResponse
 
 OPTIONAL_SEARCH_ARGS = ["n"]  # Extendable list of optional arguments for recommendations
 

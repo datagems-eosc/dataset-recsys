@@ -3,7 +3,7 @@ from typing import Dict
 from fastapi import FastAPI, HTTPException
 import time
 from fastapi import FastAPI, HTTPException
-from src.services.models import SearchRequest, SearchResponse, API_SearchResult
+from dataset_recsys.api.models import SearchRequest, SearchResponse, API_SearchResult
 from src.ap_handling import parse_recommendation_request_ap, create_recommendation_response_ap
 from src.recommendation_client import RecommendationClient
 

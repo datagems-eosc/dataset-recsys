@@ -1,5 +1,5 @@
 import os
-from recommendation_client import RecommendationClient # Assuming your class is in this file
+from dataset_recsys.storage.recommendation_client import RecommendationClient # Assuming your class is in this file
 
 def run_ingestion(file_path: str, dataset_id: str):
     # 1. Setup environment for local port-forwarding

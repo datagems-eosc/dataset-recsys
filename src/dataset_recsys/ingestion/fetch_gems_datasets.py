@@ -10,12 +10,17 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import requests
 
 BASE_URL = "https://datagems-dev.scayle.es/dmm/api/v1"
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+OUTPUT_DIR = REPO_ROOT / "data" / "gems_datasets_metadata" / "moma"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 @dataclass
 class DatasetProfile:
@@ -188,21 +193,21 @@ def main() -> int:
 
     print(f"Fetched dataset graphs: {len(payload.get('datasets', []))}")
 
-    raw_path = "datagems_datasets_raw.json"
+    raw_path = OUTPUT_DIR / "datagems_datasets_raw.json"
     with open(raw_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
     print(f"Wrote raw dump: {raw_path}")
 
     # Summarize which dataset metadata fields exist and how often they appear.
     fields_summary = summarize_dataset_property_fields(payload)
-    fields_path = "datagems_dataset_fields_summary.json"
+    fields_path = OUTPUT_DIR / "datagems_dataset_fields_summary.json"
     with open(fields_path, "w", encoding="utf-8") as f:
         json.dump(fields_summary, f, ensure_ascii=False, indent=2)
     print(f"Wrote dataset fields summary: {fields_path}")
 
     profiles = extract_dataset_profiles(payload)
 
-    profiles_path = "datagems_dataset_profiles.json"
+    profiles_path = OUTPUT_DIR / "datagems_dataset_profiles.json"
     with open(profiles_path, "w", encoding="utf-8") as f:
         json.dump([p.__dict__ for p in profiles], f, ensure_ascii=False, indent=2)
     print(f"Wrote minimal text profiles: {profiles_path}")

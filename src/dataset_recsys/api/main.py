@@ -7,8 +7,8 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status, Query, Bod
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from src.recommendation_client import RecommendationClient
-from src.legacy_client import LegacyClient
+from src.dataset_recsys.storage.recommendation_client import RecommendationClient
+from src.dataset_recsys.storage.legacy_client import LegacyClient
 from src.configs.logging_config import (
     request_response_logging_middleware,
     correlation_id_middleware,

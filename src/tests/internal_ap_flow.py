@@ -5,7 +5,7 @@ import time
 from fastapi import FastAPI, HTTPException
 from dataset_recsys.api.models import SearchRequest, SearchResponse, API_SearchResult
 from src.ap_handling import parse_recommendation_request_ap, create_recommendation_response_ap
-from src.recommendation_client import RecommendationClient
+from src.dataset_recsys.storage.recommendation_client import RecommendationClient
 
 app = FastAPI()
 recs_client = RecommendationClient()

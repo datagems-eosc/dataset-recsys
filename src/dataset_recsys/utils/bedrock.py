@@ -6,32 +6,26 @@ import os
 
 load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
-# AWS setup: 
-MODEL_CONFIG = {
-    "mistral": {
-        "model_id": "mistral.mistral-7b-instruct-v0:2",
-        "region": "eu-west-1"
-    },
-    "claude": {
-        "model_id": "anthropic.claude-3-5-sonnet-20240620-v1:0",
-        "region": "eu-central-1"
-    }
-}
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
+MODEL_CONFIG = {
+    "claude-sonnet-4-6": {
+        "region": "eu-central-1",
+        "model_id": "eu.anthropic.claude-sonnet-4-6",
+    }
+}
 
-# Bedrock client
-def get_bedrock_client_for_model(model_name: str):
-    config = MODEL_CONFIG.get(model_name)
+def get_bedrock_client(llm: str):
+    config = MODEL_CONFIG.get(llm)
     if not config:
-        raise ValueError(f"No Bedrock config found for model '{model_name}'")
+        raise ValueError(f"Unsupported Bedrock model alias: {llm}")
 
     return boto3.client(
         service_name="bedrock-runtime",
         region_name=config["region"],
         aws_access_key_id=AWS_ACCESS_KEY,
-        aws_secret_access_key=AWS_SECRET_KEY
-    ), config["model_id"]
+        aws_secret_access_key=AWS_SECRET_KEY,
+    )
 
 # Test Bedrock access
 def test_bedrock_model_access(region: str):
@@ -51,45 +45,45 @@ def test_bedrock_model_access(region: str):
         print(f"\nFailed to query Bedrock in region {region}: {e}")
 
 # Prompt template
-def build_prompt(description, headline, keywords, field_of_science, encoding_formats, structure_summary):
+def build_prompt(title, headline, description, keywords, field_of_science):
     """
-    Constructs the prompt string to send to the LLM.
+    Prompt for generating a public-facing catalog description.
     """
-    encoding_line = f"Encoding format(s): {', '.join(encoding_formats)}\n" if encoding_formats else ""
-    structure_line = f"Structure Summary:\n{structure_summary}\n" if structure_summary else ""
+    return f"""
+    Based on this dataset's metadata, write a concise paragraph (80–150 words) that could serve as its summary in a scientific data catalog or registry.
+    
+    The paragraph should clearly state:
+    - What the dataset contains
+    - How it was created or structured (if known)
+    - Its main value
+    - Who it is intended for
+    - Specific use cases or example analytical tasks it supports
 
-    return f"""You are given the following metadata about a dataset:
-
+    Dataset metadata:
+    Title: {title}
+    Subtitle: {headline}
     Description:
     {description}
+    Keywords: {', '.join(keywords) if isinstance(keywords, list) else keywords}
+    Field: {', '.join(field_of_science) if isinstance(field_of_science, list) else field_of_science}
 
-    Headline:
-    {headline}
-
-    {encoding_line}{structure_line}
-    Keywords: {', '.join(keywords)}
-    Scientific domain: {', '.join(field_of_science)}
-
-    Write a short, well-structured paragraph that could serve as a public-facing abstract for this dataset in a scientific data catalog or registry. 
-    The paragraph should be 100–200 words, in fluent academic English. It should explain:
-    - What the dataset contains
-    - Its structure or origin, if applicable (e.g., data format, how it was collected, or which organization produced it)
-    - Why the dataset is valuable (its potential benefits or advantages)
-    - Who the dataset is intended for (target users or communities)
-    - Relevant use cases or application scenarios where the dataset could be effectively used
-
-    Use the structure summary only if it helps convey how the data is organized or what types of information are included.
-    Do not assume the structure summary lists all records and their fields; it is based on a sample (i.e., up to 3 records and 5 fields each).
+    Use domain-specific terminology where appropriate.
     """
 
-def call_bedrock(prompt: str, model_name: str) -> str:
+def call_bedrock(prompt: str, llm: str = "claude-sonnet-4-6") -> str:
     """
-    Unified Bedrock call supporting Claude 3.5 Sonnet and Mistral.
+    Calls an LLM on Amazon Bedrock and returns the generated text.
+    Currently supports Claude via the configured model alias.
     """
-    client, model_id = get_bedrock_client_for_model(model_name)
+    config = MODEL_CONFIG.get(llm)
+    if not config:
+        raise ValueError(f"Unsupported Bedrock model alias: {llm}")
 
-    # Claude 3.5
-    if model_id == "anthropic.claude-3-5-sonnet-20240620-v1:0":
+    client = get_bedrock_client(llm)
+    model_id = config["model_id"]
+    region = config["region"]
+
+    if llm.startswith("claude"):
         body = {
             "anthropic_version": "bedrock-2023-05-31",
             "messages": [
@@ -97,113 +91,64 @@ def call_bedrock(prompt: str, model_name: str) -> str:
             ],
             "max_tokens": 300,
             "temperature": 0.7,
-            "top_p": 0.9
         }
-
-    # Mistral
     else:
-        body = {
-            "prompt": prompt,
-            "max_tokens": 300,
-            "temperature": 0.7,
-            "top_p": 0.9
-        }
+        raise ValueError(f"No request body defined yet for llm='{llm}'")
+
+    print(f"Invoking Bedrock model/profile: {model_id} in region {region}")
 
     response = client.invoke_model(
         modelId=model_id,
         body=json.dumps(body),
         contentType="application/json",
-        accept="application/json"
+        accept="application/json",
     )
 
     output = json.loads(response["body"].read())
 
-    # Parse model output
-    if model_id == "anthropic.claude-3-5-sonnet-20240620-v1:0":
+    if llm.startswith("claude"):
         return output["content"][0]["text"].strip()
-    else:
-        return output["outputs"][0]["text"].strip()
 
-def enrich_dataset_from_json(json_path: Path, llm="mistral"):
+    raise ValueError(f"No response parser defined yet for llm='{llm}'")
+
+def enrich_data_profile(profile: dict, llm: str = "claude-sonnet-4-6"):
     """
-    Reads a JSON dataset metadata file, constructs a prompt, 
-    calls Bedrock to enrich it, and returns the result.
+    Enriches a single dataset profile using Claude on Bedrock.
     """
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    title = profile.get("title", "")
+    headline = profile.get("headline", "")
+    description = profile.get("description", "")
+    keywords = profile.get("keywords", [])
+    field_of_science = profile.get("field_of_science", profile.get("fieldOfScience", []))
 
-    description = data.get("description", "")
-    headline = data.get("headline", "")
-    keywords = data.get("keywords", [])
-    field_of_science = data.get("fieldOfScience", [])
-    record_sets = data.get("recordSet", [])
+    prompt = build_prompt(
+        title=title,
+        headline=headline,
+        description=description,
+        keywords=keywords,
+        field_of_science=field_of_science,
+    )
 
-    # Extract encoding formats
-    encoding_formats = {
-        dist["encodingFormat"].strip().lower()
-        for dist in data.get("distribution", [])
-        if "encodingFormat" in dist
-    }
-
-    # Take up to 3 record entries, and within each, list up to 5 field names for summarization
-    # Build structure summary from recordSet
-    structure_snippets = [
-        f"'{record.get('name', '')}' with fields: {', '.join(f.get('name', '') for f in record.get('field', [])[:5] if f.get('name'))}"
-        for record in record_sets[:3]
-        if record.get("name") and record.get("field")
-    ]
-
-    structure_summary = (
-        "The dataset contains the following records:\n" +
-        "\n".join(f"- {s}" for s in structure_snippets)
-    ) if structure_snippets else ""
-
-    prompt = build_prompt(description, headline, keywords, field_of_science, list(encoding_formats), structure_summary)
-
-    text_enriched = call_bedrock(prompt, model_name=llm)
+    enriched_description = call_bedrock(prompt, llm=llm)
 
     return {
-        "file": json_path.name,
-        "enriched_description": text_enriched
+        **profile,
+        "enriched_description": enriched_description,
     }
-    # return prompt
 
-def batch_enrich(json_folder: str, output_file: str, llm="mistral"):
-    input_paths = list(Path(json_folder).glob("*.json"))
-    results = []
+def enrich_batch(profiles: list[dict], llm: str = "claude-sonnet-4-6"):
+    """
+    Enriches a list of dataset profiles using Claude on Bedrock.
+    """
+    enriched_profiles = []
 
-    for path in input_paths:
-        print(f"Processing {path.name}...")
-        try:
-            result = enrich_dataset_from_json(path, llm=llm)
-            results.append(result)
-        except Exception as e:
-            print(f"Failed for {path.name}: {e}")
+    for profile in profiles:
+        title = profile.get("title", "<untitled>")
+        print(f"Enriching: {title}")
+        enriched_profiles.append(enrich_data_profile(profile, llm=llm))
 
-    with open(output_file, "w", encoding="utf-8") as f:
-        for item in results:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+    return enriched_profiles
 
 if __name__ == "__main__":
     test_bedrock_model_access("eu-central-1")
-    
-    # batch_enrich(
-    #     "development/datagems_dataset_recs/datasets_metadata/",
-    #     "development/datagems_dataset_recs/datasets_metadata/enriched_datasets_mistral.jsonl",
-    #     llm="mistral"
-    # )
-
-    # batch_enrich(
-    #     "development/datagems_dataset_recs/datasets_metadata/",
-    #     "development/datagems_dataset_recs/datasets_metadata/enriched_datasets_claude.jsonl",
-    #     llm="claude"
-    # )
-
-    # test_path = Path("development/datagems_dataset_recs/datasets_metadata/encyc_net.json")
-    # prompt = enrich_dataset_from_json(test_path)
-    # print("\nGENERATED PROMPT\n")
-    # print(prompt)
-
-    # result = enrich_dataset_from_json(test_path, llm="mistral")
-    # print("\nENRICHED DESCRIPTION\n")
-    # print(result["enriched_description"])
+    # print(call_bedrock("Say hello in one short sentence.", llm="claude-sonnet-4-6"))

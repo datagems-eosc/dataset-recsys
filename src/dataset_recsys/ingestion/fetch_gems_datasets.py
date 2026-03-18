@@ -178,39 +178,43 @@ def extract_dataset_profiles(payload: Dict[str, Any]) -> List[DatasetProfile]:
 
     return out
 
-def main() -> int:
+def run_ingestion() -> tuple[Dict[str, Any], List[DatasetProfile]]:
+    """
+    Fetch portal data and return both the payload and the extracted dataset profiles.
+    """
     try:
-        payload = fetch_search()
+        raw_data = fetch_search()
     except requests.HTTPError as e:
         print(f"HTTP error: {e}", file=sys.stderr)
-        return 2
+        raise
     except requests.RequestException as e:
         print(f"Request failed: {e}", file=sys.stderr)
-        return 2
+        raise
     except json.JSONDecodeError as e:
         print(f"Invalid JSON response: {e}", file=sys.stderr)
-        return 2
+        raise
 
-    print(f"Fetched dataset graphs: {len(payload.get('datasets', []))}")
+    print(f"Fetched dataset graphs: {len(raw_data.get('datasets', []))}")
+
+    profiles = extract_dataset_profiles(raw_data)
+    return raw_data, profiles
+
+if __name__ == "__main__":
+    raw_data, profiles = run_ingestion()
 
     raw_path = OUTPUT_DIR / "datagems_datasets_raw.json"
     with open(raw_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+        json.dump(raw_data, f, ensure_ascii=False, indent=2)
     print(f"Wrote raw dump: {raw_path}")
 
     # Summarize which dataset metadata fields exist and how often they appear.
-    fields_summary = summarize_dataset_property_fields(payload)
+    fields_summary = summarize_dataset_property_fields(raw_data)
     fields_path = OUTPUT_DIR / "datagems_dataset_fields_summary.json"
     with open(fields_path, "w", encoding="utf-8") as f:
         json.dump(fields_summary, f, ensure_ascii=False, indent=2)
     print(f"Wrote dataset fields summary: {fields_path}")
 
-    profiles = extract_dataset_profiles(payload)
-
     profiles_path = OUTPUT_DIR / "datagems_dataset_profiles.json"
     with open(profiles_path, "w", encoding="utf-8") as f:
         json.dump([p.__dict__ for p in profiles], f, ensure_ascii=False, indent=2)
     print(f"Wrote minimal text profiles: {profiles_path}")
-
-if __name__ == "__main__":
-    main()

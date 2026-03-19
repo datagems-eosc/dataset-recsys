@@ -13,10 +13,11 @@ Input:
 
 Processing:
 1. Run ingestion to extract dataset profiles from the portal response
-2. Enrich the profiles with LLM-generated descriptions and store them
+2. Enrich the profiles with LLM-generated descriptions
 3. Clean text inputs for embedding generation
 4. Generate embeddings
 5. Candidate retrieval based on embedding similarity
+6. Store recommendations in Redis
 """
 
 import json
@@ -27,6 +28,7 @@ import torch
 from transformers import AutoModel, AutoTokenizer
 
 from src.dataset_recsys.ingestion.fetch_gems_datasets import run_ingestion
+from src.dataset_recsys.storage.recommendation_client import RecommendationClient
 from src.dataset_recsys.utils.bedrock import enrich_batch
 from src.dataset_recsys.utils.text_preprocessing import LightTextPreprocessor, build_embedding_text
 
@@ -45,6 +47,7 @@ RECOMMENDATIONS_OUTPUT_PATH = Path(
     f"data/gems_datasets_metadata/moma/datagems_dataset_recommendations_{LLM_NAME}.json"
 )
 TOP_K = 10
+APPLICATION_NAME = "datagems"
 EMBEDDING_MODEL_NAME = "allenai/specter2_base"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MAX_LENGTH = 512
@@ -122,6 +125,19 @@ def build_recommendations(profiles, embeddings: np.ndarray, top_k: int = TOP_K):
 
     return recommendations
 
+def save_recommendations_to_redis(recommendations, application: str = APPLICATION_NAME):
+    client = RecommendationClient()
+    redis_payload = {
+        item["id"]: {
+            rec["id"]: rec["score"]
+            for rec in item.get("recommendations", [])
+            if rec.get("id") is not None and rec.get("score") is not None
+        }
+        for item in recommendations
+        if item.get("id")
+    }
+    client.store_recommendations(application, redis_payload)
+
 if __name__ == "__main__":
     # Step 1: Run ingestion to extract dataset profiles from the portal response
     #  _, profiles = run_ingestion()
@@ -131,6 +147,9 @@ if __name__ == "__main__":
     #  enriched_profiles = enrich_batch(profiles, llm=LLM_NAME)
     #  save_profiles(enriched_profiles, output_path=ENRICHED_OUTPUT_PATH)
     enriched_profiles = load_json(ENRICHED_OUTPUT_PATH)
+
+    # print("Compared original vs enriched descriptions:\n")
+    # TODO
 
     # Step 3: Clean text inputs for embedding generation
     cleaner = LightTextPreprocessor()
@@ -158,8 +177,10 @@ if __name__ == "__main__":
     recommendations = build_recommendations(enriched_profiles, embeddings)
     save_json(recommendations, RECOMMENDATIONS_OUTPUT_PATH)
 
-    print(f"Saved embeddings with shape {embeddings.shape} to {EMBEDDINGS_OUTPUT_PATH}")
-    print(f"Saved embedding metadata to {EMBEDDINGS_METADATA_PATH}")
-    print(f"Saved recommendations to {RECOMMENDATIONS_OUTPUT_PATH}")
+    # Step 6: Store recommendations in Redis
+    save_recommendations_to_redis(recommendations, application=APPLICATION_NAME)
 
-    
+    # print(f"Saved embeddings with shape {embeddings.shape} to {EMBEDDINGS_OUTPUT_PATH}")
+    # print(f"Saved embedding metadata to {EMBEDDINGS_METADATA_PATH}")
+    # print(f"Saved recommendations to {RECOMMENDATIONS_OUTPUT_PATH}")
+    print(f"Stored recommendations in Redis under application '{APPLICATION_NAME}'")

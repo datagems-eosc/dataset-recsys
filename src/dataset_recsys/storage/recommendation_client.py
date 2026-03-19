@@ -57,6 +57,27 @@ class RecommendationClient:
                 "or a list of entity_ids ranked by relevance."
             )
 
+    def store_recommendations(self, application: str, recommendations: Dict[str, Dict[str, float]]) -> int:
+        """Store scored recommendations for one application."""
+        self.delete_application(application)
+        index_key = self._index_key(application)
+        stored_entities = 0
+
+        for entity_id, recommended_items in recommendations.items():
+            if not entity_id:
+                continue
+
+            rec_key = self._recommendation_key(application, str(entity_id))
+            recs_to_add = self._normalize_recommendations(recommended_items)
+
+            self.r.sadd(index_key, str(entity_id))
+            stored_entities += 1
+
+            if recs_to_add:
+                self.r.zadd(rec_key, recs_to_add)
+
+        return stored_entities
+
     # -------------------------
     # INGESTION
     # -------------------------
@@ -78,21 +99,7 @@ class RecommendationClient:
                 "Expected JSON to be a dict."
             )
 
-        self.delete_application(application)
-
-        index_key = self._index_key(application)
-        stored_entities = 0
-
-        for entity_id, recommended_ids in data.items():
-            rec_key = self._recommendation_key(application, str(entity_id))
-
-            recs_to_add = self._normalize_recommendations(recommended_ids)
-
-            self.r.sadd(index_key, str(entity_id))
-            stored_entities += 1
-
-            if recs_to_add:
-                self.r.zadd(rec_key, recs_to_add)
+        stored_entities = self.store_recommendations(application, data)
 
         return (
             f"Stored recommendations for {stored_entities} entities "

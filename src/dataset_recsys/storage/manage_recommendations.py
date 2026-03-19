@@ -88,6 +88,6 @@ if __name__ == "__main__":
     else:
         parser.print_help()
 
-# python src/dataset_recsys/storage/manage_recommendations.py ingest data/mathe/mathe_top20_recommendations.json mathe
-# python src/dataset_recsys/storage/manage_recommendations.py delete-application mathe
-# python src/dataset_recsys/storage/manage_recommendations.py list-entities mathe
+# PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py ingest data/mathe/mathe_top20_recommendations.json mathe
+# PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py delete-application mathe
+# PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py list-entities mathe

@@ -1,6 +1,6 @@
 import json
 import os
-from typing import List, Set
+from typing import Dict, List
 
 import redis
 
@@ -11,15 +11,14 @@ class RecommendationClient:
 
     Storage model:
         Redis key   -> recs:{application}:{entity_id}
-        Redis value -> Set of recommended entity IDs
+        Redis value -> Sorted Set (ZSET) of recommended entity IDs scored by relevance
 
     Index model:
         Redis key   -> recs:index:{application}
         Redis value -> Set of entity IDs stored for that application
 
-    Examples:
-        recs:mathe:6.pdf -> {7.pdf, 9.pdf, 221.pdf}
-        recs:portal:meteo_era5land -> {weather_stations_climpact, wikipedia}
+    Example usage:
+        recs:mathe:6.pdf -> {7.pdf: 0.91, 9.pdf: 0.87, 221.pdf: 0.72}
     """
 
     def __init__(self):
@@ -43,6 +42,21 @@ class RecommendationClient:
     def _index_key(self, application: str) -> str:
         return f"recs:index:{application}"
 
+    # TODO: In the future, we will keep only dicts of entity_id -> score, 
+    # and remove support for ranked lists without explicit scores.
+    def _normalize_recommendations(self, items) -> Dict[str, float]:
+        """Convert input into {entity_id: score} mapping."""
+        if isinstance(items, dict):
+            return {str(k): float(v) for k, v in items.items() if k}
+        elif isinstance(items, list):
+            n = len(items)
+            return {str(k): float(n - i) for i, k in enumerate(items) if k}
+        else:
+            raise ValueError(
+                "Expected recommendations to be a dict of entity_id -> score, "
+                "or a list of entity_ids ranked by relevance."
+            )
+
     # -------------------------
     # INGESTION
     # -------------------------
@@ -50,8 +64,9 @@ class RecommendationClient:
         """
         Load a JSON file containing entity-to-entity recommendations for one application.
 
-        The JSON is expected to have the form:
+        The JSON is expected to have one of the following forms:
             entity_id -> list of recommended entity IDs
+            entity_id -> dict of recommended entity ID -> score
 
         Existing recommendations for the application are replaced on each ingestion.
         """
@@ -60,7 +75,7 @@ class RecommendationClient:
 
         if not isinstance(data, dict):
             raise ValueError(
-                "Expected recommendation JSON to be a dict of entity_id -> recommended entity IDs."
+                "Expected JSON to be a dict."
             )
 
         self.delete_application(application)
@@ -71,16 +86,13 @@ class RecommendationClient:
         for entity_id, recommended_ids in data.items():
             rec_key = self._recommendation_key(application, str(entity_id))
 
-            if isinstance(recommended_ids, list):
-                recs_to_add = {str(rec_id) for rec_id in recommended_ids if rec_id}
-            else:
-                recs_to_add = {str(recommended_ids)} if recommended_ids else set()
+            recs_to_add = self._normalize_recommendations(recommended_ids)
 
             self.r.sadd(index_key, str(entity_id))
             stored_entities += 1
 
             if recs_to_add:
-                self.r.sadd(rec_key, *recs_to_add)
+                self.r.zadd(rec_key, recs_to_add)
 
         return (
             f"Stored recommendations for {stored_entities} entities "
@@ -90,25 +102,27 @@ class RecommendationClient:
     # -------------------------
     # QUERYING
     # -------------------------
-    def get_recommendations(self, application: str, entity_id: str) -> Set[str]:
+    def get_recommendations(self, application: str, entity_id: str) -> List[str]:
         """Return recommended entity IDs for one entity within an application."""
-        return self.r.smembers(self._recommendation_key(application, entity_id))
+        return self.r.zrevrange(
+            self._recommendation_key(application, entity_id), 0, -1, 
+        )
 
-    # TODO: Check whether this returns only the entity ids that have recommendations, or also those with empty recommendation sets. If the latter, we may want to filter those out.
+    # TODO: Check whether this returns only the entity IDs that have recommendations, or also those with empty recommendation ZSETs. If the latter, we may want to filter those out.
     def list_entities(self, application: str) -> List[str]:
         """List entity IDs currently stored for an application."""
         return sorted(self.r.smembers(self._index_key(application)))
 
-    def find_entities_recommending(self, application: str, target_entity_id: str) -> Set[str]:
+    def find_entities_recommending(self, application: str, target_entity_id: str) -> List[str]:
         """Find which entities recommend a given target entity within an application."""
-        referring_entities = set()
+        referring_entities = []
 
         for entity_id in self.r.smembers(self._index_key(application)):
             rec_key = self._recommendation_key(application, entity_id)
-            if self.r.sismember(rec_key, target_entity_id):
-                referring_entities.add(entity_id)
+            if self.r.zscore(rec_key, target_entity_id) is not None:
+                referring_entities.append(entity_id)
 
-        return referring_entities
+        return sorted(referring_entities)
 
     # -------------------------
     # UTILITIES

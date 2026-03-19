@@ -2,11 +2,11 @@ from typing import List, Set
 
 import httpx
 import structlog
-from src.configs.config import settings
-from src.configs.exceptions import (
+from dataset_recsys.api.security.config import settings
+from dataset_recsys.api.logging.exceptions import (
     FailedDependencyException,
 )
-from src.configs.logging_config import (
+from dataset_recsys.api.logging.logging_config import (
     get_correlation_id,
 )
 from fastapi import Depends, HTTPException, status
@@ -179,72 +179,17 @@ def require_role(required_roles: List[str]):
 
     return role_checker
 
-
-async def _exchange_token_for_gateway(user_token: str) -> str | None:
+async def get_authorized_entity_ids(token: str) -> Set[str]:
     """
-    Performs the On-Behalf-Of token exchange to get a token for the Gateway.
-    """
-    log = logger.bind()
-    try:
-        oidc_config = await get_oidc_config()
-        token_endpoint = oidc_config.get("token_endpoint")
-        if not token_endpoint:
-            log.error(
-                "token_endpoint not found in OIDC config. Cannot perform OBO flow."
-            )
-            return None
-
-        data = {
-            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
-            "client_id": settings.OIDC_AUDIENCE,
-            "client_secret": settings.IdpClientSecret,
-            "subject_token": user_token,
-            "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
-            "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
-            "scope": "dg-app-api",
-        }
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(token_endpoint, data=data)
-            response.raise_for_status()
-            new_token_data = response.json()
-            exchanged_token = new_token_data.get("access_token")
-            if exchanged_token:
-                log.info("Successfully exchanged token for Gateway via OBO flow.")
-                return exchanged_token
-            else:
-                log.error("OBO flow response did not contain an access_token.")
-                return None
-    except httpx.HTTPStatusError as e:
-        log.error(
-            "Failed to exchange token via OBO flow due to HTTP error.",
-            status_code=e.response.status_code,
-            response=e.response.text,
-        )
-        return None
-    except Exception as e:
-        log.error(
-            "Unexpected error during OBO token exchange.", error=str(e), exc_info=True
-        )
-        return None
-
-
-async def get_authorized_dataset_ids(token: str) -> Set[str]:
-    """
-    Calls the DataGEMS Gateway to get the dataset IDs a user can access.
+    Calls the DataGEMS Gateway to get the entity IDs a user can access.
+    Uses the incoming user token directly (no OBO exchange needed,
+    as the Gateway handles token exchange for downstream services).
     """
     log = logger.bind()
-
-    gateway_token = await _exchange_token_for_gateway(token)
-    if not gateway_token:
-        log.warning(
-            "Could not obtain a gateway token. User will have no dataset permissions."
-        )
-        return set()
 
     try:
         api_url = f"{settings.GATEWAY_API_URL}/api/principal/context-grants/query"
-        headers = {"Authorization": f"Bearer {gateway_token}"}
+        headers = {"Authorization": f"Bearer {token}"}
         payload = {"roles": ["dg_ds-browse"]}
 
         log = log.bind(gateway_url=api_url, gateway_payload=payload)
@@ -254,30 +199,30 @@ async def get_authorized_dataset_ids(token: str) -> Set[str]:
             response.raise_for_status()
 
             context_grants = response.json()
-            dataset_ids = {
+            entity_ids = {
                 grant["targetId"]
                 for grant in context_grants
-                if grant.get("targetType") == 0  # 0 indicates a dataset
+                if grant.get("targetType") == 0  # 0 indicates a entity
                 and "targetId" in grant
             }
 
             log.info(
                 "Successfully fetched user permissions from Gateway.",
                 total_grants=len(context_grants),
-                dataset_grants=len(dataset_ids),
+                entity_grants=len(entity_ids),
             )
-            return dataset_ids
+            return entity_ids
 
     except httpx.HTTPStatusError as e:
         log.error(
-            "Gateway returned an error when fetching dataset permissions.",
+            "Gateway returned an error when fetching entity permissions.",
             status_code=e.response.status_code,
             response=e.response.text,
         )
         return set()
     except Exception as e:
         log.error(
-            "An unexpected error occurred while fetching dataset permissions.",
+            "An unexpected error occurred while fetching entity permissions.",
             error=str(e),
         )
         return set()

@@ -6,10 +6,11 @@ Supported actions:
 - delete all stored recommendations for one application
 - list stored entity IDs for one application
 """
+import json
 import os
 import argparse
 from typing import Optional
-from dataset_recsys.storage.recommendation_client import RecommendationClient
+from recommendation_client import RecommendationClient
 
 
 def get_client() -> Optional[RecommendationClient]:
@@ -53,6 +54,20 @@ def delete_application(application: str):
     except Exception as e:
         print(f"❌ Delete failed: {e}")
 
+def get_recommendations(application: str, entity_id: str):
+    client = get_client()
+    if client is None:
+        return
+
+    print(f"🔍 Fetching recommendations for '{entity_id}' in application '{application}'...")
+    recs = client.get_recommendations(application, entity_id)
+    
+    if not recs:
+        print(f"⚠️ No recommendations found for entity '{entity_id}'.")
+    else:
+        print(f"✅ Found {len(recs)} recommendations:")
+        # Print as a clean JSON list for easy reading
+        print(json.dumps(recs, indent=2))
 
 def list_entities(application: str):
     client = get_client()
@@ -71,6 +86,10 @@ if __name__ == "__main__":
     ingest_parser.add_argument("file", help="Path to recommendation JSON file")
     ingest_parser.add_argument("application", help="Application name")
 
+    get_parser = subparsers.add_parser("get", help="Get recommendations for a specific entity")
+    get_parser.add_argument("application", help="Application name")
+    get_parser.add_argument("entity_id", help="The ID to lookup (e.g. 6.pdf or a UUID)")
+
     delete_parser = subparsers.add_parser("delete-application", help="Delete all recommendations for one application")
     delete_parser.add_argument("application", help="Application name")
 
@@ -81,6 +100,8 @@ if __name__ == "__main__":
 
     if args.command == "ingest":
         ingest_recommendations(args.file, args.application)
+    elif args.command == "get":
+        get_recommendations(args.application, args.entity_id)
     elif args.command == "delete-application":
         delete_application(args.application)
     elif args.command == "list-entities":
@@ -89,5 +110,10 @@ if __name__ == "__main__":
         parser.print_help()
 
 # PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py ingest data/mathe/mathe_top20_recommendations.json mathe
+# PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py ingest data/gems_datasets_metadata/moma/datagems_dataset_recommendations_claude-sonnet-4-6.json portal
 # PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py delete-application mathe
+# PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py delete-application portal
 # PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py list-entities mathe
+# PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py list-entities portal
+# PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py get mathe 6.pdf
+# PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py get portal 07382b91-5bc5-42f9-8391-33adc2460c19

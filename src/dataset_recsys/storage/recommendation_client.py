@@ -25,8 +25,8 @@ class RecommendationClient:
         self.r = self.get_redis_client()
 
     def get_redis_client(self) -> redis.Redis:
-        redis_host = os.getenv("REDIS_HOST", "redis")
-        redis_port = int(os.getenv("REDIS_PORT", "6379"))
+        redis_host = os.getenv("REDIS_HOST", "localhost")
+        redis_port = int(os.getenv("REDIS_PORT", "6380"))
         redis_db = int(os.getenv("REDIS_DB", "0"))
 
         return redis.Redis(
@@ -57,13 +57,39 @@ class RecommendationClient:
                 "or a list of entity_ids ranked by relevance."
             )
 
-    def store_recommendations(self, application: str, recommendations: Dict[str, Dict[str, float]]) -> int:
+    def store_recommendations(self, application: str, data) -> int:
         """Store scored recommendations for one application."""
         self.delete_application(application)
         index_key = self._index_key(application)
         stored_entities = 0
 
-        for entity_id, recommended_items in recommendations.items():
+        # --- POLYMORPHIC PRE-PROCESSING ---
+        # If input is the Claude-style list: [{"id": "...", "recommendations": [...]}, ...]
+        if isinstance(data, list):
+            items_to_process = {}
+            for entry in data:
+                eid = entry.get("id")
+                recs = entry.get("recommendations", [])
+                
+                # If the nested recs are objects with scores, 
+                # convert them to a dict before passing to normalize
+                if recs and isinstance(recs[0], dict):
+                    items_to_process[eid] = {
+                        str(r["id"]): float(r.get("score", 0.0)) 
+                        for r in recs if "id" in r
+                    }
+                else:
+                    # Otherwise, just pass the list (e.g., list of strings)
+                    items_to_process[eid] = recs
+        
+        # If input is the Legacy dict: {"6.pdf": ["7.pdf", ...]}
+        elif isinstance(data, dict):
+            items_to_process = data
+        else:
+            raise ValueError(f"Unsupported JSON structure: {type(data)}")
+
+        # --- STORAGE LOOP ---
+        for entity_id, recommended_items in items_to_process.items():
             if not entity_id:
                 continue
 
@@ -94,11 +120,6 @@ class RecommendationClient:
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        if not isinstance(data, dict):
-            raise ValueError(
-                "Expected JSON to be a dict."
-            )
-
         stored_entities = self.store_recommendations(application, data)
 
         return (
@@ -110,10 +131,16 @@ class RecommendationClient:
     # QUERYING
     # -------------------------
     def get_recommendations(self, application: str, entity_id: str) -> List[str]:
-        """Return recommended entity IDs for one entity within an application."""
-        return self.r.zrevrange(
-            self._recommendation_key(application, entity_id), 0, -1, 
-        )
+        """
+        Return recommended entity IDs for one entity, ordered by score descending.
+        Returns an empty list if the entity_id does not exist or has no recs.
+        """
+        if not entity_id:
+            return []
+            
+        key = self._recommendation_key(application, entity_id)
+        # ZREVRANGE returns items from highest score to lowest
+        return self.r.zrevrange(key, 0, -1)
 
     # TODO: Check whether this returns only the entity IDs that have recommendations, or also those with empty recommendation ZSETs. If the latter, we may want to filter those out.
     def list_entities(self, application: str) -> List[str]:

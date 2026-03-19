@@ -150,5 +150,5 @@ def setup_logging():
     root_logger.setLevel(logging.INFO)
     structlog.contextvars.bind_contextvars(
         correlation_id=get_correlation_id,
-        Application="cross-dataset-discovery-api",
+        Application="dataset-recommendation-api",
     )

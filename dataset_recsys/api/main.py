@@ -56,8 +56,8 @@ app.add_middleware(
 )
 
 DATA_DIR = Path("data")
-DOCS_VALID_EXAMPLES_PATH = Path("dataset_recsys/api_docs/valid_examples.json")
-DOCS_ERROR_EXAMPLES_PATH = Path("dataset_recsys/api_docs/error_examples.json")
+DOCS_VALID_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/valid_examples.json")
+DOCS_ERROR_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/error_examples.json")
 
 def load_json_file(path: Path) -> dict:
     if not path.exists():

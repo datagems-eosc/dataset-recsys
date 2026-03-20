@@ -22,7 +22,7 @@ data/gems_datasets_metadata/*
 data/gems_datasets_metadata/moma/*
 !data/gems_datasets_metadata/moma/*recommendations*.json
 
-src/dataset_recsys/pipelines/temp.py
+dataset_recsys/pipelines/temp.py
 
 # VSCode settings
 .vscode/settings.json

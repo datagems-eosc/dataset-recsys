@@ -27,10 +27,10 @@ import numpy as np
 import torch
 from transformers import AutoModel, AutoTokenizer
 
-from src.dataset_recsys.ingestion.fetch_gems_datasets import run_ingestion
-from src.dataset_recsys.storage.recommendation_client import RecommendationClient
-from src.dataset_recsys.utils.bedrock import enrich_batch
-from src.dataset_recsys.utils.text_preprocessing import LightTextPreprocessor, build_embedding_text
+from dataset_recsys.ingestion.fetch_gems_datasets import run_ingestion
+from dataset_recsys.storage.recommendation_client import RecommendationClient
+from dataset_recsys.utils.bedrock import enrich_batch
+from dataset_recsys.utils.text_preprocessing import LightTextPreprocessor, build_embedding_text
 
 LLM_NAME = "claude-sonnet-4-6"
 DATA_PATH = Path("data/gems_datasets_metadata/moma/datagems_dataset_profiles.json")

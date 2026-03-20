@@ -109,11 +109,11 @@ if __name__ == "__main__":
     else:
         parser.print_help()
 
-# PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py ingest data/mathe/mathe_top20_recommendations.json mathe
-# PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py ingest data/gems_datasets_metadata/moma/datagems_dataset_recommendations_claude-sonnet-4-6.json portal
-# PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py delete-application mathe
-# PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py delete-application portal
-# PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py list-entities mathe
-# PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py list-entities portal
-# PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py get mathe 6.pdf
-# PYTHONPATH=src python src/dataset_recsys/storage/manage_recommendations.py get portal 07382b91-5bc5-42f9-8391-33adc2460c19
+# python dataset_recsys/storage/manage_recommendations.py ingest data/mathe/mathe_top20_recommendations.json mathe
+# python dataset_recsys/storage/manage_recommendations.py ingest data/gems_datasets_metadata/moma/datagems_dataset_recommendations_claude-sonnet-4-6.json portal
+# python dataset_recsys/storage/manage_recommendations.py delete-application mathe
+# python dataset_recsys/storage/manage_recommendations.py delete-application portal
+# python dataset_recsys/storage/manage_recommendations.py list-entities mathe
+# python dataset_recsys/storage/manage_recommendations.py list-entities portal
+# python dataset_recsys/storage/manage_recommendations.py get mathe 6.pdf
+# python dataset_recsys/storage/manage_recommendations.py get portal 07382b91-5bc5-42f9-8391-33adc2460c19

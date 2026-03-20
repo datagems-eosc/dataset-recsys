@@ -8,13 +8,13 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status, Query, Bod
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from src.dataset_recsys.storage.recommendation_client import RecommendationClient
-from src.dataset_recsys.api.logging.logging_config import (
+from dataset_recsys.storage.recommendation_client import RecommendationClient
+from dataset_recsys.api.logging.logging_config import (
     request_response_logging_middleware,
     correlation_id_middleware,
     setup_logging,
 )
-from src.dataset_recsys.api.logging.exceptions import (
+from dataset_recsys.api.logging.exceptions import (
     ErrorResponse,
     ValidationErrorDetail,
     ValidationErrorResponse,
@@ -22,7 +22,7 @@ from src.dataset_recsys.api.logging.exceptions import (
     FailedDependencyResponse,
     FailedDependencyException,
 )
-from src.dataset_recsys.api.security import security
+from dataset_recsys.api.security import security
 import json
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -56,8 +56,8 @@ app.add_middleware(
 )
 
 DATA_DIR = Path("data")
-DOCS_VALID_EXAMPLES_PATH = Path("src/dataset_recsys/api_docs/valid_examples.json")
-DOCS_ERROR_EXAMPLES_PATH = Path("src/dataset_recsys/api_docs/error_examples.json")
+DOCS_VALID_EXAMPLES_PATH = Path("dataset_recsys/api_docs/valid_examples.json")
+DOCS_ERROR_EXAMPLES_PATH = Path("dataset_recsys/api_docs/error_examples.json")
 
 def load_json_file(path: Path) -> dict:
     if not path.exists():
@@ -282,7 +282,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # kubectl port-forward pod/dataset-recsys-redis-5547b598b7-mngqk -n athenarc 6380:6379
 
 # Run the API with:
-# uvicorn src.dataset_recsys.api.main:app --reload
+# uvicorn dataset_recsys.api.main:app --reload
 # http://127.0.0.1:8000/dataset-recsys/redoc
 # http://127.0.0.1:8000/dataset-recsys/docs
 

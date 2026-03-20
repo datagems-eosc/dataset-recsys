@@ -139,8 +139,8 @@ The meaning of *entity* varies by application:
     }
 )
 async def get_recommendations(
-    application: str = Query(..., description="", enum=SUPPORTED_APPLICATIONS),
-    entity_id: str = Query(..., description="The item identifier within the selected dataset"),
+    application: str = Query(..., description="", enum=SUPPORTED_APPLICATIONS, required=True),
+    entity_id: str = Query(..., description="The item identifier within the selected dataset", required=True),
     n: int = Query(10, le=20, description="Number of similar items to return"),
     claims: dict = Depends(security.require_role(["user", "dg_user"])),
     token: str = Depends(security.oauth2_scheme),     

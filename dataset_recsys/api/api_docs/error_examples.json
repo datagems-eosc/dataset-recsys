@@ -1,19 +1,25 @@
 {
   "422": {
-    "summary": "Validation Error",
+    "summary": "Validation Error - Missing Parameters",
+    "description": "Raised when required query parameters like 'application' or 'entity_id' are missing or invalid.",
     "value": {
       "code": 102,
       "error": "Validation Error",
       "message": [
         {
-          "Key": "body.dataset_id",
+          "Key": "query.application",
+          "Value": ["field required"]
+        },
+        {
+          "Key": "query.entity_id",
           "Value": ["field required"]
         }
       ]
     }
   },
   "401": {
-    "summary": "Invalid Token",
+    "summary": "Invalid or Missing Token",
+    "description": "Raised when the Bearer token is missing from the Authorization header or has expired.",
     "value": {
       "code": 401,
       "error": "Could not validate credentials"
@@ -21,18 +27,20 @@
   },
   "403": {
     "summary": "Authorization Failure",
+    "description": "Raised when the user is authenticated but does not have permission to access the requested entity.",
     "value": {
       "code": 403,
       "error": "Forbidden",
-      "message": "User is not authorized to access dataset: 9b25bc46-xxxx-xxxx"
+      "message": "User is not authorized to access entity: 9b25bc46-3f61-4ccf-a001-7c28d065c30d"
     }
   },
   "500": {
     "summary": "Internal Server Error",
+    "description": "Raised when an unexpected error occurs, such as a database connection timeout.",
     "value": {
       "code": 500,
       "error": "Internal server error",
-      "message": "Connection to Redis timed out."
+      "message": "An unexpected error occurred: Connection to Redis failed at 127.0.0.1:6380"
     }
   }
 }

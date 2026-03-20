@@ -1,29 +1,31 @@
 {
   "Dataset Relationship Success": {
-    "summary": "Successful Dataset-to-Dataset recommendation",
-    "description": "Returns a list of authorized dataset IDs related to the input dataset.",
+    "summary": "Successful Entity-to-Entity recommendation",
+    "description": "Returns a list of authorized entity IDs related to the input entity within a specific application.",
     "value": {
       "query_time": 0.0125,
-      "dataset_id": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
+      "application": "portal",
+      "entity_id": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
       "recommendations": [
         {
-          "item_id": "67f22d91-2b1a-4e8c-8f92-52dbc38c130f"
+          "id": "67f22d91-2b1a-4e8c-8f92-52dbc38c130f"
         },
         {
-          "item_id": "climate-data-v2"
+          "id": "climate-data-v2"
         },
         {
-          "item_id": "european-soil-maps-2023"
+          "id": "european-soil-maps-2023"
         }
       ]
     }
   },
   "Empty Recommendations": {
     "summary": "No Recommendations Found",
-    "description": "The dataset exists, but no relationships are defined in the database.",
+    "description": "The entity exists and is authorized, but no relationships are defined in the database.",
     "value": {
       "query_time": 0.005,
-      "dataset_id": "new-empty-dataset-id",
+      "application": "mathe",
+      "entity_id": "non-existent-or-unrelated.pdf",
       "recommendations": []
     }
   }

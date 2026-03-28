@@ -21,18 +21,22 @@ class RecommendationClient:
         recs:mathe:6.pdf -> {7.pdf: 0.91, 9.pdf: 0.87, 221.pdf: 0.72}
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        db: int | None = None,
+    ):
+        self.host = host or os.getenv("REDIS_HOST", "localhost")
+        self.port = int(port or os.getenv("REDIS_PORT", "6380"))
+        self.db = int(db or os.getenv("REDIS_DB", "0"))
         self.r = self.get_redis_client()
 
     def get_redis_client(self) -> redis.Redis:
-        redis_host = os.getenv("REDIS_HOST", "localhost")
-        redis_port = int(os.getenv("REDIS_PORT", "6380"))
-        redis_db = int(os.getenv("REDIS_DB", "0"))
-
         return redis.Redis(
-            host=redis_host,
-            port=redis_port,
-            db=redis_db,
+            host=self.host,
+            port=self.port,
+            db=self.db,
             decode_responses=True,
         )
 

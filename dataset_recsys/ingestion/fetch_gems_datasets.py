@@ -31,6 +31,7 @@ class DatasetProfile:
     description: str = ""
     keywords: str = ""
     field_of_science: str = ""
+    catalog_summary: str = ""
 
 def _is_dataset_node(node: Dict[str, Any]) -> bool:
     return "sc:Dataset" in (node.get("labels") or [])
@@ -199,6 +200,10 @@ def run_ingestion() -> tuple[Dict[str, Any], List[DatasetProfile]]:
     profiles = extract_dataset_profiles(raw_data)
     return raw_data, profiles
 
+def fetch_catalog() -> List[DatasetProfile]:
+    _, profiles = run_ingestion()
+    return profiles
+
 if __name__ == "__main__":
     raw_data, profiles = run_ingestion()
 
@@ -207,14 +212,23 @@ if __name__ == "__main__":
         json.dump(raw_data, f, ensure_ascii=False, indent=2)
     print(f"Wrote raw dump: {raw_path}")
 
-    # Summarize which dataset metadata fields exist and how often they appear.
-    fields_summary = summarize_dataset_property_fields(raw_data)
-    fields_path = OUTPUT_DIR / "datagems_dataset_fields_summary.json"
-    with open(fields_path, "w", encoding="utf-8") as f:
-        json.dump(fields_summary, f, ensure_ascii=False, indent=2)
-    print(f"Wrote dataset fields summary: {fields_path}")
+    # # Summarize which dataset metadata fields exist and how often they appear.
+    # fields_summary = summarize_dataset_property_fields(raw_data)
+    # fields_path = OUTPUT_DIR / "datagems_dataset_fields_summary.json"
+    # with open(fields_path, "w", encoding="utf-8") as f:
+    #     json.dump(fields_summary, f, ensure_ascii=False, indent=2)
+    # print(f"Wrote dataset fields summary: {fields_path}")
 
     profiles_path = OUTPUT_DIR / "datagems_dataset_profiles.json"
     with open(profiles_path, "w", encoding="utf-8") as f:
         json.dump([p.__dict__ for p in profiles], f, ensure_ascii=False, indent=2)
     print(f"Wrote minimal text profiles: {profiles_path}")
+
+__all__ = [
+    "DatasetProfile",
+    "extract_dataset_profiles",
+    "fetch_catalog",
+    "fetch_search",
+    "run_ingestion",
+    "summarize_dataset_property_fields",
+]

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from typing import Iterable
 
 from sklearn.base import BaseEstimator, TransformerMixin
+
+from dataset_recsys.ingestion.fetch_gems_datasets import DatasetProfile
 
 
 class BaseTextPreprocessor(BaseEstimator, TransformerMixin):
@@ -61,15 +64,28 @@ class LightTextPreprocessor(BaseTextPreprocessor):
 
         return text
 
-def build_embedding_text(profile: dict, cleaner: BaseTextPreprocessor | None = None) -> str:
-    """Build a single cleaned text block from a dataset profile for embedding."""
-    title = profile.get("title").strip()
-    description = profile.get("enriched_description").strip()
 
-    if cleaner is not None:
-        description = cleaner.clean(description)
+def preprocess_catalog(
+    catalog: list[DatasetProfile],
+    cleaner: BaseTextPreprocessor | None = None,
+) -> list[DatasetProfile]:
+    """Clean the catalog summaries in the dataset profiles using the provided cleaner."""
+    cleaner = cleaner or LightTextPreprocessor()
 
-    if title and description.lower().startswith(title.lower()):
-        return description
+    processed_catalog: list[DatasetProfile] = []
+    for data_profile in catalog:
+        processed_catalog.append(
+            replace(
+                data_profile,
+                catalog_summary=cleaner.clean(data_profile.catalog_summary),
+            )
+        )
 
-    return f"{title}. {description}"
+    return processed_catalog
+
+
+__all__ = [
+    "BaseTextPreprocessor",
+    "LightTextPreprocessor",
+    "preprocess_catalog",
+]

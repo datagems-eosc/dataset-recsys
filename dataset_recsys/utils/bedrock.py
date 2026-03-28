@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from dotenv import load_dotenv
 import os
+from dataset_recsys.ingestion.fetch_gems_datasets import DatasetProfile
 
 load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
@@ -44,11 +45,14 @@ def test_bedrock_model_access(region: str):
     except Exception as e:
         print(f"\nFailed to query Bedrock in region {region}: {e}")
 
-# Prompt template
-def build_prompt(title, headline, description, keywords, field_of_science):
-    """
-    Prompt for generating a public-facing catalog description.
-    """
+def build_catalog_summary_prompt(
+    title: str,
+    headline: str,
+    description: str,
+    keywords,
+    field_of_science,
+) -> str:
+    """Prompt for generating a public-facing catalog summary."""
     return f"""
     Based on this dataset's metadata, write a concise paragraph (80–150 words) that could serve as its summary in a scientific data catalog or registry.
     
@@ -69,6 +73,33 @@ def build_prompt(title, headline, description, keywords, field_of_science):
 
     Use domain-specific terminology where appropriate.
     """
+
+
+PROMPT_BUILDERS = {
+    "catalog_summary_v1": build_catalog_summary_prompt,
+}
+
+
+def build_prompt(
+    title: str,
+    headline: str,
+    description: str,
+    keywords,
+    field_of_science,
+    prompt_version: str = "catalog_summary_v1",
+) -> str:
+    """Build a prompt from the selected prompt version."""
+    prompt_builder = PROMPT_BUILDERS.get(prompt_version)
+    if prompt_builder is None:
+        raise ValueError(f"Unsupported prompt version: {prompt_version}")
+
+    return prompt_builder(
+        title=title,
+        headline=headline,
+        description=description,
+        keywords=keywords,
+        field_of_science=field_of_science,
+    )
 
 def call_bedrock(prompt: str, llm: str = "claude-sonnet-4-6") -> str:
     """
@@ -111,15 +142,19 @@ def call_bedrock(prompt: str, llm: str = "claude-sonnet-4-6") -> str:
 
     raise ValueError(f"No response parser defined yet for llm='{llm}'")
 
-def enrich_data_profile(profile: dict, llm: str = "claude-sonnet-4-6"):
+def enrich_data_profile(
+    profile: DatasetProfile,
+    llm: str = "claude-sonnet-4-6",
+    prompt_version: str = "catalog_summary_v1",
+) -> DatasetProfile:
     """
     Enriches a single dataset profile using Claude on Bedrock.
     """
-    title = profile.get("title", "")
-    headline = profile.get("headline", "")
-    description = profile.get("description", "")
-    keywords = profile.get("keywords", [])
-    field_of_science = profile.get("field_of_science", profile.get("fieldOfScience", []))
+    title = profile.title or ""
+    headline = profile.headline or ""
+    description = profile.description or ""
+    keywords = profile.keywords or ""
+    field_of_science = profile.field_of_science or ""
 
     prompt = build_prompt(
         title=title,
@@ -127,27 +162,52 @@ def enrich_data_profile(profile: dict, llm: str = "claude-sonnet-4-6"):
         description=description,
         keywords=keywords,
         field_of_science=field_of_science,
+        prompt_version=prompt_version,
     )
 
-    enriched_description = call_bedrock(prompt, llm=llm)
+    catalog_summary = call_bedrock(prompt, llm=llm)
 
-    return {
-        **profile,
-        "enriched_description": enriched_description,
-    }
+    return DatasetProfile(
+        id=profile.id,
+        title=profile.title,
+        headline=profile.headline,
+        description=profile.description,
+        keywords=profile.keywords,
+        field_of_science=profile.field_of_science,
+        catalog_summary=catalog_summary,
+    )
 
-def enrich_batch(profiles: list[dict], llm: str = "claude-sonnet-4-6"):
+def enrich_batch(
+    profiles: list[DatasetProfile],
+    llm: str = "claude-sonnet-4-6",
+    prompt_version: str = "catalog_summary_v1",
+) -> list[DatasetProfile]:
     """
     Enriches a list of dataset profiles using Claude on Bedrock.
     """
     enriched_profiles = []
 
     for profile in profiles:
-        title = profile.get("title", "<untitled>")
+        title = profile.title or "<untitled>"
         print(f"Enriching: {title}")
-        enriched_profiles.append(enrich_data_profile(profile, llm=llm))
+        enriched_profiles.append(
+            enrich_data_profile(profile, llm=llm, prompt_version=prompt_version)
+        )
 
     return enriched_profiles
+
+
+__all__ = [
+    "MODEL_CONFIG",
+    "PROMPT_BUILDERS",
+    "build_catalog_summary_prompt",
+    "build_prompt",
+    "call_bedrock",
+    "enrich_batch",
+    "enrich_data_profile",
+    "get_bedrock_client",
+    "test_bedrock_model_access",
+]
 
 if __name__ == "__main__":
     test_bedrock_model_access("eu-central-1")

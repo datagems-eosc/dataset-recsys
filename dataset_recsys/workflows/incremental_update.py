@@ -1,0 +1,2 @@
+
+# TODO: Implement incremental update workflow, which would fetch only recently updated datasets and update the catalog and embeddings accordingly. This would be more efficient than re-fetching everything on each run.

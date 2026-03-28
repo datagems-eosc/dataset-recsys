@@ -11,9 +11,10 @@ flowchart TB
     A[Scheduler / Manual Trigger] --> B[Fetch Full Catalog]
     B --> C[Preprocess Metadata]
     C --> D[Generate Embeddings]
-    D --> E[Update Vector DB]
-    E --> F[Compute Top-k Recos + Scores]
-    F --> G[Write Recos to Redis]
+    D --> E[Store Embedding Metadata]
+    E --> F[Update Vector DB]
+    F --> G[Compute Top-k Recos + Scores]
+    G --> H[Write Recos to Redis]
 
     classDef trigger fill:#E8F5E9,stroke:#43A047,stroke-width:2px,color:#1B5E20;
     classDef prep fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px,color:#0D47A1;
@@ -22,8 +23,8 @@ flowchart TB
 
     class A trigger;
     class B,C prep;
-    class D,F compute;
-    class E,G storage;
+    class D,G compute;
+    class E,F,H storage;
 ```
 
 This workflow is used when the full catalog must be recomputed, for example
@@ -37,9 +38,10 @@ flowchart TB
     A[New / Updated Dataset] --> B[Fetch Dataset Metadata]
     B --> C[Preprocess Metadata]
     C --> D[Generate / Update Embedding]
-    D --> E[Update Vector DB]
-    E --> F[Compute Top-k Recos + Scores for Changed Dataset]
-    F --> G[Write Recos to Redis]
+    D --> E[Store Embedding Metadata]
+    E --> F[Update Vector DB]
+    F --> G[Compute Top-k Recos + Scores for Changed Dataset]
+    G --> H[Write Recos to Redis]
 
     classDef trigger fill:#E8F5E9,stroke:#43A047,stroke-width:2px,color:#1B5E20;
     classDef prep fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px,color:#0D47A1;
@@ -48,8 +50,8 @@ flowchart TB
 
     class A trigger;
     class B,C prep;
-    class D,F compute;
-    class E,G storage;
+    class D,G compute;
+    class E,F,H storage;
 ```
 
 This workflow updates only the changed dataset: it updates its embedding,

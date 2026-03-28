@@ -1,4 +1,10 @@
 """
+DEPRECATED: legacy MVP pipeline kept only for reference.
+
+Use dataset_recsys/workflows/full_batch_rebuild.py instead.
+"""
+
+"""
 Portal Dataset Recommendation MVP Pipeline
 
 Goal

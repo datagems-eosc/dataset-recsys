@@ -165,10 +165,29 @@ class RecommendationClient:
     # -------------------------
     # UTILITIES
     # -------------------------
-    def delete_entity(self, application: str, entity_id: str) -> bool:
-        """Delete all recommendations stored for one entity."""
-        deleted = bool(self.r.delete(self._recommendation_key(application, entity_id)))
+
+    # TODO: If recommendation recomputation is introduced later, call it after cleanup.
+    def remove_dataset(self, application: str, entity_id: str) -> int:
+        """Remove one dataset completely from an application.
+
+        This deletes:
+        - its own recommendation key
+        - its entry in the application index
+        - any references to it inside other entities' recommendation sets
+
+        Returns the number of Redis keys deleted for the entity itself
+        (0 or 1). References removed from other ZSETs are not counted here.
+        """
+        if not entity_id:
+            return 0
+
+        deleted = int(self.r.delete(self._recommendation_key(application, entity_id)))
         self.r.srem(self._index_key(application), entity_id)
+
+        for other_entity_id in self.r.smembers(self._index_key(application)):
+            rec_key = self._recommendation_key(application, other_entity_id)
+            self.r.zrem(rec_key, entity_id)
+
         return deleted
 
     def delete_application(self, application: str) -> int:

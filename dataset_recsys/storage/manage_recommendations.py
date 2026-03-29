@@ -10,7 +10,7 @@ import json
 import os
 import argparse
 from typing import Optional
-from recommendation_client import RecommendationClient
+from dataset_recsys.storage.recommendation_client import RecommendationClient
 
 
 def get_client() -> Optional[RecommendationClient]:
@@ -54,6 +54,19 @@ def delete_application(application: str):
     except Exception as e:
         print(f"❌ Delete failed: {e}")
 
+def remove_dataset(application: str, entity_id: str):
+    client = get_client()
+    if client is None:
+        return
+
+    print(f"Removing dataset '{entity_id}' from application '{application}'...")
+
+    try:
+        deleted = client.remove_dataset(application, entity_id)
+        print(f"✅ Removed dataset '{entity_id}' (deleted keys: {deleted}).")
+    except Exception as e:
+        print(f"❌ Remove dataset failed: {e}")
+
 def get_recommendations(application: str, entity_id: str):
     client = get_client()
     if client is None:
@@ -96,6 +109,10 @@ if __name__ == "__main__":
     list_parser = subparsers.add_parser("list-entities", help="List entity IDs stored for one application")
     list_parser.add_argument("application", help="Application name")
 
+    remove_parser = subparsers.add_parser("remove-dataset", help="Remove a dataset and its references from one application")
+    remove_parser.add_argument("application", help="Application name")
+    remove_parser.add_argument("entity_id", help="Dataset ID to remove")
+
     args = parser.parse_args()
 
     if args.command == "ingest":
@@ -106,14 +123,17 @@ if __name__ == "__main__":
         delete_application(args.application)
     elif args.command == "list-entities":
         list_entities(args.application)
+    elif args.command == "remove-dataset":
+        remove_dataset(args.application, args.entity_id)
     else:
         parser.print_help()
 
-# python dataset_recsys/storage/manage_recommendations.py ingest data/mathe/mathe_top20_recommendations.json mathe
-# python dataset_recsys/storage/manage_recommendations.py ingest data/gems_datasets_metadata/moma/datagems_dataset_recommendations_claude-sonnet-4-6.json portal
-# python dataset_recsys/storage/manage_recommendations.py delete-application mathe
-# python dataset_recsys/storage/manage_recommendations.py delete-application portal
-# python dataset_recsys/storage/manage_recommendations.py list-entities mathe
-# python dataset_recsys/storage/manage_recommendations.py list-entities portal
-# python dataset_recsys/storage/manage_recommendations.py get mathe 6.pdf
-# python dataset_recsys/storage/manage_recommendations.py get portal 07382b91-5bc5-42f9-8391-33adc2460c19
+# python dataset_recsys/storage/manage_recommendations.py ingest data/mathe/mathe_top20_recommendations.json ds2ds_mathe
+# python dataset_recsys/storage/manage_recommendations.py ingest data/gems_datasets_metadata/moma/datagems_dataset_recommendations_claude-sonnet-4-6.json ds2ds
+# python dataset_recsys/storage/manage_recommendations.py delete-application ds2ds_mathe
+# python dataset_recsys/storage/manage_recommendations.py delete-application ds2ds
+# python dataset_recsys/storage/manage_recommendations.py list-entities ds2ds_mathe
+# python dataset_recsys/storage/manage_recommendations.py list-entities ds2ds
+# python dataset_recsys/storage/manage_recommendations.py get ds2ds_mathe 6.pdf
+# python dataset_recsys/storage/manage_recommendations.py get ds2ds 07382b91-5bc5-42f9-8391-33adc2460c19
+# python dataset_recsys/storage/manage_recommendations.py remove-dataset ds2ds_mathe 7.pdf

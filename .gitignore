@@ -18,8 +18,11 @@ data/datafinder/*
 data/mathe/mathe_embedding_index.json
 data/mathe/mathe_embeddings.npy
 data/gems_datasets_metadata/*
+!data/gems_datasets_metadata/moma/
+data/gems_datasets_metadata/moma/*
+!data/gems_datasets_metadata/moma/*recommendations*.json
 
-src/temp.py
+dataset_recsys/pipelines/temp.py
 
 # VSCode settings
 .vscode/settings.json

@@ -20,6 +20,5 @@ notebooks/
 *.tmp
 
 data/*
-!data/mathe/mathe_top20_recommendations.json
 
 .env

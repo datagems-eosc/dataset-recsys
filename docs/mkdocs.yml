@@ -5,6 +5,7 @@ repo_url: https://github.com/datagems-eosc/dataset-recsys
 nav:
   - System:
     - Architecture: architecture.md
+    - Workflows: workflows.md
   - API: index.md
   - License: license.md
   - DataGEMS Home: https://datagems-eosc.github.io/
@@ -23,6 +24,7 @@ theme:
 extra_css:
   - stylesheets/custom-footer.css
   - stylesheets/mkdocsoad.css
+  - stylesheets/extra.css
 
 docs_dir: source
 
@@ -34,11 +36,18 @@ plugins:
 
 markdown_extensions:
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
   - toc:
       permalink: true
+
+extra_javascript:
+  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
 
 extra:
   version:

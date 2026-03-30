@@ -5,24 +5,27 @@ This page presents the high-level architecture of the dataset recommender system
 ## Dataset RecSys Architecture
 
 ```mermaid
-%%{init: {'flowchart': {'nodeSpacing': 20, 'rankSpacing': 20}, 'themeVariables': {'fontSize': '12px'}}}%%
-flowchart LR
+%%{init: {'flowchart': {'nodeSpacing': 22, 'rankSpacing': 22, 'curve': 'linear'}, 'themeVariables': {'fontSize': '12px', 'lineColor': '#9E9E9E', 'edgeLabelBackground':'#ffffff', 'primaryBorderColor':'#BDBDBD', 'clusterBorder':'#E0E0E0', 'lineWidth':'0\.9px'}}}%%
+flowchart TB
+
 
     %% Representation Pipeline
-    subgraph Representation[Representation]
+    subgraph Representation[ ]
         A[Data Ingestion] --> B[Preprocessing]
         B --> C[Embedding Model]
         C --> D[Vector DB]
     end
 
+
     %% Retrieval
-    subgraph Retrieval[Retrieval]
+    subgraph Retrieval[ ]
         D --> F[Candidate Retrieval]
         F --> G[Reranking Module]
     end
 
+
     %% Serving
-    subgraph Serving[Serving]
+    subgraph Serving[ ]
         G --> I[Redis Storage]
         I --> J[API Layer]
         J --> K[Client / Platform]
@@ -32,10 +35,12 @@ flowchart LR
     classDef update fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px,color:#0D47A1;
     classDef retrieval fill:#FFF3E0,stroke:#FB8C00,stroke-width:2px,color:#E65100;
     classDef serving fill:#F3E5F5,stroke:#8E24AA,stroke-width:2px,color:#4A148C;
+    classDef header fill:#FFFFFF,stroke:#BDBDBD,stroke-width:1.5px,color:#333333;
 
     class A,B,C,D update;
     class F,G retrieval;
     class I,J,K serving;
+
 ```
 
 ## Main Components
@@ -60,7 +65,7 @@ so the system does not need to recompute them for every request.
 The system retrieves candidate datasets using similarity-based search over the
 embedding collection.
 
-### 6. Reranking Module (Future Work)
+### 6. Reranking Module
 An optional reranking stage can refine the retrieved candidates before the final
 top-k recommendation list is produced.
 
@@ -71,4 +76,3 @@ the associated ranking scores, so results can be served efficiently at request t
 ### 8. API Layer
 The API exposes the stored recommendations to downstream consumers,
 including the DataGEMS platform or other services.
-

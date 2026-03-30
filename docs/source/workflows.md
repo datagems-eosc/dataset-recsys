@@ -6,14 +6,15 @@ full batch rebuild, incremental dataset update, and recommendation serving.
 ### 1. Full Batch Rebuild Workflow
 
 ```mermaid
-%%{init: {'flowchart': {'nodeSpacing': 22, 'rankSpacing': 22}, 'themeVariables': {'fontSize': '12px'}}}%%
-flowchart LR
+%%{init: {'flowchart': {'nodeSpacing': 22, 'rankSpacing': 22, 'curve': 'linear'}, 'themeVariables': {'fontSize': '12px', 'lineColor': '#9E9E9E', 'edgeLabelBackground':'#ffffff', 'primaryBorderColor':'#BDBDBD', 'clusterBorder':'#E0E0E0', 'lineWidth':'0\.9px'}}}%%
+flowchart TB
     A[Scheduler / Manual Trigger] --> B[Fetch Full Catalog]
     B --> C[Preprocess Metadata]
     C --> D[Generate Embeddings]
-    D --> E[Update Vector DB]
-    E --> F[Compute Top-k Recos + Scores]
-    F --> G[Write Recos to Redis]
+    D --> E[Store Embedding Metadata]
+    E --> F[Update Vector DB]
+    F --> G[Compute Top-k Recos + Scores]
+    G --> H[Write Recos to Redis]
 
     classDef trigger fill:#E8F5E9,stroke:#43A047,stroke-width:2px,color:#1B5E20;
     classDef prep fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px,color:#0D47A1;
@@ -22,8 +23,8 @@ flowchart LR
 
     class A trigger;
     class B,C prep;
-    class D,F compute;
-    class E,G storage;
+    class D,G compute;
+    class E,F,H storage;
 ```
 
 This workflow is used when the full catalog must be recomputed, for example
@@ -32,14 +33,15 @@ after an embedding-model change, a major metadata update, or an initial deployme
 ### 2. Incremental Dataset Update Workflow
 
 ```mermaid
-%%{init: {'flowchart': {'nodeSpacing': 22, 'rankSpacing': 22}, 'themeVariables': {'fontSize': '12px'}}}%%
-flowchart LR
+%%{init: {'flowchart': {'nodeSpacing': 22, 'rankSpacing': 22, 'curve': 'linear'}, 'themeVariables': {'fontSize': '12px', 'lineColor': '#9E9E9E', 'edgeLabelBackground':'#ffffff', 'primaryBorderColor':'#BDBDBD', 'clusterBorder':'#E0E0E0', 'lineWidth':'0\.9px'}}}%%
+flowchart TB
     A[New / Updated Dataset] --> B[Fetch Dataset Metadata]
     B --> C[Preprocess Metadata]
     C --> D[Generate / Update Embedding]
-    D --> E[Update Vector DB]
-    E --> F[Compute Top-k Recos + Scores for Changed Dataset]
-    F --> G[Write Recos to Redis]
+    D --> E[Store Embedding Metadata]
+    E --> F[Update Vector DB]
+    F --> G[Compute Top-k Recos + Scores for Changed Dataset]
+    G --> H[Write Recos to Redis]
 
     classDef trigger fill:#E8F5E9,stroke:#43A047,stroke-width:2px,color:#1B5E20;
     classDef prep fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px,color:#0D47A1;
@@ -48,14 +50,15 @@ flowchart LR
 
     class A trigger;
     class B,C prep;
-    class D,F compute;
-    class E,G storage;
+    class D,G compute;
+    class E,F,H storage;
 ```
 
 This workflow updates only the changed dataset: it updates its embedding,
 computes its recommendation list, and writes the new top-k output to Redis.
 
 Optionally, the system can also perform a **selective neighbor refresh**:
+
 - retrieve the top-M nearest existing datasets to the changed dataset
 - recompute their recommendation lists
 - update their corresponding Redis entries
@@ -67,8 +70,8 @@ if needed.
 ### 3. Recommendation Serving with Access Control
 
 ```mermaid
-%%{init: {'flowchart': {'nodeSpacing': 22, 'rankSpacing': 22}, 'themeVariables': {'fontSize': '12px'}}}%%
-flowchart LR
+%%{init: {'flowchart': {'nodeSpacing': 22, 'rankSpacing': 22, 'curve': 'linear'}, 'themeVariables': {'fontSize': '12px', 'lineColor': '#9E9E9E', 'edgeLabelBackground':'#ffffff', 'primaryBorderColor':'#BDBDBD', 'clusterBorder':'#E0E0E0', 'lineWidth':'0\.9px'}}}%%
+flowchart TB
     A[Client / Platform Request] --> B[Authenticate User]
     B --> C[Read Recos from Redis]
     C --> D[Authorization Filter]

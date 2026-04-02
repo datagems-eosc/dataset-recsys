@@ -10,7 +10,8 @@ full batch rebuild, incremental dataset update, and recommendation serving.
 flowchart TB
     A[Scheduler / Manual Trigger] --> B[Fetch Full Catalog]
     B --> C[Preprocess Metadata]
-    C --> D[Generate Embeddings]
+    C --> X[Optional LLM Enrichment]
+    X --> D[Generate Embeddings]
     D --> E[Store Embedding Metadata]
     E --> F[Update Vector DB]
     F --> G[Compute Top-k Recos + Scores]
@@ -30,6 +31,9 @@ flowchart TB
 This workflow is used when the full catalog must be recomputed, for example
 after an embedding-model change, a major metadata update, or an initial deployment.
 
+Depending on configuration, the workflow may optionally enrich the dataset
+representation using an LLM before generating embeddings.
+
 ### 2. Incremental Dataset Update Workflow
 
 ```mermaid
@@ -37,7 +41,8 @@ after an embedding-model change, a major metadata update, or an initial deployme
 flowchart TB
     A[New / Updated Dataset] --> B[Fetch Dataset Metadata]
     B --> C[Preprocess Metadata]
-    C --> D[Generate / Update Embedding]
+    C --> X[Optional LLM Enrichment]
+    X --> D[Generate / Update Embedding]
     D --> E[Store Embedding Metadata]
     E --> F[Update Vector DB]
     F --> G[Compute Top-k Recos + Scores for Changed Dataset]
@@ -56,6 +61,9 @@ flowchart TB
 
 This workflow updates only the changed dataset: it updates its embedding,
 computes its recommendation list, and writes the new top-k output to Redis.
+
+As in the full batch workflow, an optional LLM-based enrichment step may be
+applied before embedding generation, depending on system configuration.
 
 Optionally, the system can also perform a **selective neighbor refresh**:
 

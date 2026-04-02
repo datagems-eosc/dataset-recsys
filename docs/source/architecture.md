@@ -12,7 +12,8 @@ flowchart TB
     %% Representation Pipeline
     subgraph Representation[ ]
         A[Data Ingestion] --> B[Preprocessing]
-        B --> C[Embedding Model]
+        B --> E[Optional LLM Enrichment]
+        E --> C[Embedding Model]
         C --> D[Vector DB]
     end
 
@@ -53,26 +54,30 @@ These profiles include the metadata fields used to represent each dataset.
 Before recommendation, the selected metadata fields are cleaned, normalized,
 and combined into the textual representation that will be embedded.
 
-### 3. Embedding Model
+### 3. Optional LLM Enrichment
+An optional enrichment step can transform raw dataset metadata into a richer
+semantic representation before embedding.
+
+### 4. Embedding Model
 The embedding model converts each dataset representation into a dense vector
 that captures semantic similarity across datasets.
 
-### 4. Vector Database
+### 5. Vector Database
 The generated dataset embeddings are stored in a vector database and reused for recommendation,
 so the system does not need to recompute them for every request.
 
-### 5. Candidate Retrieval
+### 6. Candidate Retrieval
 The system retrieves candidate datasets using similarity-based search over the
 embedding collection.
 
-### 6. Reranking Module
+### 7. Reranking Module
 An optional reranking stage can refine the retrieved candidates before the final
 top-k recommendation list is produced.
 
-### 7. Redis Storage
+### 8. Redis Storage
 Redis stores the final top-k recommendation list for each dataset together with
 the associated ranking scores, so results can be served efficiently at request time.
 
-### 8. API Layer
+### 9. API Layer
 The API exposes the stored recommendations to downstream consumers,
 including the DataGEMS platform or other services.

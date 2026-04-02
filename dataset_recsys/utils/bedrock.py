@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import os
 from dataset_recsys.ingestion.fetch_gems_datasets import DatasetProfile
 
-load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+load_dotenv()
 
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")

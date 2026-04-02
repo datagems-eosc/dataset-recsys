@@ -69,10 +69,28 @@ def build_embedding_text(profile: DatasetProfile) -> str:
     return title or catalog_summary
 
 
+def build_raw_embedding_text(profile: DatasetProfile) -> str:
+    """Build embedding input directly from raw dataset metadata fields."""
+    parts = []
+
+    if profile.title:
+        parts.append(profile.title)
+    if profile.headline:
+        parts.append(profile.headline)
+    if profile.description:
+        parts.append(profile.description)
+    if profile.keywords:
+        parts.append(profile.keywords)
+    if profile.field_of_science:
+        parts.append(profile.field_of_science)
+
+    return ". ".join(part.strip() for part in parts if part and str(part).strip())
+
+
 __all__ = [
     "EMBEDDING_MODEL_CONFIG",
     "build_embedding_text",
+    "build_raw_embedding_text",
     "encode_texts",
     "load_embedding_model",
-    "mean_pool",
 ]

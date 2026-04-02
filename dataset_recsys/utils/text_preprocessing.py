@@ -52,6 +52,10 @@ class LightTextPreprocessor(BaseTextPreprocessor):
         # Example: "[dataset page](http://example.com)" -> "dataset page"
         text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
 
+        # Remove bare brackets but keep their contents
+        # Example: "[dataset]" -> "dataset"
+        text = re.sub(r"\[(.*?)\]", r"\1", text)
+
         # Flatten bullet-like formatting while keeping the content
         # Example:
         # "- first item" -> "first item"
@@ -63,6 +67,36 @@ class LightTextPreprocessor(BaseTextPreprocessor):
         text = re.sub(r"\s+", " ", text).strip()
 
         return text
+
+
+def get_dataset_profile_fields() -> set[str]:
+    """Return the available DatasetProfile dataclass field names."""
+    return set(DatasetProfile.__dataclass_fields__.keys())
+
+
+def preprocess_profiles_field(
+    profiles: list[DatasetProfile],
+    field_name: str,
+    cleaner: BaseTextPreprocessor | None = None,
+) -> list[DatasetProfile]:
+    cleaner = cleaner or LightTextPreprocessor()
+    available_fields = get_dataset_profile_fields()
+
+    if field_name not in available_fields:
+        raise AttributeError(
+            f"DatasetProfile has no field '{field_name}'. Available fields: {sorted(available_fields)}"
+        )
+
+    processed_profiles: list[DatasetProfile] = []
+    for data_profile in profiles:
+        processed_profiles.append(
+            replace(
+                data_profile,
+                **{field_name: cleaner.clean(getattr(data_profile, field_name))},
+            )
+        )
+
+    return processed_profiles
 
 
 def preprocess_catalog(
@@ -88,4 +122,5 @@ __all__ = [
     "BaseTextPreprocessor",
     "LightTextPreprocessor",
     "preprocess_catalog",
+    "preprocess_profiles_field",
 ]

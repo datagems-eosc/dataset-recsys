@@ -19,7 +19,7 @@ class EmbeddingClient:
         password: str | None = None,
     ):
         self.conn = psycopg2.connect(
-            host=host or os.getenv("DATAGEMS_POSTGRES_USERNAME", "localhost"),
+            host=host or os.getenv("DATAGEMS_POSTGRES_HOST", "localhost"),
             port=port or os.getenv("DATAGEMS_POSTGRES_PORT", "5432"),
             dbname=dbname or os.getenv("DATAGEMS_POSTGRES_DBNAME", "postgres"),
             user=user or os.getenv("DATAGEMS_POSTGRES_USER", "postgres"),

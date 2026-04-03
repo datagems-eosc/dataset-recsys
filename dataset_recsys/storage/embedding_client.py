@@ -26,8 +26,8 @@ class EmbeddingClient:
         )
         self.schema = os.getenv("DATAGEMS_POSTGRES_SCHEMA", "public")
         self.conn.autocommit = True
-
         with self.conn.cursor() as cur:
+            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {self.schema};")
             cur.execute(f"SET search_path TO {self.schema};")
             cur.execute(f"""
             CREATE TABLE IF NOT EXISTS {self.schema}.dataset_recsys_embeddings (
@@ -127,7 +127,6 @@ class EmbeddingClient:
         """
 
         with self.conn.cursor() as cur:
-            cur.execute(f"SET search_path TO {self.schema};")
             cur.execute(query, (query_embedding, application, query_embedding, top_k))
             return cur.fetchall()
 
@@ -162,7 +161,6 @@ class EmbeddingClient:
 
         schema = {}
         with self.conn.cursor() as cur:
-            cur.execute(f"SET search_path TO {self.schema};")
             cur.execute(query, (self.schema,))
             rows = cur.fetchall()
 

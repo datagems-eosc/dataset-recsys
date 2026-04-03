@@ -9,6 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dataset_recsys.storage.recommendation_client import RecommendationClient
+from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.api.logging.logging_config import (
     request_response_logging_middleware,
     correlation_id_middleware,
@@ -42,7 +43,7 @@ app = FastAPI(
     redoc_url="/dataset-recsys/redoc",
 )
 recs_client = RecommendationClient()
-
+embedding_client = EmbeddingClient()
 # --- Middleware ---
 app.middleware("http")(request_response_logging_middleware)
 app.middleware("http")(correlation_id_middleware)
@@ -200,30 +201,42 @@ async def get_recommendations(
 @app.get(
     "/dataset-recsys/health",
     summary="Health check",
-    description="Check if the API and the underlying Redis database are responsive.",
+    description="Check if the API, Redis, and vector database are responsive.",
     tags=["Service Health"],
 )
 async def health_check():
     try:
-        # 1. Check Redis connectivity via the client
+        # --- Redis check ---
         is_redis_up = recs_client.check_connection()
-        
-        if not is_redis_up:
-            logger.error("Health check failed: Redis is unreachable.")
+
+        # --- pgvector / Postgres check ---
+        is_vector_db_up = embedding_client.check_connection()
+
+        if not is_redis_up or not is_vector_db_up:
+            logger.error(
+                "Health check failed",
+                redis=is_redis_up,
+                vector_db=is_vector_db_up,
+            )
             raise HTTPException(
-                status_code=503, 
-                detail="Service Unavailable: Database connection failed"
+                status_code=503,
+                detail={
+                    "message": "Service Unavailable",
+                    "redis": is_redis_up,
+                    "vector_db": is_vector_db_up,
+                },
             )
 
         return {
             "status": "ok",
-            "database": "connected",
+            "redis": "connected",
+            "vector_db": "connected",
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Health check encountered an unexpected error: {e}")
+        logger.error(f"Health check error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
     
 @app.get(
@@ -234,6 +247,20 @@ async def health_check():
 )
 async def root():
     return {"status": "ok", "message": "Dataset Recommendation Service is running."}
+
+@app.get(
+    "/dataset-recsys/debug/schema",
+    summary="Get database schema",
+    description="Retrieve the database schema for the embedding storage.",
+    tags=["Service Health"],
+)
+async def get_schema():
+    try:
+        schema = embedding_client.get_schema_overview()
+        return {"status": "ok", "schema": schema}
+    except Exception as e:
+        logger.error(f"Error fetching schema: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # --- Exception Handlers ---
 @app.exception_handler(FailedDependencyException)

@@ -22,7 +22,7 @@ class EmbeddingClient:
             host=host or os.getenv("DATAGEMS_POSTGRES_HOST", "localhost"),
             port=port or os.getenv("DATAGEMS_POSTGRES_PORT", "5432"),
             dbname=dbname or os.getenv("DATAGEMS_POSTGRES_DBNAME", "postgres"),
-            user=user or os.getenv("DATAGEMS_POSTGRES_USER", "postgres"),
+            user=user or os.getenv("DATAGEMS_POSTGRES_USERNAME", "postgres"),
             password=password or os.getenv("DATAGEMS_POSTGRES_PASSWORD", "postgres"),
         )
         self.schema = os.getenv("DATAGEMS_POSTGRES_SCHEMA", "public")

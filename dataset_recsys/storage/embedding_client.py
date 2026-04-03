@@ -1,13 +1,12 @@
 import os
 from typing import List, Any
-
 import psycopg2
 from psycopg2.extras import execute_values
 
 
 class EmbeddingClient:
     """
-    PostgreSQL + pgvector client for storing dataset embeddings.
+    PostgreSQL + pgvector client for storing dataset embeddings with enriched metadata.
     """
 
     def __init__(
@@ -30,15 +29,20 @@ class EmbeddingClient:
 
         with self.conn.cursor() as cur:
             cur.execute(f"SET search_path TO {self.schema};")
-            # cur.execute(f"""
-            # CREATE TABLE IF NOT EXISTS {self.schema}.dataset_embeddings (
-            #     application TEXT NOT NULL,
-            #     dataset_id TEXT NOT NULL,
-            #     embedding VECTOR(1536) NOT NULL,
-            #     embedding_model TEXT NOT NULL,
-            #     PRIMARY KEY (application, dataset_id)
-            # );
-            # """)
+            cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS {self.schema}.dataset_recsys_embeddings (
+                application TEXT NOT NULL,
+                dataset_id TEXT NOT NULL,
+                embedding VECTOR(1536) NOT NULL,
+                embedding_input TEXT,
+                embedding_model TEXT NOT NULL,
+                enrichment_llm TEXT,
+                prompt_version TEXT,
+                run_id TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (dataset_id)
+            );
+            """)
 
     # -------------------------
     # STORAGE
@@ -49,10 +53,14 @@ class EmbeddingClient:
         application: str,
         dataset_ids: List[str],
         embeddings: Any,
+        embedding_inputs: List[str],
         embedding_model: str,
+        enrichment_llm: str | None = None,
+        prompt_version: str | None = None,
+        run_id: str | None = None,
     ) -> int:
         """
-        Store embeddings in bulk (replaces existing ones for the application).
+        Store embeddings in bulk with metadata (replaces existing entries for the application).
         """
 
         self.delete_application(application)
@@ -62,18 +70,36 @@ class EmbeddingClient:
                 application,
                 dataset_id,
                 embedding.tolist(),  # numpy -> list
+                embedding_input,
                 embedding_model,
+                enrichment_llm,
+                prompt_version,
+                run_id,
             )
-            for dataset_id, embedding in zip(dataset_ids, embeddings)
+            for dataset_id, embedding, embedding_input in zip(dataset_ids, embeddings, embedding_inputs)
         ]
 
-        query = """
-        INSERT INTO dataset_embeddings (application, dataset_id, embedding, embedding_model)
+        query = f"""
+        INSERT INTO {self.schema}.dataset_recsys_embeddings (
+            application,
+            dataset_id,
+            embedding,
+            embedding_input,
+            embedding_model,
+            enrichment_llm,
+            prompt_version,
+            run_id
+        )
         VALUES %s
         ON CONFLICT (dataset_id)
         DO UPDATE SET
             embedding = EXCLUDED.embedding,
-            embedding_model = EXCLUDED.embedding_model
+            embedding_input = EXCLUDED.embedding_input,
+            embedding_model = EXCLUDED.embedding_model,
+            enrichment_llm = EXCLUDED.enrichment_llm,
+            prompt_version = EXCLUDED.prompt_version,
+            run_id = EXCLUDED.run_id,
+            created_at = NOW();
         """
 
         with self.conn.cursor() as cur:
@@ -92,9 +118,9 @@ class EmbeddingClient:
         query_embedding: List[float],
         top_k: int = 10,
     ):
-        query = """
+        query = f"""
         SELECT dataset_id, embedding <-> %s AS distance
-        FROM dataset_embeddings
+        FROM {self.schema}.dataset_recsys_embeddings
         WHERE application = %s
         ORDER BY embedding <-> %s
         LIMIT %s
@@ -104,6 +130,18 @@ class EmbeddingClient:
             cur.execute(f"SET search_path TO {self.schema};")
             cur.execute(query, (query_embedding, application, query_embedding, top_k))
             return cur.fetchall()
+
+    # -------------------------
+    # UTILITIES
+    # -------------------------
+
+    def delete_application(self, application: str) -> int:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                f"DELETE FROM {self.schema}.dataset_recsys_embeddings WHERE application = %s",
+                (application,),
+            )
+            return cur.rowcount
 
     def get_schema_overview(self) -> dict:
         """
@@ -123,7 +161,6 @@ class EmbeddingClient:
         """
 
         schema = {}
-
         with self.conn.cursor() as cur:
             cur.execute(f"SET search_path TO {self.schema};")
             cur.execute(query, (self.schema,))
@@ -131,10 +168,8 @@ class EmbeddingClient:
 
             for row in rows:
                 table_schema, table_name, column_name, data_type, is_nullable, default = row
-
                 if table_name not in schema:
                     schema[table_name] = []
-
                 schema[table_name].append({
                     "column": column_name,
                     "type": data_type,
@@ -143,18 +178,6 @@ class EmbeddingClient:
                 })
 
         return schema
-
-    # -------------------------
-    # UTILITIES
-    # -------------------------
-
-    def delete_application(self, application: str) -> int:
-        with self.conn.cursor() as cur:
-            cur.execute(
-                "DELETE FROM dataset_embeddings WHERE application = %s",
-                (application,),
-            )
-            return cur.rowcount
 
     def check_connection(self) -> bool:
         try:

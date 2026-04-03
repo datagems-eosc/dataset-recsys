@@ -221,7 +221,6 @@ def _save_embedding_metadata_artifact(
         metadata,
         "Saved embedding metadata to",
     )
-    # TODO: replace with persistent metadata storage (linked to embeddings in vector DB)
 
 def _save_embeddings_artifact(
     run_dir: Path,
@@ -233,7 +232,6 @@ def _save_embeddings_artifact(
     output_path = run_dir / filename
     np.save(output_path, embeddings)
     print(f"[TEST] Saved embeddings to: {output_path}")
-    # TODO: replace with vector database storage
 
 # Function to run the full batch rebuild workflow with configurable parameters (scheduler/integration calls)
 def run_full_batch_rebuild(
@@ -251,22 +249,46 @@ def run_full_batch_rebuild(
 
     def generate_embeddings_step(catalog):
         embedding_texts = [build_embedding_text(profile) for profile in catalog]
-        return encode_texts(embedding_texts, model_name=embedding_model)
+        embeddings = encode_texts(embedding_texts, model_name=embedding_model)
+
+        # Save local metadata artifact
+        artifact_name = _artifact_filename("embeddings_metadata")
+        _save_embedding_metadata_artifact(
+            run_dir,
+            artifact_name,
+            catalog,
+            embedding_texts,
+            embedding_model,
+            enrichment_llm=enrichment_llm,
+            prompt_version=prompt_version,
+        )
+
+        # Save local embeddings (.npy)
+        embeddings_filename = _artifact_filename("embeddings", extension="npy")
+        _save_embeddings_artifact(run_dir, embeddings_filename, embeddings)
+
+        # Store embeddings + metadata in Postgres/vector DB
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")  # unique per workflow run
+        dataset_ids = [p.id for p in catalog]
+        embedding_client.store_embeddings(
+            application=application,
+            dataset_ids=dataset_ids,
+            embeddings=embeddings,
+            embedding_texts=embedding_texts,
+            embedding_model=embedding_model,
+            enrichment_llm=enrichment_llm,
+            prompt_version=prompt_version,
+            run_id=run_id,
+        )
+        print(f"[TEST] Stored {len(dataset_ids)} embeddings with metadata (run_id={run_id})")
+
+        return embeddings
 
     def compute_recommendations_step(embeddings, catalog):
         return build_recommendations(catalog, embeddings)
 
     def write_recommendations_step(recommendations):
         recs_client.store_recommendations(application=application, data=recommendations)
-
-    def write_embeddings_step(embeddings, catalog):
-        dataset_ids = [p.id for p in catalog]
-        embedding_client.store_embeddings(
-            application=application,
-            dataset_ids=dataset_ids,
-            embeddings=embeddings,
-            embedding_model=embedding_model,
-        )
 
     workflow = FullBatchRebuildWorkflow(
         fetch_catalog=fetch_catalog,
@@ -279,7 +301,6 @@ def run_full_batch_rebuild(
         generate_embeddings=generate_embeddings_step,
         compute_recommendations=compute_recommendations_step,
         write_recommendations=write_recommendations_step,
-        write_embeddings=write_embeddings_step,
     )
 
     return workflow.run()
@@ -321,7 +342,6 @@ if __name__ == "__main__":
         _save_profiles_artifact(run_dir, artifact_name, processed_catalog)
         return processed_catalog
     
-    # TODO: persist embeddings to a vector database in production and keep local
     # .npy saving only for offline debugging/artifact inspection.
     def generate_embeddings_step(catalog):
         embedding_texts = [build_embedding_text(profile) for profile in catalog]
@@ -340,6 +360,22 @@ if __name__ == "__main__":
         embeddings_filename = _artifact_filename("embeddings", extension="npy")
         _save_embeddings_artifact(run_dir, embeddings_filename, embeddings)
 
+        # Store embeddings in the vector DB (or local file for testing) with metadata linking to dataset IDs
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")  # unique ID per workflow run
+        dataset_ids = [p.id for p in catalog]
+
+        embedding_client.store_embeddings(
+            application=application,
+            dataset_ids=dataset_ids,
+            embeddings=embeddings,
+            embedding_texts=embedding_texts,
+            embedding_model=embedding_model,
+            enrichment_llm=enrichment_llm,
+            prompt_version=prompt_version,
+            run_id=run_id,
+        )
+        print(f"[TEST] Stored {len(dataset_ids)} embeddings with metadata (run_id={run_id})")
+
         return embeddings
 
     def compute_recommendations_step(embeddings, catalog):
@@ -352,16 +388,6 @@ if __name__ == "__main__":
             f"({stored_entities} entities stored)"
         )
 
-    def write_embeddings_step(embeddings, catalog):
-        dataset_ids = [p.id for p in catalog]
-
-        embedding_client.store_embeddings(
-            application=application,
-            dataset_ids=dataset_ids,
-            embeddings=embeddings,
-            embedding_model=embedding_model,
-        )
-
     workflow = FullBatchRebuildWorkflow(
         fetch_catalog=fetch_catalog_step,
         enrich_catalog=partial(enrich_batch, llm=enrichment_llm, prompt_version=prompt_version),
@@ -369,7 +395,6 @@ if __name__ == "__main__":
         generate_embeddings=generate_embeddings_step,
         compute_recommendations=compute_recommendations_step,
         write_recommendations=write_recommendations_step,
-        write_embeddings=write_embeddings_step,
     )
 
     artifacts = workflow.run()

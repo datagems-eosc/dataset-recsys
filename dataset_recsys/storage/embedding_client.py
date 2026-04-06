@@ -27,10 +27,9 @@ class EmbeddingClient:
         self.schema = os.getenv("DATAGEMS_POSTGRES_SCHEMA", "public")
         self.conn.autocommit = True
         with self.conn.cursor() as cur:
-            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {self.schema};")
             cur.execute(f"SET search_path TO {self.schema};")
             cur.execute(f"""
-            CREATE TABLE IF NOT EXISTS {self.schema}.dataset_recsys_embeddings (
+            CREATE TABLE IF NOT EXISTS {self.schema}.dataset_embeddings (
                 application TEXT NOT NULL,
                 dataset_id TEXT NOT NULL,
                 embedding VECTOR(1536) NOT NULL,
@@ -80,7 +79,7 @@ class EmbeddingClient:
         ]
 
         query = f"""
-        INSERT INTO {self.schema}.dataset_recsys_embeddings (
+        INSERT INTO {self.schema}.dataset_embeddings (
             application,
             dataset_id,
             embedding,
@@ -120,7 +119,7 @@ class EmbeddingClient:
     ):
         query = f"""
         SELECT dataset_id, embedding <-> %s AS distance
-        FROM {self.schema}.dataset_recsys_embeddings
+        FROM {self.schema}.dataset_embeddings
         WHERE application = %s
         ORDER BY embedding <-> %s
         LIMIT %s
@@ -137,7 +136,7 @@ class EmbeddingClient:
     def delete_application(self, application: str) -> int:
         with self.conn.cursor() as cur:
             cur.execute(
-                f"DELETE FROM {self.schema}.dataset_recsys_embeddings WHERE application = %s",
+                f"DELETE FROM {self.schema}.dataset_embeddings WHERE application = %s",
                 (application,),
             )
             return cur.rowcount

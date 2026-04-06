@@ -280,6 +280,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Enable port forwarding to Redis before running the app:
 # export KUBECONFIG=~/path/to/.kubeconfig
 # kubectl port-forward pod/dataset-recsys-redis-5547b598b7-mngqk -n athenarc 6380:6379
+# kubectl port-forward pod/dataset-recsys-redis-9b9888c9-bbgvz -n athenarc 6380:6379
+# redis-cli -p 6380
 
 # Run the API with:
 # uvicorn dataset_recsys.api.main:app --reload

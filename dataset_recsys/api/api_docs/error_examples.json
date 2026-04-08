@@ -1,7 +1,7 @@
 {
-  "422": {
-    "summary": "Validation Error - Missing Parameters",
-    "description": "Raised when required query parameters like 'application' or 'entity_id' are missing or invalid.",
+  "422_missing_application": {
+    "summary": "Validation Error - Missing Application",
+    "description": "Raised when the 'application' parameter is missing or invalid.",
     "value": {
       "code": 102,
       "error": "Validation Error",
@@ -9,14 +9,24 @@
         {
           "Key": "query.application",
           "Value": ["field required"]
-        },
+        }
+      ]
+    }
+  },
+  "422_missing_entity_id": {
+    "summary": "Validation Error - Missing Entity ID",
+    "description": "Raised when the 'entity_id' parameter is missing.",
+    "value": {
+      "code": 102,
+      "error": "Validation Error",
+      "message": [
         {
           "Key": "query.entity_id",
           "Value": ["field required"]
         }
       ]
     }
-  },
+  },  
   "401": {
     "summary": "Invalid or Missing Token",
     "description": "Raised when the Bearer token is missing from the Authorization header or has expired.",
@@ -27,20 +37,19 @@
   },
   "403": {
     "summary": "Authorization Failure",
-    "description": "Raised when the user is authenticated but does not have permission to access the requested entity.",
+    "description": "The user is authenticated but does not have permission to view this entity.",
     "value": {
       "code": 403,
       "error": "Forbidden",
-      "message": "User is not authorized to access entity: 9b25bc46-3f61-4ccf-a001-7c28d065c30d"
+      "message": "Insufficient permissions for the requested entity_id."
     }
   },
   "500": {
     "summary": "Internal Server Error",
-    "description": "Raised when an unexpected error occurs, such as a database connection timeout.",
+"description": "An unexpected server-side error occurred.",
     "value": {
       "code": 500,
-      "error": "Internal server error",
-      "message": "An unexpected error occurred: Connection to Redis failed at 127.0.0.1:6380"
+      "error": "Internal server error"
     }
   }
 }

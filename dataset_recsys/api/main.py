@@ -24,6 +24,11 @@ from dataset_recsys.api.logging.exceptions import (
     FailedDependencyException,
 )
 from dataset_recsys.api.security import security
+from dataset_recsys.api.analytical_patterns.ap_handling import (
+    parse_recommendation_request_ap,
+    create_recommendation_response_ap,
+)
+from dataset_recsys.api.analytical_patterns.models import RecsRequest, RecsResponse, Recommendation
 import json
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -43,7 +48,6 @@ app = FastAPI(
     redoc_url="/dataset-recsys/redoc",
 )
 recs_client = RecommendationClient()
-embedding_client = EmbeddingClient()
 # --- Middleware ---
 app.middleware("http")(request_response_logging_middleware)
 app.middleware("http")(correlation_id_middleware)
@@ -57,6 +61,10 @@ app.add_middleware(
 )
 
 DATA_DIR = Path("data")
+AP_DOCS_VALID_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/ap_valid_examples.json")
+AP_DOCS_ERROR_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/ap_error_examples.json")
+AP_REQUEST_EXAMPLE_PATH = Path("dataset_recsys/api/api_docs/ap_request_example.json")
+AP_REQUEST_MATHE_EXAMPLE_PATH = Path("dataset_recsys/api/api_docs/ap_request_pilot.json")
 DOCS_VALID_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/valid_examples.json")
 DOCS_ERROR_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/error_examples.json")
 
@@ -73,15 +81,9 @@ def load_json_file(path: Path) -> dict:
         return {}
 
 examples_data, errors_data = (load_json_file(DOCS_VALID_EXAMPLES_PATH), load_json_file(DOCS_ERROR_EXAMPLES_PATH))
-class Recommendation(BaseModel):
-    id: str = Field(..., description="The recommended entity ID")
-
-class RecsResponse(BaseModel):
-    """Response model for recommendations."""
-    query_time: float = Field(..., description="Time taken to process the recommendation query in seconds")
-    application: str = Field(..., description="The application/dataset for which recommendations are returned")
-    entity_id: str = Field(..., description="The input entity ID for which recommendations were requested")
-    recommendations: List[Recommendation] = Field(..., description="List of recommendations")
+ap_examples_data, ap_errors_data = (load_json_file(AP_DOCS_VALID_EXAMPLES_PATH), load_json_file(AP_DOCS_ERROR_EXAMPLES_PATH))
+ap_request_example = load_json_file(AP_REQUEST_EXAMPLE_PATH)
+ap_request_mathe_example = load_json_file(AP_REQUEST_MATHE_EXAMPLE_PATH)
 
 # --- API Endpoints ---
 @app.post(
@@ -97,19 +99,15 @@ The meaning of *entity* varies by application:
     """,
     tags=["Dataset Recommendation Service"],
     responses={
-        200: {
-            "description": "Successful retrieval of related datasets",
-            "content": {
-                "application/json": {
-                    "examples": examples_data  # Loaded from valid_examples.json
-                }
-            }
-        },
+        200: {"description": "Successful retrieval of related datasets", "content": {"application/json": {"examples": examples_data}}},
         422: {
             "description": "Validation Error",
             "content": {
                 "application/json": {
-                    "examples": errors_data.get("422")
+                    "examples": {
+                        "Missing Application": errors_data.get("422_missing_application"),
+                        "Missing Entity ID": errors_data.get("422_missing_entity_id")
+                    }
                 }
             }
         },
@@ -117,15 +115,19 @@ The meaning of *entity* varies by application:
             "description": "Unauthorized - Invalid or missing token",
             "content": {
                 "application/json": {
-                    "examples": errors_data.get("401")
+                    "examples": {
+                        "Invalid Token": errors_data.get("401")
+                    }
                 }
             }
         },
         403: {
-            "description": "Forbidden - Insufficient permissions for the requested dataset",
+            "description": "Forbidden - Insufficient permissions",
             "content": {
                 "application/json": {
-                    "examples": errors_data.get("403")
+                    "examples": {
+                        "Access Denied": errors_data.get("403")
+                    }
                 }
             }
         },
@@ -133,7 +135,9 @@ The meaning of *entity* varies by application:
             "description": "Internal Server Error",
             "content": {
                 "application/json": {
-                    "examples": errors_data.get("500")
+                    "examples": {
+                        "System Failure": errors_data.get("500")
+                    }
                 }
             }
         }
@@ -141,7 +145,7 @@ The meaning of *entity* varies by application:
 )
 async def get_recommendations(
     application: str = Query(..., description="", enum=SUPPORTED_APPLICATIONS, required=True),
-    entity_id: str = Query(..., description="The item identifier within the selected dataset", required=True),
+    entity_id: str = Query(..., description="The entity identifier within the selected application.", required=True),
     n: int = Query(10, le=20, description="Number of similar items to return"),
     claims: dict = Depends(security.require_role(["user", "dg_user"])),
     token: str = Depends(security.oauth2_scheme),     
@@ -160,11 +164,22 @@ async def get_recommendations(
         Timestamp=datetime.utcnow().isoformat() + "Z",
     )
 
-    # 1. Validate application name
+    # 1. Validate application name and entity_id format
     application = application.lower()
     if application not in SUPPORTED_APPLICATIONS:
         logger.warning(f"Requested application '{application}' is not supported.")
-        raise HTTPException(status_code=404, detail=f"Application '{application}' not found")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, 
+            detail=f"Application '{application}' is not supported."
+        )
+    
+    entity_id = entity_id.strip()
+    if not entity_id:
+        logger.warning("Entity ID is empty after stripping.")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, 
+            detail="Entity ID cannot be empty."
+        )
 
     # 2. Logic for Mathe vs Portal
     # If application is mathe, we force the lookup to the fixed MATHE_DATASET_ID
@@ -177,13 +192,16 @@ async def get_recommendations(
         # 4. Check if user is authorized to even see the source entity
         if lookup_id not in authorized_set:
             logger.warning(f"User {user_subject} not authorized for source entity {lookup_id}")
-            return RecsResponse(dataset=application, iid=entity_id, recommendations=[])
-        
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions for the requested entity_id."
+            )
+
         # 5. Get ranked recs from Redis
         raw_recs = recs_client.get_recommendations(application=application, entity_id=entity_id)
 
         # 6. Filter recs by authorization while PRESERVING ORDER    
-        filtered_recs = [item for item in raw_recs if item in authorized_set]
+        filtered_recs = [Recommendation(id=item) for item in raw_recs if item in authorized_set]
 
         query_time = time.time() - start_time
         logger.info(f"Returning {len(filtered_recs[:n])} recs for {lookup_id} in {query_time:.3f}s")
@@ -193,10 +211,104 @@ async def get_recommendations(
             iid=entity_id,
             recommendations=filtered_recs[:n]
         )        
-
+    except HTTPException:
+        # Re-raise HTTP exceptions so they aren't caught by the general Exception block
+        raise
     except Exception as e:
         logger.error("Unexpected error", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail="Internal Server Error")
+
+@app.post(
+    "/dataset-recsys/recommend/ap", 
+    response_model=RecsResponse,
+    tags=["Analytical Pattern Handling"],
+    summary="Get recommendations via Analytical Pattern",
+description="""
+Processes a graph-based **Analytical Pattern (AP)** request through the following flow:
+
+1. **Extraction**: Identifies the `application`, `n`, and (optionally) `entity_id` from the **DatasetRecommender_Operator** node properties.
+2. **Identification**: 
+   - For **MathE**: Uses the `entity_id` provided directly in the operator's properties.
+   - For **Portal**: Identifies the seed dataset by tracing the incoming **input** edge to the operator.
+3. **Engine Query**: Calls the recommendation engine to find related entities.
+4. **Graph Injection**: Creates new nodes for recommendations:
+   - **MathE**: Generates **cr:FileObject** nodes with unique UUIDs.
+   - **Portal**: Generates **sc:Dataset** nodes.
+5. **Relationship Mapping**: Connects the Operator to each new node via **output** edges, assigning a `rank` property to preserve the order of relevance.
+    """,
+    responses={
+        200: {"description": "Successful graph transformation", "content": {"application/json": {"examples": ap_examples_data}}},
+        403: {
+                "description": "Authorization Failure",
+                "content": {
+                    "application/json": {
+                        "examples": {
+                            "Insufficient Permissions": errors_data.get("403")
+                        }
+                    }
+                }
+            },
+            422: {
+                "description": "Malformed AP Graph",
+                "content": {
+                    "application/json": {
+                        "examples": {
+                            "MathE Missing Property": ap_errors_data.get("422_ap_missing_mathe_id"),
+                            "Portal Missing Edge": ap_errors_data.get("422_ap_missing_input_edge"),
+                            "Operator Missing": ap_errors_data.get("422_ap_missing_operator")
+                        }
+                    }
+                }
+            },
+            500: {
+                "description": "Internal Server Error",
+                "content": {
+                    "application/json": {
+                        "examples": {
+                            "Server Error": errors_data.get("500")
+                        }
+                    }
+                }
+            }
+        }
+)
+async def get_recommendations_ap(
+    analytical_pattern: dict = Body(
+        ...,
+        description="The Analytical Pattern graph in JSON format",
+        openapi_examples={
+            "Portal Request": {
+                "summary": "Standard Portal Request",
+                "description": "Infers entity_id from the incoming 'input' edge.",
+                "value": ap_request_example  # Your existing portal JSON
+            },
+            "MathE Request": {
+                "summary": "MathE Pilot",
+                "description": "Uses the 'entity_id' property from the operator node.",
+                "value": ap_request_mathe_example  # Your MathE-specific JSON
+            }
+        }
+    ),
+    claims: dict = Depends(security.require_role(["user", "dg_user"])),
+    token: str = Depends(security.oauth2_scheme),
+):
+    try:
+        search_request = parse_recommendation_request_ap(analytical_pattern)
+        search_response = await get_recommendations(
+            search_request.application, 
+            search_request.entity_id, 
+            search_request.n, 
+            claims, 
+            token
+        )
+        updated_ap = create_recommendation_response_ap(analytical_pattern, search_response)
+        return updated_ap
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing recommendation AP request: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+
 
 @app.get(
     "/dataset-recsys/health",
@@ -210,6 +322,7 @@ async def health_check():
         is_redis_up = recs_client.check_connection()
 
         # --- pgvector / Postgres check ---
+        embedding_client = EmbeddingClient()
         is_vector_db_up = embedding_client.check_connection()
 
         if not is_redis_up or not is_vector_db_up:
@@ -256,6 +369,7 @@ async def root():
 )
 async def get_schema():
     try:
+        embedding_client = EmbeddingClient()
         schema = embedding_client.get_schema_overview()
         return {"status": "ok", "schema": schema}
     except Exception as e:
@@ -300,8 +414,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     response_content = ValidationErrorResponse(
         code=102, error="Validation Error", message=details
     )
+    # Changed from 400 to 422 to match OpenAPI docs
     return JSONResponse(
-        status_code=status.HTTP_400_BAD_REQUEST, content=response_content.model_dump()
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, 
+        content=response_content.model_dump()
     )
 
 # Enable port forwarding to Redis before running the app:

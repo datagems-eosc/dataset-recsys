@@ -1,5 +1,6 @@
 from ast import Dict
 from email.mime import application
+import profile
 import time
 from datetime import datetime
 import logging
@@ -28,11 +29,11 @@ from dataset_recsys.api.analytical_patterns.ap_handling import (
     parse_recommendation_request_ap,
     create_recommendation_response_ap,
 )
-from dataset_recsys.api.analytical_patterns.models import RecsRequest, RecsResponse, Recommendation
+from dataset_recsys.ingestion.moma_dataset import MomaDataset
+from dataset_recsys.workflows.incremental_update import process_incremental_update
+from dataset_recsys.api.analytical_patterns.models import RecsResponse, Recommendation
 import json
 from pathlib import Path
-from pydantic import BaseModel, Field
-from typing import List
 
 # Configure logging
 setup_logging()
@@ -309,7 +310,50 @@ async def get_recommendations_ap(
         logger.error(f"Error processing recommendation AP request: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
+# --- Dataset Update flow ------
+@app.post("/dataset-recsys/dataset/add", tags=["Dataset Addition"], summary="Add a new dataset to the system")
+async def add_dataset(
+    dataset_id: str,
+    application: str = Query(..., description="", enum=SUPPORTED_APPLICATIONS, required=True),
+    claims: dict = Depends(security.require_role(["user", "dg_user"])),
+    token: str = Depends(security.oauth2_scheme),    
+):
+    user_subject = claims.get("sub")
+    accounting_logger.info(
+        "Dataset Addition Request Received",
+        UserId=user_subject,
+        Action="add_dataset",
+        Resource="DatasetRecommendations",
+        Type="+",
+        Value=1,
+        Timestamp=datetime.utcnow().isoformat() + "Z",
+    )
+    try:
+        # 1. Ingest raw data
+        moma = MomaDataset(user_token=token)
+        moma.get_from_external(dataset_id) 
+        profile = moma.to_dataset_profile()
+        
+        # 2. Process incremental update workflow (enrichment, embedding, vector DB update, recs update)
+        was_added = await process_incremental_update(profile, application)
 
+        if not was_added:
+            return {
+                "status": "ignored", 
+                "message": f"Dataset {dataset_id} is already in the system."
+            }
+            
+        return {
+            "status": "success", 
+            "message": f"Dataset {dataset_id} successfully added and recommendations updated."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding dataset {dataset_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred while adding the dataset: {e}")
+
+# --- Utility Endpoints for Testing and Debugging ------
 @app.get(
     "/dataset-recsys/health",
     summary="Health check",

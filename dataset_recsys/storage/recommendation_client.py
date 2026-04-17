@@ -131,6 +131,31 @@ class RecommendationClient:
             f"under application '{application}'."
         )
 
+    def update_single_entity_recs(self, application: str, entity_id: str, recommendations: Dict[str, float]):
+        """Update only one ZSET and ensure the ID is in the application index."""
+        rec_key = self._recommendation_key(application, entity_id)
+        index_key = self._index_key(application)
+        
+        with self.r.pipeline() as pipe:
+            pipe.sadd(index_key, entity_id)
+            pipe.delete(rec_key) # Refresh this specific entity
+            if recommendations:
+                pipe.zadd(rec_key, recommendations)
+            pipe.execute()
+
+    def update_neighbor_recs(self, application: str, neighbor_id: str, new_entity_id: str, score: float, limit: int = 20):
+        """
+        Inject a new entity into an existing neighbor's recommendation list.
+        Keeps the ZSET capped at 'limit'.
+        """
+        rec_key = self._recommendation_key(application, neighbor_id)
+        
+        with self.r.pipeline() as pipe:
+            pipe.zadd(rec_key, {new_entity_id: score})
+            # Remove elements outside the top N to keep Redis lean
+            pipe.zremrangebyrank(rec_key, 0, -(limit + 1)) 
+            pipe.execute()
+
     # -------------------------
     # QUERYING
     # -------------------------

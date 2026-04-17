@@ -107,9 +107,44 @@ class EmbeddingClient:
 
         return len(rows)
 
+    def upsert_single_embedding(
+        self, 
+        application: str, 
+        dataset_id: str, 
+        embedding: List[float], 
+        embedding_input: str,
+        metadata: dict
+    ) -> None:
+        """Upsert a single vector and metadata."""
+        query = f"""
+        INSERT INTO {self.schema}.dataset_embeddings (
+            application, dataset_id, embedding, embedding_input, 
+            embedding_model, enrichment_llm, prompt_version, run_id
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (dataset_id) 
+        DO UPDATE SET 
+            embedding = EXCLUDED.embedding,
+            embedding_input = EXCLUDED.embedding_input,
+            created_at = NOW();
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(query, (
+                application, dataset_id, embedding, embedding_input,
+                metadata.get("model"), metadata.get("llm"), 
+                metadata.get("prompt"), metadata.get("run_id")
+            ))
+
     # -------------------------
     # QUERYING
     # -------------------------
+
+    def exists(self, dataset_id: str) -> bool:
+        """Check if a dataset_id already has an embedding record."""
+        query = f"SELECT 1 FROM {self.schema}.dataset_embeddings WHERE dataset_id = %s LIMIT 1;"
+        with self.conn.cursor() as cur:
+            cur.execute(query, (dataset_id,))
+            return cur.fetchone() is not None
 
     def find_similar(
         self,

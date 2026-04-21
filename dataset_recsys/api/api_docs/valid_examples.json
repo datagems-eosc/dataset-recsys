@@ -1,10 +1,8 @@
 {
   "Dataset Relationship Success": {
     "summary": "Successful Entity-to-Entity recommendation",
-    "description": "Returns a list of authorized entity IDs related to the input entity within a specific application.",
+    "description": "Returns a list of related entity IDs for the given entity.",
     "value": {
-      "query_time": 0.0125,
-      "application": "portal",
       "entity_id": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
       "recommendations": [
         {
@@ -21,10 +19,8 @@
   },
   "Empty Recommendations": {
     "summary": "No Recommendations Found",
-    "description": "The entity exists and is authorized, but no relationships are defined in the database.",
+    "description": "The entity exists, but no related entities are found.",
     "value": {
-      "query_time": 0.005,
-      "application": "mathe",
       "entity_id": "non-existent-or-unrelated.pdf",
       "recommendations": []
     }

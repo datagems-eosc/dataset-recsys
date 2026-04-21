@@ -29,8 +29,7 @@
             "properties": {
                 "name": "GetRecommendations Operator",
                 "command": "get_recommendations",
-                "n": 10,
-                "application": "portal"
+                "n": 10
             }
         },
         {

@@ -1,7 +1,7 @@
 {
   "Portal Request Success": {
-    "summary": "Successful recommendation for the portal application",
-    "description": "Returns a list of authorized entity IDs related to the input entity within a specific application.",
+    "summary": "Successful recommendation for the DataGEMS portal",
+    "description": "Returns a graph enriched with recommended dataset nodes linked to the operator through ranked output edges.",
     "value": {    
         "nodes": [
             {
@@ -42,8 +42,16 @@
                 "name": "GetRecommendations Operator",
                 "description": "Dataset-to-Dataset recommender operator.",
                 "command": "get_recommendations",
-                "n": 2,
-                "application": "portal"
+                "n": 2
+                }
+            },
+            {
+                "id": "seed-dataset-001",
+                "labels": [
+                "sc:Dataset"
+                ],
+                "properties": {
+                "name": "Seed Dataset"
                 }
             },
             {
@@ -88,114 +96,10 @@
                 ]
             },
             {
-                "from": "operator-recommender",
-                "to": "recommended-entity-1",
-                "labels": [
-                "output"
-                ],
-                "properties": {
-                "rank": 1
-                }
-            },
-            {
-                "from": "operator-recommender",
-                "to": "recommended-entity-2",
-                "labels": [
-                "output"
-                ],
-                "properties": {
-                "rank": 2
-                }
-            }
-        ]
-    }
-  },
-  "Mathe Request Success": {
-    "summary": "Successful recommendation for the mathe pilot",
-    "description": "Returns a list of authorized entity IDs related to the input entity within a specific application.",
-    "value": {    
-        "nodes": [
-            {
-                "id": "user-session-123",
-                "labels": [
-                "User"
-                ]
-            },
-            {
-                "id": "task-rec-001",
-                "labels": [
-                "Task"
-                ],
-                "properties": {
-                "name": "Get recommendations",
-                "description": "Retrieve the top-N recommendations for a given dataset."
-                }
-            },
-            {
-                "id": "pattern-ds-recs",
-                "labels": [
-                "Analytical_Pattern"
-                ],
-                "properties": {
-                "name": "Dataset-to-Dataset Recommendations AP",
-                "description": "Retrieve top-N recommendations for a given dataset.",
-                "process": "recommend",
-                "publishedDate": "2026-01-21",
-                "startTime": "10:00:00"
-                }
-            },
-            {
-                "id": "operator-recommender",
-                "labels": [
-                "DatasetRecommender_Operator"
-                ],
-                "properties": {
-                "name": "GetRecommendations Operator",
-                "description": "Dataset-to-Dataset recommender operator.",
-                "command": "get_recommendations",
-                "n": 2,
-                "application": "mathe"
-                }
-            },
-            {
-                "id": "recommended-entity-1",
-                "labels": [
-                "cr:FileObject"
-                ],
-                "properties": {
-                "name": "Recommended Entity 1"
-                }
-            },
-            {
-                "id": "recommended-entity-2",
-                "labels": [
-                "cr:FileObject"
-                ],
-                "properties": {
-                "name": "Recommended Entity 2"
-                }
-            }
-        ],
-        "edges": [
-            {
-                "from": "user-session-123",
-                "to": "task-rec-001",
-                "labels": [
-                "request"
-                ]
-            },
-            {
-                "from": "task-rec-001",
-                "to": "pattern-ds-recs",
-                "labels": [
-                "is_accomplished"
-                ]
-            },
-            {
-                "from": "pattern-ds-recs",
+                "from": "seed-dataset-001",
                 "to": "operator-recommender",
                 "labels": [
-                "consist_of"
+                "input"
                 ]
             },
             {

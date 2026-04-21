@@ -30,13 +30,11 @@
         "name": "GetRecommendations Operator",
         "description": "Dataset-to-Dataset recommender operator.",
         "command": "get_recommendations",
-        "n": 2,
-        "application": "mathe",
-        "entity_id": "6.pdf"
+        "n": 2
       }
     },
     {
-      "id": "b551f361-3f61-4ccf-a001-7c28d065c30d",
+      "id": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
       "labels": ["sc:Dataset"],
       "properties": {
         "description": "The seed dataset used as the basis for recommendations."
@@ -60,7 +58,7 @@
       "labels": ["consist_of"]
     },
     {
-      "from": "b551f361-3f61-4ccf-a001-7c28d065c30d",
+      "from": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
       "to": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
       "labels": ["input"]
     }

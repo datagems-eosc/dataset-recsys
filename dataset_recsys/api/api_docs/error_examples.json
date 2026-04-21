@@ -1,21 +1,7 @@
 {
-  "422_missing_application": {
-    "summary": "Validation Error - Missing Application",
-    "description": "Raised when the 'application' parameter is missing or invalid.",
-    "value": {
-      "code": 102,
-      "error": "Validation Error",
-      "message": [
-        {
-          "Key": "query.application",
-          "Value": ["field required"]
-        }
-      ]
-    }
-  },
   "422_missing_entity_id": {
     "summary": "Validation Error - Missing Entity ID",
-    "description": "Raised when the 'entity_id' parameter is missing.",
+    "description": "Raised when the 'entity_id' query parameter is missing.",
     "value": {
       "code": 102,
       "error": "Validation Error",
@@ -46,7 +32,7 @@
   },
   "500": {
     "summary": "Internal Server Error",
-"description": "An unexpected server-side error occurred.",
+    "description": "An unexpected server-side error occurred.",
     "value": {
       "code": 500,
       "error": "Internal server error"

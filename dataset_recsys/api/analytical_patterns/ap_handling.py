@@ -1,12 +1,15 @@
 """Handling Analytical Patterns."""
 
-from typing import Dict, Union, List
-import uuid
-from fastapi import HTTPException, status # Add these imports
+from typing import Dict, Union
+
+import copy
+
+from fastapi import HTTPException, status
+
 from dataset_recsys.api.analytical_patterns.models import RecsRequest, RecsResponse
 
-OPTIONAL_SEARCH_ARGS = ["n"]  # Extendable list of optional arguments for recommendations
-MATHE_DATASET_ID = "b551f361-3f61-4ccf-a001-7c28d065c30d"
+OPTIONAL_SEARCH_ARGS = ["n"]
+MATHE_DATASET_ID = "b551f361-3f61-4ccf-a001-7c28d065c30d" # for testing purposes
 
 def get_node_from_label(analytical_pattern: Dict, node_label: str) -> Union[Dict, None]:
     """Returns the first node from the analytical pattern that has the given label.
@@ -55,72 +58,45 @@ def remove_node(analytical_pattern: Dict, remove_node_id: str) -> Dict:
 
 def parse_recommendation_request_ap(analytical_pattern: Dict) -> RecsRequest:
     """
-    Parses the AP JSON to extract recommendation parameters.
+    Parses a DataGEMS AP JSON to extract recommendation parameters.
     Raises 422 if the graph structure is invalid.
     """
-    # Access the nested 'ap' key from the JSON
-    # ap_data = analytical_pattern.get("ap", {})
+    # Access the nested ap key from the JSON body
+    # ap = analytical_pattern.get("ap", {})
+    
     nodes = analytical_pattern.get("nodes", [])
     edges = analytical_pattern.get("edges", [])
 
-    # 1. Locate the Operator Node
     operator_node = next(
-        (n for n in nodes if "DatasetRecommender_Operator" in n["labels"]), 
-        None
+        (n for n in nodes if "DatasetRecommender_Operator" in n["labels"]),
+        None,
     )
     if not operator_node:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Malformed AP Graph: Operator 'DatasetRecommender_Operator' not found."
+            detail="Malformed AP Graph: Operator 'DatasetRecommender_Operator' not found.",
         )
 
     operator_id = operator_node["id"]
     props = operator_node.get("properties", {})
-    
-    # 2. Extract 'n' and 'iid' from operator properties
-    # In your JSON, seed_entity_id is the 'iid' for the RecsRequest
-    n_value = props.get("n", 10) # check for 'n' in properties, if not found default to 10
-    application = props.get("application")
-    if not application:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Malformed AP Graph: Operator missing 'application' in properties."
-        )
-    
-    if application == "mathe":
-        if not props.get("entity_id"):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Malformed AP Graph: For 'mathe' application, 'entity_id' must be provided in operator properties."
-            )
+    n_value = props.get("n", 10)
 
-        return RecsRequest(
-            application=application,
-            entity_id=props.get("entity_id"),
-            n=n_value
-        )
-
-    # 3. Extract 'dataset_id' from the incoming 'input' edge
-    # This finds the node ID of the sc:Dataset connected to the operator
     input_edge = next(
         (e for e in edges if e["to"] == operator_id and "input" in e["labels"]),
-        None
+        None,
     )
-    
     if not input_edge:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Malformed AP Graph: No input dataset linked to the Recommender Operator."
+            detail="Malformed AP Graph: No input dataset linked to the Recommender Operator.",
         )
-    
-    # The 'from' field in the edge is the UUID of the sc:Dataset node
+
+    # The 'from' field of the input edge is the UUID of the sc:Dataset node that serves as the seed for recommendations
     entity_id = input_edge["from"]
 
-    # 4. Instantiate the Pydantic Model
     return RecsRequest(
-        application=application,
         entity_id=entity_id,
-        n=n_value
+        n=n_value,
     )
 
 def create_recommendation_response_ap(
@@ -128,55 +104,43 @@ def create_recommendation_response_ap(
     search_response: RecsResponse
 ) -> Dict:
     """
-    Updates the Analytical Pattern with recommendations.
+    Updates a DataGEMS AP with dataset recommendations.
 
-    For 'mathe':
-        - Generates cr:FileObject nodes with unique IDs (UUIDs)
-
-    For other applications:
-        - Generates sc:Dataset nodes
+    Recommended datasets are added as `sc:Dataset` nodes and linked to the
+    recommender operator through ranked `output` edges.
     """
+    analytical_pattern = copy.deepcopy(analytical_pattern)
     # Locate operator
     operator_node = get_node_from_label(analytical_pattern, "DatasetRecommender_Operator")
     if not operator_node:
-        # If it was there during parsing but gone now, something is very wrong
+        # If it was there during parsing but gone now, something went very wrong during processing
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Malformed AP Graph: DatasetRecommender_Operator node disappeared during processing."
         )
     
     op_id = operator_node["id"]
-    props = operator_node.get("properties", {})
-    application = props.get("application")
-    
+
     # Cleanup old output nodes
-    old_output_nodes = [e["to"] for e in analytical_pattern["edges"] 
-                        if e["from"] == op_id and "output" in e["labels"]]
+    old_output_nodes = [
+        e["to"]
+        for e in analytical_pattern["edges"]
+        if e["from"] == op_id and "output" in e["labels"]
+    ]
     for node_id in old_output_nodes:
         analytical_pattern = remove_node(analytical_pattern, node_id)
     
     # Inject recommendations
     for rank, rec in enumerate(search_response.recommendations, start=1):
-        if application == "mathe":
-            node_id = str(uuid.uuid4())  # unique graph ID
-            new_node = {
-                "id": node_id,
-                "labels": ["cr:FileObject"],
-                "properties": {
-                    "fileName": rec.id,  # keep original file name as reference
-                    "rank": rank
-                }
+        node_id = rec.id
+        new_node = {
+            "id": node_id,
+            "labels": ["sc:Dataset"],
+            "properties": {
+                "name": f"Recommended Entity {rank}"
             }
-        else:
-            node_id = rec.id
-            new_node = {
-                "id": node_id,
-                "labels": ["sc:Dataset"],
-                "properties": {
-                    "name": f"Recommended Entity {rank}"
-                }
-            }
-        
+        }
+
         analytical_pattern["nodes"].append(new_node)
 
         # Add output edge
@@ -186,38 +150,25 @@ def create_recommendation_response_ap(
             "labels": ["output"],
             "properties": {"rank": rank}
         })
-    
-    # Mathe-specific cleanup
-    if application == "mathe":
-        # Remove input edges
-        analytical_pattern["edges"] = [
-            e for e in analytical_pattern["edges"] if "input" not in e["labels"]
-        ]
-        # Remove any sc:Dataset nodes (seed dataset or others)
-        analytical_pattern["nodes"] = [
-            n for n in analytical_pattern["nodes"] if "sc:Dataset" not in n["labels"]
-            or n["id"] == op_id  # keep operator node if it was mislabeled
-        ]
-    else:
-        # Step 1: find input edges
-        input_edges = [
-            e for e in analytical_pattern["edges"]
-            if "input" in e["labels"]
-        ]
 
-        # Step 2: collect dataset IDs used as input
-        input_node_ids = {e["from"] for e in input_edges}
+    # Remove input nodes and edges to avoid exposing the input dataset in the response (since the operator has already consumed it)
+    input_edges = [
+        e for e in analytical_pattern["edges"]
+        if "input" in e["labels"]
+    ]
 
-        # Step 3: remove input edges
-        analytical_pattern["edges"] = [
-            e for e in analytical_pattern["edges"]
-            if "input" not in e["labels"]
-        ]
+    input_node_ids = {e["from"] for e in input_edges}
 
-        # Step 4: remove input dataset nodes
-        analytical_pattern["nodes"] = [
-            n for n in analytical_pattern["nodes"]
-            if n["id"] not in input_node_ids
-        ]
+    # Remove input edges
+    analytical_pattern["edges"] = [
+        e for e in analytical_pattern["edges"]
+        if "input" not in e["labels"]
+    ]
+
+    # Remove input nodes
+    analytical_pattern["nodes"] = [
+        n for n in analytical_pattern["nodes"]
+        if n["id"] not in input_node_ids
+    ]
     
     return analytical_pattern

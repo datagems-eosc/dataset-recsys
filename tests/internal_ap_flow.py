@@ -1,10 +1,37 @@
-import time
+"""
+DEV-ONLY TEST FILE: It bypasses authentication and authorization.
+
+Used for:
+- testing recommendation logic without auth
+- testing Analytical Pattern transformations locally
+
+How to run locally:
+1. Ensure Redis is reachable locally, e.g. through port-forward:
+   kubectl port-forward svc/dataset-recsys-redis -n athenarc 6380:6379
+
+2. Start this test app (not the main API):
+   REDIS_HOST=localhost REDIS_PORT=6380 uvicorn internal_ap_flow:app --reload --app-dir tests
+
+3. Test the direct recommendation flow:
+   curl -X POST "http://127.0.0.1:8000/test/recommend" \
+     -H "Content-Type: application/json" \
+     -d '{"entity_id": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f", "n": 5}'
+
+4. Test the full AP flow:
+   curl -X POST "http://127.0.0.1:8000/test/recommend/ap" \
+     -H "Content-Type: application/json" \
+     -d @tests/ap_request.json
+"""
+
 from typing import Dict
+
 from fastapi import FastAPI, HTTPException
-import time
-from fastapi import FastAPI, HTTPException
+
 from dataset_recsys.api.analytical_patterns.models import Recommendation, RecsRequest, RecsResponse
-from dataset_recsys.api.analytical_patterns.ap_handling import parse_recommendation_request_ap, create_recommendation_response_ap
+from dataset_recsys.api.analytical_patterns.ap_handling import (
+    parse_recommendation_request_ap,
+    create_recommendation_response_ap,
+)
 from dataset_recsys.storage.recommendation_client import RecommendationClient
 
 app = FastAPI()
@@ -14,39 +41,29 @@ async def internal_recommend_logic(request: RecsRequest):
     """
     The core recommendation engine logic without authorization checks.
     """
-    start_time = time.time()
-    application = request.application
     entity_id = request.entity_id
     n = request.n
 
     try:
-        # Fetch from your Redis/Database client
-        recs_set = recs_client.get_recommendations(application=application, entity_id=entity_id)
-        
+        recs_set = recs_client.get_recommendations(application="portal", entity_id=entity_id)
+
         if not recs_set:
             return RecsResponse(
-                query_time=time.time() - start_time, 
-                application=application,
                 entity_id=entity_id,
                 recommendations=[]
             )
 
         recs_list = list(recs_set)
-        query_time = time.time() - start_time
-        
-        print(f"Generated {len(recs_list)} recommendations for {application}:{entity_id} in {query_time:.2f} seconds.")
-        print(f"Recommendations: {recs_list[:n]}")  # Print only top N for brevity
-        
+
+        print(f"Generated {len(recs_list)} recommendations for {entity_id}.")
+        print(f"Recommendations: {recs_list[:n]}")
+
         recs = [Recommendation(id=rec_id) for rec_id in recs_list[:n]]
-        
-        # Build the response model
-        final_response = RecsResponse(
-            query_time=query_time,
-            application=application,
+
+        return RecsResponse(
             entity_id=entity_id,
-            recommendations=recs  # Return only top N recommendations
+            recommendations=recs
         )
-        return final_response
 
     except Exception as e:
         print(f"Error in recommendation logic: {e}")

@@ -1,15 +1,7 @@
 {
-    "422_ap_missing_mathe_id": {
-        "summary": "Malformed AP - MathE ID Missing",
-        "description": "Raised when application is 'mathe' but no entity_id is found in the operator properties.",
-        "value": {
-        "code": 422,
-        "error": "Malformed AP Graph: For 'mathe' application, 'entity_id' must be provided in operator properties."
-        }
-    },
     "422_ap_missing_input_edge": {
         "summary": "Malformed AP - Missing Input Edge",
-        "description": "Raised when application is 'portal' but the operator has no incoming 'input' edge to provide a dataset ID.",
+        "description": "Raised when the operator has no incoming 'input' edge to provide a dataset ID.",
         "value": {
         "code": 422,
         "error": "Malformed AP Graph: No input dataset linked to the Recommender Operator."

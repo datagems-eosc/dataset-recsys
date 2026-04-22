@@ -149,12 +149,22 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Health check
 # curl -X GET "http://127.0.0.1:8000/dataset-recsys/health" -v
 
-# Portal recommendations
-# curl -X POST "http://127.0.0.1:8000/dataset-recsys/recommend?entity_id=<DATASET_ID>&n=5" \
-#      -H "Authorization: Bearer YOUR_TOKEN_HERE"
-
-# Dataset id: b551f361-3f61-4ccf-a001-7c28d065c30d
-# User token: ?
+#
+# Example Portal dataset id for testing:
+# 9b25bc46-8bd3-4f7f-94b4-52dbc38c130f
+#
+# To obtain a Bearer token (valid for a few minutes), run:
+# TOKEN=$(curl --location "$DATAGEMS_AUTH_URL" \
+#   --header 'Content-Type: application/x-www-form-urlencoded' \
+#   --data-urlencode "grant_type=password" \
+#   --data-urlencode "client_id=$DATAGEMS_CLIENT_ID" \
+#   --data-urlencode "username=$DATAGEMS_USER" \
+#   --data-urlencode "password=$DATAGEMS_PASSWORD" \
+#   --data-urlencode "scope=$DATAGEMS_SCOPE" | jq -r '.access_token')
+#
+# Then call the API with:
+# curl -X POST "http://127.0.0.1:8000/dataset-recsys/recommend?entity_id=9b25bc46-8bd3-4f7f-94b4-52dbc38c130f&n=5" \
+#      -H "Authorization: Bearer $TOKEN"
 
 # MathE recommendations
 # curl -X POST "http://127.0.0.1:8000/dataset-recsys/mathe/recommend?entity_id=6.pdf&n=5"

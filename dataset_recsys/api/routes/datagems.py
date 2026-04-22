@@ -141,7 +141,7 @@ async def get_recommendations(
             application="portal", entity_id=request.entity_id
         )
 
-        filtered_recs = [Recommendation(id=item) for item in raw_recs if item in authorized_set]
+        filtered_recs = [Recommendation(entity_id=item) for item in raw_recs if item in authorized_set]
 
         query_time = time.time() - start_time
         log.info(
@@ -244,12 +244,12 @@ async def get_recommendations_ap(
     summary="Add a new dataset to the system",
 )
 async def add_dataset(
-    dataset_id: str = Query(..., description="The dataset identifier to add."),
+    entity_id: str = Query(..., description="The dataset identifier to add."),
     claims: dict = Depends(security.require_role(["user", "dg_user"])),
     token: str = Depends(security.oauth2_scheme),
 ):
     user_subject = claims.get("sub")
-    log = logger.bind(item_id=dataset_id, UserId=user_subject)
+    log = logger.bind(item_id=entity_id, UserId=user_subject)
 
     accounting_logger.info(
         "Dataset Addition Request Received",
@@ -257,13 +257,13 @@ async def add_dataset(
         Action="add_dataset",
         Resource="dataset2dataset_recommender",
         Domain="datagems",
-        ItemId=dataset_id,
+        ItemId=entity_id,
         Timestamp=datetime.utcnow().isoformat() + "Z",
     )
 
-    dataset_id = dataset_id.strip()
-    if not dataset_id:
-        log.warning("Missing dataset_id.")
+    entity_id = entity_id.strip()
+    if not entity_id:
+        log.warning("Missing entity_id.")
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Dataset ID is required.",
@@ -271,7 +271,7 @@ async def add_dataset(
 
     try:
         moma = MomaDataset(user_token=token)
-        moma.get_from_external(dataset_id)
+        moma.get_from_external(entity_id)
         profile = moma.to_dataset_profile()
 
         was_added = await process_incremental_update(profile, "portal")
@@ -279,17 +279,17 @@ async def add_dataset(
         if not was_added:
             return {
                 "status": "ignored",
-                "message": f"Dataset {dataset_id} is already in the system.",
+                "message": f"Dataset {entity_id} is already in the system.",
             }
 
         return {
             "status": "success",
-            "message": f"Dataset {dataset_id} successfully added and recommendations updated.",
+            "message": f"Dataset {entity_id} successfully added and recommendations updated.",
         }
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Error adding dataset {dataset_id}: {e}", exc_info=True)
+        log.error(f"Error adding dataset {entity_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"An unexpected error occurred while adding the dataset: {e}",

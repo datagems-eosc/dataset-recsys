@@ -6,13 +6,13 @@
       "entity_id": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
       "recommendations": [
         {
-          "id": "67f22d91-2b1a-4e8c-8f92-52dbc38c130f"
+          "entity_id": "67f22d91-2b1a-4e8c-8f92-52dbc38c130f"
         },
         {
-          "id": "climate-data-v2"
+          "entity_id": "climate-data-v2"
         },
         {
-          "id": "european-soil-maps-2023"
+          "entity_id": "european-soil-maps-2023"
         }
       ]
     }

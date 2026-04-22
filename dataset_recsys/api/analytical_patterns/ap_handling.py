@@ -9,7 +9,6 @@ from fastapi import HTTPException, status
 from dataset_recsys.api.analytical_patterns.models import RecsRequest, RecsResponse
 
 OPTIONAL_SEARCH_ARGS = ["n"]
-MATHE_DATASET_ID = "b551f361-3f61-4ccf-a001-7c28d065c30d" # for testing purposes
 
 def get_node_from_label(analytical_pattern: Dict, node_label: str) -> Union[Dict, None]:
     """Returns the first node from the analytical pattern that has the given label.
@@ -132,7 +131,7 @@ def create_recommendation_response_ap(
     
     # Inject recommendations
     for rank, rec in enumerate(search_response.recommendations, start=1):
-        node_id = rec.id
+        node_id = rec.entity_id
         new_node = {
             "id": node_id,
             "labels": ["sc:Dataset"],

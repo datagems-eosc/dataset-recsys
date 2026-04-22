@@ -136,7 +136,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # conda activate <env_name>
 
 # Run the API
-# REDIS_HOST=localhost REDIS_PORT=6380 uvicorn dataset_recsys.api.main:app --reload
+# OIDC_AUDIENCE=dataset-recsys-api REDIS_HOST=localhost REDIS_PORT=6380 uvicorn dataset_recsys.api.main:app --reload
+# OIDC_AUDIENCE=query-recommender REDIS_HOST=localhost REDIS_PORT=6380 uvicorn dataset_recsys.api.main:app --reload
 
 # Open docs:
 # http://127.0.0.1:8000/dataset-recsys/docs
@@ -165,6 +166,11 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Then call the API with:
 # curl -X POST "http://127.0.0.1:8000/dataset-recsys/recommend?entity_id=9b25bc46-8bd3-4f7f-94b4-52dbc38c130f&n=5" \
 #      -H "Authorization: Bearer $TOKEN"
+
+# curl -X POST "http://127.0.0.1:8000/dataset-recsys/recommend/ap" \
+#   -H "Authorization: Bearer $TOKEN" \
+#   -H "Content-Type: application/json" \
+#   -d @dataset_recsys/api/api_docs/ap_request_example.json
 
 # MathE recommendations
 # curl -X POST "http://127.0.0.1:8000/dataset-recsys/mathe/recommend?entity_id=6.pdf&n=5"

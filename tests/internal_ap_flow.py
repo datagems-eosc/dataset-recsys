@@ -58,7 +58,7 @@ async def internal_recommend_logic(request: RecsRequest):
         print(f"Generated {len(recs_list)} recommendations for {entity_id}.")
         print(f"Recommendations: {recs_list[:n]}")
 
-        recs = [Recommendation(id=rec_id) for rec_id in recs_list[:n]]
+        recs = [Recommendation(entity_id=rec_id) for rec_id in recs_list[:n]]
 
         return RecsResponse(
             entity_id=entity_id,

@@ -14,7 +14,7 @@ class RecsRequest(BaseModel):
     )
 
 class Recommendation(BaseModel):
-    id: str = Field(..., description="The recommended entity ID")
+    entity_id: str = Field(..., description="The recommended entity ID")
 
 class RecsResponse(BaseModel):
     # query_time: float = Field(

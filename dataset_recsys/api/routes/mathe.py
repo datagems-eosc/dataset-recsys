@@ -54,7 +54,7 @@ async def get_recommendations(
             application="mathe", entity_id=entity_id
         )
 
-        filtered_recs = [Recommendation(id=item) for item in raw_recs]
+        filtered_recs = [Recommendation(entity_id=item) for item in raw_recs]
 
         query_time = time.time() - start_time
         log.info(

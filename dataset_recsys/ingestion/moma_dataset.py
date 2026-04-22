@@ -71,10 +71,10 @@ class MomaDataset:
         
         # Extract fields following the logic in fetch_gems_datasets.py
         title = self.name or props.get("name", "")
-        headline = props.get("dg:headline", "")
+        headline = props.get("headline", "")
         
         # Handle keywords (ensuring it's a string)
-        kw = props.get("dg:keywords", "")
+        kw = props.get("keywords", "")
         if isinstance(kw, list):
             keywords = ", ".join(filter(None, kw))
         else:
@@ -86,6 +86,6 @@ class MomaDataset:
             headline=headline.strip() if headline.lower() != title.lower() else "",
             description=props.get("description", "").strip(),
             keywords=keywords,
-            field_of_science=str(props.get("dg:fieldOfScience", "")),
+            field_of_science=str(props.get("fieldOfScience", "")),
             catalog_summary=""  # This will be filled by the LLM enrichment step
         )

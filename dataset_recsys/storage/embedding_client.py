@@ -32,7 +32,7 @@ class EmbeddingClient:
             CREATE TABLE IF NOT EXISTS {self.schema}.dataset_embeddings (
                 application TEXT NOT NULL,
                 dataset_id TEXT NOT NULL,
-                embedding VECTOR(1536) NOT NULL,
+                embedding VECTOR(768) NOT NULL,
                 embedding_input TEXT,
                 embedding_model TEXT NOT NULL,
                 enrichment_llm TEXT,
@@ -152,15 +152,17 @@ class EmbeddingClient:
         query_embedding: List[float],
         top_k: int = 10,
     ):
+        # Using <=> for cosine distance. Similarity = 1 - (A <=> B)
         query = f"""
-        SELECT dataset_id, embedding <-> %s AS distance
+        SELECT dataset_id, 1 - (embedding <=> %s) AS similarity
         FROM {self.schema}.dataset_embeddings
         WHERE application = %s
-        ORDER BY embedding <-> %s
+        ORDER BY embedding <=> %s
         LIMIT %s
         """
 
         with self.conn.cursor() as cur:
+            # Note: query_embedding must be a list or np.array
             cur.execute(query, (query_embedding, application, query_embedding, top_k))
             return cur.fetchall()
 

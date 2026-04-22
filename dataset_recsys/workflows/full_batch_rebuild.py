@@ -235,7 +235,7 @@ def _save_embeddings_artifact(
 
 # Function to run the full batch rebuild workflow with configurable parameters (scheduler/integration calls)
 def run_full_batch_rebuild(
-    redis_host="localhost", # TODO: replace with actual Redis host in production (e.g., from env var or config)
+    redis_host="localhost",
     redis_port=6380,
     redis_db=0,
     application: str = "ds2ds",
@@ -267,6 +267,16 @@ def run_full_batch_rebuild(
         embeddings_filename = _artifact_filename("embeddings", extension="npy")
         _save_embeddings_artifact(run_dir, embeddings_filename, embeddings)
 
+        return {
+            "embeddings": embeddings,
+            "texts": embedding_texts,
+            "catalog": catalog,
+        }
+    
+    def write_embeddings_step(payload):
+        embeddings = payload["embeddings"]
+        embedding_texts = payload["texts"]
+        catalog = payload["catalog"]
         # Store embeddings + metadata in Postgres/vector DB
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")  # unique per workflow run
         dataset_ids = [p.id for p in catalog]
@@ -274,17 +284,16 @@ def run_full_batch_rebuild(
             application=application,
             dataset_ids=dataset_ids,
             embeddings=embeddings,
-            embedding_texts=embedding_texts,
+            embedding_inputs=embedding_texts,
             embedding_model=embedding_model,
             enrichment_llm=enrichment_llm,
             prompt_version=prompt_version,
             run_id=run_id,
         )
-        print(f"[TEST] Stored {len(dataset_ids)} embeddings with metadata (run_id={run_id})")
+        print(f"[TEST] Stored {len(dataset_ids)} embeddings with metadata (run_id={run_id})")        
 
-        return embeddings
-
-    def compute_recommendations_step(embeddings, catalog):
+    def compute_recommendations_step(payload, catalog):
+        embeddings = payload["embeddings"]
         return build_recommendations(catalog, embeddings)
 
     def write_recommendations_step(recommendations):
@@ -299,6 +308,7 @@ def run_full_batch_rebuild(
         ),
         preprocess_catalog=preprocess_catalog,
         generate_embeddings=generate_embeddings_step,
+        write_embeddings=write_embeddings_step,
         compute_recommendations=compute_recommendations_step,
         write_recommendations=write_recommendations_step,
     )
@@ -359,16 +369,24 @@ if __name__ == "__main__":
 
         embeddings_filename = _artifact_filename("embeddings", extension="npy")
         _save_embeddings_artifact(run_dir, embeddings_filename, embeddings)
+        return {
+            "embeddings": embeddings,
+            "texts": embedding_texts,
+            "catalog": catalog,
+        }   
 
-        # Store embeddings in the vector DB (or local file for testing) with metadata linking to dataset IDs
-        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")  # unique ID per workflow run
+    def write_embeddings_step(payload):
+        embeddings = payload["embeddings"]
+        embedding_texts = payload["texts"]
+        catalog = payload["catalog"]
+        # Store embeddings + metadata in Postgres/vector DB
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")  # unique per workflow run
         dataset_ids = [p.id for p in catalog]
-
         embedding_client.store_embeddings(
             application=application,
             dataset_ids=dataset_ids,
             embeddings=embeddings,
-            embedding_texts=embedding_texts,
+            embedding_inputs=embedding_texts,
             embedding_model=embedding_model,
             enrichment_llm=enrichment_llm,
             prompt_version=prompt_version,
@@ -376,9 +394,8 @@ if __name__ == "__main__":
         )
         print(f"[TEST] Stored {len(dataset_ids)} embeddings with metadata (run_id={run_id})")
 
-        return embeddings
-
-    def compute_recommendations_step(embeddings, catalog):
+    def compute_recommendations_step(payload, catalog):
+        embeddings = payload["embeddings"]
         return build_recommendations(catalog, embeddings)
 
     def write_recommendations_step(recommendations):
@@ -393,6 +410,7 @@ if __name__ == "__main__":
         enrich_catalog=partial(enrich_batch, llm=enrichment_llm, prompt_version=prompt_version),
         preprocess_catalog=preprocess_catalog_step,
         generate_embeddings=generate_embeddings_step,
+        write_embeddings=write_embeddings_step,
         compute_recommendations=compute_recommendations_step,
         write_recommendations=write_recommendations_step,
     )

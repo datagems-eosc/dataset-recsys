@@ -15,12 +15,41 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import requests
+import os
+from dotenv import load_dotenv
 
 BASE_URL = "https://datagems-dev.scayle.es/dmm/api/v1"
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OUTPUT_DIR = REPO_ROOT / "data" / "gems_datasets_metadata" / "moma"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# For local testing we do load environment variables from a .env file, but in production these should be set in the environment directly (e.g. via Kubernetes secrets or similar).
+load_dotenv()
+
+def get_access_token() -> str:
+    """
+    Retrieves an OAuth2 access token using the Password Grant flow.
+    """
+    payload = {
+        "grant_type": "password",
+        "client_id": os.getenv("DATAGEMS_CLIENT_ID"),
+        "username": os.getenv("DATAGEMS_USER"),
+        "password": os.getenv("DATAGEMS_PASSWORD"),
+        "scope": os.getenv("DATAGEMS_SCOPE", "openid profile email"),
+    }
+    
+    response = requests.post(
+        os.getenv("DATAGEMS_AUTH_URL"), 
+        data=payload,
+        timeout=10
+    )
+    
+    if response.status_code != 200:
+        print(f"Failed to retrieve token: {response.status_code} - {response.text}")
+        response.raise_for_status()
+        
+    return response.json()["access_token"]
 
 @dataclass
 class DatasetProfile:
@@ -37,6 +66,7 @@ def _is_dataset_node(node: Dict[str, Any]) -> bool:
     return "sc:Dataset" in (node.get("labels") or [])
 
 def fetch_search(
+    token: str,
     projection_fields: Optional[List[str]] = None, # if requesting specific fields to return, e.g. ["name", "description"]
     status: Optional[List[str]] = None,
     timeout: int = 30,
@@ -79,7 +109,7 @@ def fetch_search(
     resp = requests.get(
         url,
         params=params if params else None,
-        headers={"Accept": "application/json"},
+        headers={"Accept": "application/json", "Authorization": f"Bearer {token}"},
         timeout=timeout,
     )
     resp.raise_for_status()
@@ -146,11 +176,11 @@ def extract_dataset_profiles(payload: Dict[str, Any]) -> List[DatasetProfile]:
             props = n.get("properties") or {}
 
             title = (props.get("name") or "").strip()
-            headline_raw = (props.get("dg:headline") or "").strip()
+            headline_raw = (props.get("headline") or "").strip()
             # If headline is missing or identical to title, we set it to empty string to avoid redundancy in the profile text.
             headline = "" if not headline_raw or headline_raw.lower() == title.lower() else headline_raw
 
-            kw = props.get("dg:keywords")
+            kw = props.get("keywords")
             if isinstance(kw, list):
                 keywords = ", ".join(str(x).strip() for x in kw if str(x).strip())
             elif kw is None:
@@ -158,7 +188,7 @@ def extract_dataset_profiles(payload: Dict[str, Any]) -> List[DatasetProfile]:
             else:
                 keywords = str(kw).strip()
 
-            fos = props.get("dg:fieldOfScience")
+            fos = props.get("fieldOfScience")
             if isinstance(fos, list):
                 field_of_science = ", ".join(str(x).strip() for x in fos if str(x).strip())
             elif fos is None:
@@ -179,12 +209,12 @@ def extract_dataset_profiles(payload: Dict[str, Any]) -> List[DatasetProfile]:
 
     return out
 
-def run_ingestion() -> tuple[Dict[str, Any], List[DatasetProfile]]:
+def run_ingestion(token: str) -> tuple[Dict[str, Any], List[DatasetProfile]]:
     """
     Fetch portal data and return both the payload and the extracted dataset profiles.
     """
     try:
-        raw_data = fetch_search()
+        raw_data = fetch_search(token)
     except requests.HTTPError as e:
         print(f"HTTP error: {e}", file=sys.stderr)
         raise
@@ -201,11 +231,11 @@ def run_ingestion() -> tuple[Dict[str, Any], List[DatasetProfile]]:
     return raw_data, profiles
 
 def fetch_catalog() -> List[DatasetProfile]:
-    _, profiles = run_ingestion()
-    return profiles
+    _, profiles = run_ingestion(get_access_token())
+    return profiles 
 
 if __name__ == "__main__":
-    raw_data, profiles = run_ingestion()
+    raw_data, profiles = run_ingestion(get_access_token())
 
     raw_path = OUTPUT_DIR / "datagems_datasets_raw.json"
     with open(raw_path, "w", encoding="utf-8") as f:

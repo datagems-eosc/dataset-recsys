@@ -16,6 +16,7 @@ from dataset_recsys.utils.bedrock import enrich_batch
 from dataset_recsys.embeddings import build_embedding_text, encode_texts
 from dataset_recsys.retrieval import build_recommendations
 from dataset_recsys.storage.recommendation_client import RecommendationClient
+from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.utils.text_preprocessing import preprocess_catalog
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ CatalogFetcher = Callable[[], list[DatasetProfile]]
 CatalogEnricher = Callable[[list[DatasetProfile]], list[DatasetProfile]]
 CatalogPreprocessor = Callable[[list[DatasetProfile]], list[DatasetProfile]]
 EmbeddingGenerator = Callable[[list[DatasetProfile]], Any]
-# EmbeddingWriter = Callable[[Any], None]
+EmbeddingWriter = Callable[[Any], None]
 # EmbeddingMetadataWriter = Callable[[list[DatasetProfile], Any], None]
 RecommendationList = list[dict[str, Any]]
 RecommendationComputer = Callable[[Any, list[DatasetProfile]], RecommendationList]
@@ -78,7 +79,7 @@ class FullBatchRebuildWorkflow:
     enrich_catalog: CatalogEnricher
     preprocess_catalog: CatalogPreprocessor
     generate_embeddings: EmbeddingGenerator
-    # write_embeddings: EmbeddingWriter
+    write_embeddings: EmbeddingWriter
     # write_embeddings_metadata: EmbeddingMetadataWriter
     compute_recommendations: RecommendationComputer
     write_recommendations: RecommendationWriter
@@ -94,8 +95,7 @@ class FullBatchRebuildWorkflow:
         enriched_catalog = self._enrich_catalog(raw_catalog)
         processed_catalog = self._preprocess_catalog(enriched_catalog)
         embeddings = self._generate_embeddings(processed_catalog)
-        # TODO: integrate vector database (e.g., FAISS, Milvus, pgvector)
-        # self.write_embeddings(embeddings)
+        self.write_embeddings(embeddings)
         # TODO: store embedding metadata in a persistent store linked to the embeddings in the vector DB
         # self.write_embeddings_metadata(processed_catalog, embeddings)
         recommendations = self._compute_recommendations(embeddings, processed_catalog)
@@ -150,11 +150,10 @@ class FullBatchRebuildWorkflow:
         self.logger.info("Generated embeddings with shape %s", getattr(embeddings, "shape", None))
         return embeddings
 
-    # TODO: implement vector DB update when storage layer is introduced
-    # def _write_embeddings(self, embeddings: Any) -> None:
-    #     self.logger.info("Writing embeddings to storage")
-    #     self.write_embeddings(embeddings)
-    #     self.logger.info("Embeddings written")
+    def _write_embeddings(self, embeddings: Any) -> None:
+        self.logger.info("Writing embeddings to storage")
+        self.write_embeddings(embeddings)
+        self.logger.info("Embeddings written")
 
     def _compute_recommendations(
         self,
@@ -222,7 +221,6 @@ def _save_embedding_metadata_artifact(
         metadata,
         "Saved embedding metadata to",
     )
-    # TODO: replace with persistent metadata storage (linked to embeddings in vector DB)
 
 def _save_embeddings_artifact(
     run_dir: Path,
@@ -234,11 +232,10 @@ def _save_embeddings_artifact(
     output_path = run_dir / filename
     np.save(output_path, embeddings)
     print(f"[TEST] Saved embeddings to: {output_path}")
-    # TODO: replace with vector database storage
 
 # Function to run the full batch rebuild workflow with configurable parameters (scheduler/integration calls)
 def run_full_batch_rebuild(
-    redis_host="localhost", # TODO: replace with actual Redis host in production (e.g., from env var or config)
+    redis_host="localhost",
     redis_port=6380,
     redis_db=0,
     application: str = "ds2ds",
@@ -248,12 +245,55 @@ def run_full_batch_rebuild(
 ) -> BatchRebuildArtifacts:
     """Run the full batch rebuild workflow for the dataset recommender."""
     recs_client = RecommendationClient(host=redis_host, port=redis_port, db=redis_db)
+    embedding_client = EmbeddingClient()
 
     def generate_embeddings_step(catalog):
         embedding_texts = [build_embedding_text(profile) for profile in catalog]
-        return encode_texts(embedding_texts, model_name=embedding_model)
+        embeddings = encode_texts(embedding_texts, model_name=embedding_model)
 
-    def compute_recommendations_step(embeddings, catalog):
+        # Save local metadata artifact
+        artifact_name = _artifact_filename("embeddings_metadata")
+        _save_embedding_metadata_artifact(
+            run_dir,
+            artifact_name,
+            catalog,
+            embedding_texts,
+            embedding_model,
+            enrichment_llm=enrichment_llm,
+            prompt_version=prompt_version,
+        )
+
+        # Save local embeddings (.npy)
+        embeddings_filename = _artifact_filename("embeddings", extension="npy")
+        _save_embeddings_artifact(run_dir, embeddings_filename, embeddings)
+
+        return {
+            "embeddings": embeddings,
+            "texts": embedding_texts,
+            "catalog": catalog,
+        }
+    
+    def write_embeddings_step(payload):
+        embeddings = payload["embeddings"]
+        embedding_texts = payload["texts"]
+        catalog = payload["catalog"]
+        # Store embeddings + metadata in Postgres/vector DB
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")  # unique per workflow run
+        dataset_ids = [p.id for p in catalog]
+        embedding_client.store_embeddings(
+            application=application,
+            dataset_ids=dataset_ids,
+            embeddings=embeddings,
+            embedding_inputs=embedding_texts,
+            embedding_model=embedding_model,
+            enrichment_llm=enrichment_llm,
+            prompt_version=prompt_version,
+            run_id=run_id,
+        )
+        print(f"[TEST] Stored {len(dataset_ids)} embeddings with metadata (run_id={run_id})")        
+
+    def compute_recommendations_step(payload, catalog):
+        embeddings = payload["embeddings"]
         return build_recommendations(catalog, embeddings)
 
     def write_recommendations_step(recommendations):
@@ -268,6 +308,7 @@ def run_full_batch_rebuild(
         ),
         preprocess_catalog=preprocess_catalog,
         generate_embeddings=generate_embeddings_step,
+        write_embeddings=write_embeddings_step,
         compute_recommendations=compute_recommendations_step,
         write_recommendations=write_recommendations_step,
     )
@@ -296,6 +337,7 @@ if __name__ == "__main__":
     # Force local Redis for testing (avoid using any server/project credentials)
     redis_host, redis_port, redis_db = "localhost", 6380, 0
     recs_client = RecommendationClient(host=redis_host, port=redis_port, db=redis_db)
+    embedding_client = EmbeddingClient()
     print("Redis OK:", recs_client.check_connection())
 
     def fetch_catalog_step():
@@ -310,7 +352,6 @@ if __name__ == "__main__":
         _save_profiles_artifact(run_dir, artifact_name, processed_catalog)
         return processed_catalog
     
-    # TODO: persist embeddings to a vector database in production and keep local
     # .npy saving only for offline debugging/artifact inspection.
     def generate_embeddings_step(catalog):
         embedding_texts = [build_embedding_text(profile) for profile in catalog]
@@ -328,10 +369,33 @@ if __name__ == "__main__":
 
         embeddings_filename = _artifact_filename("embeddings", extension="npy")
         _save_embeddings_artifact(run_dir, embeddings_filename, embeddings)
+        return {
+            "embeddings": embeddings,
+            "texts": embedding_texts,
+            "catalog": catalog,
+        }   
 
-        return embeddings
+    def write_embeddings_step(payload):
+        embeddings = payload["embeddings"]
+        embedding_texts = payload["texts"]
+        catalog = payload["catalog"]
+        # Store embeddings + metadata in Postgres/vector DB
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")  # unique per workflow run
+        dataset_ids = [p.id for p in catalog]
+        embedding_client.store_embeddings(
+            application=application,
+            dataset_ids=dataset_ids,
+            embeddings=embeddings,
+            embedding_inputs=embedding_texts,
+            embedding_model=embedding_model,
+            enrichment_llm=enrichment_llm,
+            prompt_version=prompt_version,
+            run_id=run_id,
+        )
+        print(f"[TEST] Stored {len(dataset_ids)} embeddings with metadata (run_id={run_id})")
 
-    def compute_recommendations_step(embeddings, catalog):
+    def compute_recommendations_step(payload, catalog):
+        embeddings = payload["embeddings"]
         return build_recommendations(catalog, embeddings)
 
     def write_recommendations_step(recommendations):
@@ -346,6 +410,7 @@ if __name__ == "__main__":
         enrich_catalog=partial(enrich_batch, llm=enrichment_llm, prompt_version=prompt_version),
         preprocess_catalog=preprocess_catalog_step,
         generate_embeddings=generate_embeddings_step,
+        write_embeddings=write_embeddings_step,
         compute_recommendations=compute_recommendations_step,
         write_recommendations=write_recommendations_step,
     )

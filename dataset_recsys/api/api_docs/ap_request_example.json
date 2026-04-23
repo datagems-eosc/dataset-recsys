@@ -1,0 +1,65 @@
+{
+    "nodes": [
+        {
+            "id": "user-session-123",
+            "labels": ["User"]
+        },
+        {
+            "id": "task-rec-001",
+            "labels": ["Task"],
+            "properties": {
+            "name": "Get recommendations",
+            "description": "Retrieve the top-N recommendations for a given dataset."
+            }
+        },
+        {
+            "id": "pattern-ds-recs",
+            "labels": ["Analytical_Pattern"],
+            "properties": {
+                "name": "Dataset-to-Dataset Recommendations AP",
+                "description": "Pattern for discovering related datasets.",
+                "process": "recommend",
+                "publishedDate": "2026-01-21",
+                "startTime": "10:00:00"
+            }
+        },
+        {
+            "id": "operator-recommender",
+            "labels": ["DatasetRecommender_Operator"],
+            "properties": {
+                "name": "GetRecommendations Operator",
+                "command": "get_recommendations",
+                "n": 10
+            }
+        },
+        {
+            "id": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
+            "labels": ["sc:Dataset"],
+            "properties": {
+            "description": "The seed dataset used as the basis for recommendations."
+            }
+        }
+    ],
+    "edges": [
+        {
+            "from": "user-session-123",
+            "to": "task-rec-001",
+            "labels": ["request"]
+        },
+        {
+            "from": "task-rec-001",
+            "to": "pattern-ds-recs",
+            "labels": ["is_accomplished"]
+        },
+        {
+            "from": "pattern-ds-recs",
+            "to": "operator-recommender",
+            "labels": ["consist_of"]
+        },
+        {
+            "from": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
+            "to": "operator-recommender",
+            "labels": ["input"]
+        }
+    ]
+}

@@ -1,0 +1,27 @@
+{
+    "422_ap_missing_input_edge": {
+        "summary": "Malformed AP - Missing Input Edge",
+        "description": "Raised when the operator has no incoming 'input' edge to provide a dataset ID.",
+        "value": {
+        "code": 422,
+        "error": "Malformed AP Graph: No input dataset linked to the Recommender Operator."
+        }
+    },
+    "422_ap_missing_operator": {
+        "summary": "Malformed AP - Missing Operator",
+        "description": "Raised when the DatasetRecommender_Operator node is completely missing from the graph.",
+        "value": {
+        "code": 422,
+        "error": "Malformed AP Graph: Operator 'DatasetRecommender_Operator' not found."
+        }
+    },
+    "403": {
+        "summary": "Authorization Failure",
+        "description": "The user is authenticated but does not have permission to view this entity.",
+        "value": {
+            "code": 403,
+            "error": "Forbidden",
+            "message": "Insufficient permissions for the requested entity_id."
+        }
+    }
+}

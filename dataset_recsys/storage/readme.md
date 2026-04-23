@@ -1,18 +1,19 @@
-
 # Storage
 
-This folder contains code that **stores and retrieves recommendation results used by the system**.
+This folder contains code that **stores and retrieves recommendation results and embeddings used by the system**.
 
 ## Rule of thumb
 
-Put code here if it **handles where and how recommendations are stored or retrieved**.
+Put code here if it **handles where and how data is stored or retrieved**.
 
 Examples:
-- Scripts that ingest recommendation JSON files into Redis
-- Clients that read recommendations from Redis
-- Utilities that manage recommendation keys, indexes, or lookup operations
 
-## Redis Storage Schema
+* Clients that read/write recommendations from Redis
+* Clients that store/query embeddings in PostgreSQL + pgvector
+* Utilities that manage keys, indexes, schemas, or lookup operations
+
+
+## Redis Storage (Recommendations)
 
 Recommendations are stored in Redis using an **application → entity → recommended entities** structure.
 
@@ -134,3 +135,88 @@ meteo_era5land → {weather_stations_climpact, wikipedia}
 ```
 
 This design allows the same storage layer to support multiple applications (e.g., MathE materials, dataset portal, or other entity collections).
+
+---
+
+# PostgreSQL + pgvector Storage (Embeddings)
+
+Embeddings are stored in PostgreSQL using the **pgvector extension**, enriched with metadata for reproducibility and traceability.
+
+---
+
+## Table schema
+
+Table:
+
+```
+{schema}.dataset_embeddings
+```
+
+Columns:
+
+| Column          | Type         | Description                               |
+| --------------- | ------------ | ----------------------------------------- |
+| application     | TEXT         | Logical grouping (e.g. ds2ds, mathe)      |
+| dataset_id      | TEXT (PK)    | Unique identifier of the dataset          |
+| embedding       | VECTOR(1536) | Embedding vector                          |
+| embedding_input | TEXT         | Input text used to generate the embedding |
+| embedding_model | TEXT         | Model used to generate embeddings         |
+| enrichment_llm  | TEXT         | LLM used for enrichment (optional)        |
+| prompt_version  | TEXT         | Prompt version used (optional)            |
+| run_id          | TEXT         | Workflow run identifier                   |
+| created_at      | TIMESTAMP    | Last update timestamp                     |
+
+Primary key:
+
+```
+PRIMARY KEY (dataset_id)
+```
+
+---
+
+## Conceptual model
+
+```
+application
+    └── dataset_id
+            ├── embedding (vector)
+            ├── embedding_input (text)
+            ├── embedding_model
+            ├── enrichment_llm
+            ├── prompt_version
+            └── run_id
+```
+
+---
+
+## Storage behavior
+
+* Embeddings are written **in bulk**
+* Existing embeddings for an application are **deleted before insert**
+* Upserts are handled via:
+
+```
+ON CONFLICT (dataset_id)
+```
+
+* Metadata is always updated together with the embedding
+
+---
+
+## Similarity search
+
+Similarity queries use pgvector distance:
+
+```
+embedding <-> query_embedding
+```
+
+Example:
+
+```
+SELECT dataset_id, embedding <-> %s AS distance
+FROM dataset_embeddings
+WHERE application = %s
+ORDER BY embedding <-> %s
+LIMIT %s;
+```

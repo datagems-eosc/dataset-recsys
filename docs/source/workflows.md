@@ -12,8 +12,7 @@ flowchart TB
     B --> C[Preprocess Metadata]
     C --> X[Optional LLM Enrichment]
     X --> D[Generate Embeddings]
-    D --> E[Store Embedding Metadata]
-    E --> F[Update Vector DB]
+    D --> F[Update Vector DB]
     F --> G[Compute Top-k Recos + Scores]
     G --> H[Write Recos to Redis]
 
@@ -23,9 +22,9 @@ flowchart TB
     classDef storage fill:#F3E5F5,stroke:#8E24AA,stroke-width:2px,color:#4A148C;
 
     class A trigger;
-    class B,C prep;
+    class B,C,X prep;
     class D,G compute;
-    class E,F,H storage;
+    class F,H storage;
 ```
 
 This workflow is used when the full catalog must be recomputed, for example
@@ -43,8 +42,7 @@ flowchart TB
     B --> C[Preprocess Metadata]
     C --> X[Optional LLM Enrichment]
     X --> D[Generate / Update Embedding]
-    D --> E[Store Embedding Metadata]
-    E --> F[Update Vector DB]
+    D --> F[Update Vector DB]
     F --> G[Compute Top-k Recos + Scores for Changed Dataset]
     G --> H[Write Recos to Redis]
 
@@ -54,9 +52,9 @@ flowchart TB
     classDef storage fill:#F3E5F5,stroke:#8E24AA,stroke-width:2px,color:#4A148C;
 
     class A trigger;
-    class B,C prep;
+    class B,C,X prep;
     class D,G compute;
-    class E,F,H storage;
+    class F,H storage;
 ```
 
 This workflow updates only the changed dataset: it updates its embedding,

@@ -21,7 +21,7 @@ flowchart TB
     %% Retrieval
     subgraph Retrieval[ ]
         D --> F[Candidate Retrieval]
-        F --> G[Reranking Module]
+        F --> G[Optional Reranking Module]
     end
 
 
@@ -38,7 +38,7 @@ flowchart TB
     classDef serving fill:#F3E5F5,stroke:#8E24AA,stroke-width:2px,color:#4A148C;
     classDef header fill:#FFFFFF,stroke:#BDBDBD,stroke-width:1.5px,color:#333333;
 
-    class A,B,C,D update;
+    class A,B,C,D,E update;
     class F,G retrieval;
     class I,J,K serving;
 

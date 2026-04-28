@@ -19,6 +19,7 @@ from dataset_recsys.api.analytical_patterns.models import (
 )
 from dataset_recsys.api.security import security
 from dataset_recsys.ingestion.moma_dataset import MomaDataset
+from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.storage.recommendation_client import RecommendationClient
 from dataset_recsys.workflows.incremental_update import process_incremental_update
 
@@ -242,6 +243,65 @@ async def get_recommendations_ap(
 @router.post(
     "/dataset/add",
     summary="Add a new dataset to the system",
+    description="""
+Fetch a dataset from external sources, generate its embeddings, and integrate it into the recommendation engine.
+If the dataset already exists, the system will skip the addition to avoid duplicates.
+    """,
+    responses={
+        200: {
+            "description": "Dataset processed successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status": "success",
+                        "message": "Dataset ds_123 successfully added and recommendations updated."
+                    }
+                }
+            },
+        },
+        401: {
+            "description": "Unauthorized - Invalid or missing token",
+            "content": {
+                "application/json": {
+                    "examples": {"Invalid Token": errors_data.get("401")}
+                }
+            },
+        },
+        403: {
+            "description": "Forbidden - Insufficient permissions",
+            "content": {
+                "application/json": {
+                    "examples": {"Access Denied": errors_data.get("403")}
+                }
+            },
+        },
+        422: {
+            "description": "Validation Error",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "Missing Entity ID": errors_data.get("422_missing_entity_id")
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "Not Found - Dataset not found in external source",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Dataset not found in external repository."}
+                }
+            },
+        },
+        500: {
+            "description": "Internal Server Error",
+            "content": {
+                "application/json": {
+                    "examples": {"System Failure": errors_data.get("500")}
+                }
+            },
+        },
+    },
 )
 async def add_dataset(
     entity_id: str = Query(..., description="The dataset identifier to add."),
@@ -268,13 +328,23 @@ async def add_dataset(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Dataset ID is required.",
         )
-
+    
+    # It is more efficient to reuse the global recs_client or define these outside 
+    # the request scope, but keeping local as per your original snippet logic.
+    embedding_client = EmbeddingClient()
+    
     try:
         moma = MomaDataset(user_token=token)
+        # Assuming get_from_external might raise an error if not found
         moma.get_from_external(entity_id)
         profile = moma.to_dataset_profile()
 
-        was_added = await process_incremental_update(profile, "portal")
+        was_added = await process_incremental_update(
+            profile, 
+            "portal", 
+            recs_client=recs_client, 
+            emb_client=embedding_client
+        )
 
         if not was_added:
             return {
@@ -290,7 +360,8 @@ async def add_dataset(
         raise
     except Exception as e:
         log.error(f"Error adding dataset {entity_id}: {e}", exc_info=True)
+        # Providing a cleaner error message for the user while logging the full exception
         raise HTTPException(
             status_code=500,
-            detail=f"An unexpected error occurred while adding the dataset: {e}",
+            detail="An unexpected error occurred while adding the dataset."
         )

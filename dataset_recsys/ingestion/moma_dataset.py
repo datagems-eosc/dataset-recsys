@@ -81,7 +81,7 @@ class MomaDataset:
             keywords = str(kw)
 
         return DatasetProfile(
-            id=self.dataset_id,
+            id=self.external_id,
             title=title.strip(),
             headline=headline.strip() if headline.lower() != title.lower() else "",
             description=props.get("description", "").strip(),

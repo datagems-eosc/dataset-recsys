@@ -154,10 +154,10 @@ class EmbeddingClient:
     ):
         # Using <=> for cosine distance. Similarity = 1 - (A <=> B)
         query = f"""
-        SELECT dataset_id, 1 - (embedding <=> %s) AS similarity
+        SELECT dataset_id, 1 - (embedding <=> %s::vector) AS similarity
         FROM {self.schema}.dataset_embeddings
         WHERE application = %s
-        ORDER BY embedding <=> %s
+        ORDER BY embedding <=> %s::vector
         LIMIT %s
         """
 

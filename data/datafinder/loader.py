@@ -277,3 +277,23 @@ class DataFinder:
         if self.data is None:
             self._init_data()
         return dataset_id in set(self.data["corpus"]["id"])
+
+if __name__ == "__main__":
+    datafinder = DataFinder()
+    info = datafinder.get_info()
+    print("Dataset Info:")
+    for key, value in info.items():
+        print(f"{key}: {value}")
+    
+    data = datafinder.get()
+    train = data["train"]
+    test = data["test"]
+    corpus = data["corpus"]
+    
+    out_dir = "datafinder_output"
+    os.makedirs(out_dir, exist_ok=True)
+    # JSON files
+    train.to_json(os.path.join(out_dir, "train_data.json"), orient="records", lines=True)
+    test.to_json(os.path.join(out_dir, "test_data.json"), orient="records", lines=True)
+    corpus.to_json(os.path.join(out_dir, "dataset_search_collection.json"), orient="records", lines=True)
+    print(f"Data splits saved to {out_dir}/")

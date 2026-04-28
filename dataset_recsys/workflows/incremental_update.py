@@ -32,9 +32,7 @@ def get_access_token() -> str:
         
     return response.json()["access_token"]
 
-async def process_incremental_update(dataset_profile, application: str, enrichment_llm: str = "claude-sonnet-4-6", prompt_version: str = "catalog_summary_v1", embedding_model: str = "allenai/specter2_base"):
-    emb_client = EmbeddingClient()
-    recs_client = RecommendationClient()
+async def process_incremental_update(dataset_profile, application: str, enrichment_llm: str = "claude-sonnet-4-6", prompt_version: str = "catalog_summary_v1", embedding_model: str = "allenai/specter2_base", recs_client: RecommendationClient | None = None, emb_client: EmbeddingClient | None = None) -> bool:
 
     # 1. Existence Check
     if emb_client.exists(dataset_profile.id):
@@ -47,7 +45,7 @@ async def process_incremental_update(dataset_profile, application: str, enrichme
     # 3. Embedding Generation
     from dataset_recsys.embeddings import build_embedding_text, encode_texts
     text_input = build_embedding_text(enriched_profile)
-    vector = encode_texts([text_input])[0].tolist()
+    vector = encode_texts([text_input], model_name=embedding_model)[0].tolist()
     
     # 4. Storage in Vector DB
     emb_client.upsert_single_embedding(
@@ -91,9 +89,25 @@ async def process_incremental_update(dataset_profile, application: str, enrichme
 
 if __name__ == "__main__":
     # Example usage for testing
+    enrichment_llm = "claude-sonnet-4-6"
+    prompt_version = "catalog_summary_v1"
+    embedding_model = "allenai/specter2_base"
+    application = "ds2ds"
+    
     from dataset_recsys.ingestion.moma_dataset import MomaDataset
     moma = MomaDataset(get_access_token())
-    moma.get_from_external("some-dataset-id")
+    moma.get_from_external("07382b91-5bc5-42f9-8391-33adc2460c19")
     profile = moma.to_dataset_profile()
+    redis_host, redis_port, redis_db = "localhost", 6379, 0
+    recs_client = RecommendationClient(host=redis_host, port=redis_port, db=redis_db)
+    embedding_client = EmbeddingClient(
+        host="localhost",
+        port=5433,
+        dbname="postgres",
+        user="postgres",
+        password="postgres"
+    )
+    print("Redis OK:", recs_client.check_connection())
+    print("Embedding DB OK:", embedding_client.check_connection())    
     import asyncio
-    asyncio.run(process_incremental_update(profile, application="portal"))
+    asyncio.run(process_incremental_update(profile, application=application, enrichment_llm=enrichment_llm, prompt_version=prompt_version, embedding_model=embedding_model, recs_client=recs_client, emb_client=embedding_client))

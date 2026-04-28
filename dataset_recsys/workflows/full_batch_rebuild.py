@@ -236,7 +236,7 @@ def _save_embeddings_artifact(
 # Function to run the full batch rebuild workflow with configurable parameters (scheduler/integration calls)
 def run_full_batch_rebuild(
     redis_host="localhost",
-    redis_port=6380,
+    redis_port=6379,
     redis_db=0,
     application: str = "ds2ds",
     enrichment_llm: str = "claude-sonnet-4-6",
@@ -335,10 +335,17 @@ if __name__ == "__main__":
     run_dir = ARTIFACTS_DIR / f"{application}_{run_timestamp}"
 
     # Force local Redis for testing (avoid using any server/project credentials)
-    redis_host, redis_port, redis_db = "localhost", 6380, 0
+    redis_host, redis_port, redis_db = "localhost", 6379, 0
     recs_client = RecommendationClient(host=redis_host, port=redis_port, db=redis_db)
-    embedding_client = EmbeddingClient()
+    embedding_client = EmbeddingClient(
+        host="localhost",
+        port=5433,
+        dbname="postgres",
+        user="postgres",
+        password="postgres"
+    )
     print("Redis OK:", recs_client.check_connection())
+    print("Embedding DB OK:", embedding_client.check_connection())
 
     def fetch_catalog_step():
         catalog = fetch_catalog()

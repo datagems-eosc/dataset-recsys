@@ -26,7 +26,7 @@ python-jose = "^3.5.0"
 pydantic-settings = "^2.13.1"
 iniconfig = "^2.3.0"
 psycopg2-binary = "^2.9.11"
-torch = { version = "2.4.1", source = "pytorch-cpu" }
+torch = { version = ">=2.6.0", source = "pytorch-cpu" }
 sentence-transformers = "3.0.1"
 
 [tool.poetry.group.train]

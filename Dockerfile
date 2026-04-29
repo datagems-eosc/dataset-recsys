@@ -4,10 +4,12 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir poetry
 
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
 COPY pyproject.toml poetry.lock ./
 
 RUN poetry config virtualenvs.create false && \
-  poetry install --with train --without dev --without docs --no-interaction --no-ansi --no-root
+  poetry install --without train --without dev --without docs --no-interaction --no-ansi --no-root
 
 COPY dataset_recsys/ ./dataset_recsys/
 COPY recs_metrics/ ./recs_metrics/

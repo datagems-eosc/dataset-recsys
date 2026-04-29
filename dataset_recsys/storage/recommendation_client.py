@@ -156,6 +156,21 @@ class RecommendationClient:
             pipe.zremrangebyrank(rec_key, 0, -(limit + 1)) 
             pipe.execute()
 
+    def remove_single_entity_recs(self, application: str, entity_id: str):
+        """Deletes an entity's own rec list and removes it from the application index."""
+        rec_key = self._recommendation_key(application, entity_id)
+        index_key = self._index_key(application)
+        
+        with self.r.pipeline() as pipe:
+            pipe.delete(rec_key)
+            pipe.srem(index_key, entity_id)
+            pipe.execute()
+
+    def remove_from_neighbor_recs(self, application: str, neighbor_id: str, target_id: str):
+        """Removes target_id from a specific neighbor's recommendation ZSET."""
+        rec_key = self._recommendation_key(application, neighbor_id)
+        self.r.zrem(rec_key, target_id)
+
     # -------------------------
     # QUERYING
     # -------------------------

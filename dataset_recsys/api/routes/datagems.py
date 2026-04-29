@@ -365,3 +365,97 @@ async def add_dataset(
             status_code=500,
             detail="An unexpected error occurred while adding the dataset."
         )
+
+@router.post(
+    "/dataset/remove",
+    summary="Remove a dataset from the system",
+    description="""
+Performs a clean, incremental removal of a dataset from the recommendation engine. 
+
+**Workflow:**
+1. **Inbound Cleanup**: Scans the Redis index to find every other dataset currently recommending this ID and removes the reference.
+2. **Outbound Cleanup**: Deletes the specific recommendation list (ZSET) for this dataset.
+3. **Index Cleanup**: Removes the dataset ID from the application's global index.
+4. **Vector Cleanup**: Deletes the embedding record from the PostgreSQL vector database.
+    """,
+    responses={
+        200: {
+            "description": "Dataset removed successfully",
+            "content": {
+                "application/json": {
+                    "example": {"status": "success", "message": "Dataset ds_123 removed."}
+                }
+            },
+        },
+        404: {
+            "description": "Not Found",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Dataset not found in the recommendation engine."}
+                }
+            },
+        },
+        500: {"description": "Internal Server Error"}
+    }
+)
+async def remove_dataset(
+    entity_id: str = Query(..., description="The unique identifier of the dataset to be removed."),
+    application: str = Query("portal", description="The application context for the dataset."),
+    claims: dict = Depends(security.require_role(["user", "dg_user"])),
+):
+    user_subject = claims.get("sub")
+    log = logger.bind(item_id=entity_id, UserId=user_subject)
+
+    accounting_logger.info(
+        "Dataset Removal Request Received",
+        UserId=user_subject,
+        Action="remove_dataset",
+        Resource="dataset2dataset_recommender",
+        Domain="datagems",
+        ItemId=entity_id,
+        Timestamp=datetime.utcnow().isoformat() + "Z",
+    )
+
+    # Validate input
+    entity_id = entity_id.strip()
+    if not entity_id:
+        raise HTTPException(status_code=422, detail="Entity ID is required.")
+
+    try:
+        from dataset_recsys.workflows.dataset_removal import dataset_removal
+        
+        # Dependency check: ensuring we have our clients ready
+        embedding_client = EmbeddingClient()
+        
+        was_removed = await dataset_removal(
+            entity_id=entity_id, 
+            application=application,
+            recs_client=recs_client, 
+            emb_client=embedding_client
+        )
+
+        if not was_removed:
+            log.warning("Removal failed: dataset does not exist.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Dataset {entity_id} not found in the system."
+            )
+
+        accounting_logger.info(
+            "Dataset Removal Processed",
+            UserId=user_subject,
+            Action="remove_dataset",
+            ItemId=entity_id,
+            Timestamp=datetime.utcnow().isoformat() + "Z",
+        )
+
+        return {
+            "status": "success",
+            "message": f"Dataset {entity_id} removed from the system.",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error during removal of {entity_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred during removal.")

@@ -305,6 +305,7 @@ If the dataset already exists, the system will skip the addition to avoid duplic
 )
 async def add_dataset(
     entity_id: str = Query(..., description="The dataset identifier to add."),
+    application: str = Query("portal", description="The application context for the dataset."),
     claims: dict = Depends(security.require_role(["user", "dg_user"])),
     token: str = Depends(security.oauth2_scheme),
 ):
@@ -341,7 +342,7 @@ async def add_dataset(
 
         was_added = await process_incremental_update(
             profile, 
-            "portal", 
+            application=application, 
             recs_client=recs_client, 
             emb_client=embedding_client
         )

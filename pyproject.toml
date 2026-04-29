@@ -7,6 +7,11 @@ license = "MIT"
 readme = "README.md"
 packages = [{ include = "dataset_recsys" }, { include = "recs_metrics" }]
 
+[[tool.poetry.source]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"
+
 [tool.poetry.dependencies]
 python = "^3.11"
 fastapi = "^0.121.0"
@@ -21,7 +26,8 @@ python-jose = "^3.5.0"
 pydantic-settings = "^2.13.1"
 iniconfig = "^2.3.0"
 psycopg2-binary = "^2.9.11"
-sentence-transformers = "5.1.0"
+torch = { version = "2.4.1", source = "pytorch-cpu" }
+sentence-transformers = "3.0.1"
 
 [tool.poetry.group.train]
 optional = true

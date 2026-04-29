@@ -7,7 +7,7 @@ RUN pip install --no-cache-dir poetry
 COPY pyproject.toml poetry.lock ./
 
 RUN poetry config virtualenvs.create false && \
-  poetry install --without dev --without train --without docs --no-interaction --no-ansi --no-root
+  poetry install --without dev --without docs --no-interaction --no-ansi --no-root
 
 COPY dataset_recsys/ ./dataset_recsys/
 COPY recs_metrics/ ./recs_metrics/

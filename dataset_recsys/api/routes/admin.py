@@ -106,7 +106,7 @@ If the dataset already exists, the system will skip the addition to avoid duplic
 )
 async def add_dataset(
     entity_id: str = Query(..., description="The dataset identifier to add."),
-    claims: dict = Depends(security.require_role(["user", "dg_user"])),
+    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
     token: str = Depends(security.oauth2_scheme),
 ):
     user_subject = claims.get("sub")
@@ -201,7 +201,7 @@ Performs a clean, incremental removal of a dataset from the recommendation engin
 )
 async def remove_dataset(
     entity_id: str = Query(..., description="The unique identifier of the dataset to be removed."),
-    claims: dict = Depends(security.require_role(["user", "dg_user"])),
+    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
 ):
     user_subject = claims.get("sub")
     log = logger.bind(item_id=entity_id, UserId=user_subject)
@@ -304,7 +304,7 @@ async def check_existence(
         description="A list of dataset IDs to verify.",
         example=["ds_123", "ds_456"]
     ),
-    claims: dict = Depends(security.require_role(["user", "dg_user"])),
+    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
 ):
     user_subject = claims.get("sub")
     log = logger.bind(UserId=user_subject, ItemIds=entity_ids)

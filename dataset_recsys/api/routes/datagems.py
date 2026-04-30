@@ -101,7 +101,7 @@ Retrieve the top-N recommendations for a given dataset.
 async def get_recommendations(
     entity_id: str = Query(..., description="The dataset identifier.", required=True),
     n: int = Query(10, gt=0, le=20, description="Number of similar items to return"),
-    claims: dict = Depends(security.require_role(["user", "dg_user"])),
+    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
     token: str = Depends(security.oauth2_scheme),
 ):
     request = RecsRequest(entity_id=entity_id, n=n)
@@ -220,7 +220,7 @@ async def get_recommendations_ap(
             }
         },
     ),
-    claims: dict = Depends(security.require_role(["user", "dg_user"])),
+    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
     token: str = Depends(security.oauth2_scheme),
 ):
     try:

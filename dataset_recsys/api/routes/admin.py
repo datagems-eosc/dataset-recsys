@@ -23,6 +23,7 @@ DOCS_ERROR_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/error_examples.json
 AP_DOCS_VALID_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/ap_valid_examples.json")
 AP_DOCS_ERROR_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/ap_error_examples.json")
 AP_REQUEST_EXAMPLE_PATH = Path("dataset_recsys/api/api_docs/ap_request_example.json")
+DEFAULT_APPLICATION = "ds2ds"
 
 
 def load_json_file(path: Path) -> dict:
@@ -105,7 +106,6 @@ If the dataset already exists, the system will skip the addition to avoid duplic
 )
 async def add_dataset(
     entity_id: str = Query(..., description="The dataset identifier to add."),
-    application: str = Query("ds2ds", description="The application context for the dataset."),
     claims: dict = Depends(security.require_role(["user", "dg_user"])),
     token: str = Depends(security.oauth2_scheme),
 ):
@@ -142,7 +142,7 @@ async def add_dataset(
 
         was_added = await process_incremental_update(
             profile, 
-            application=application, 
+            application=DEFAULT_APPLICATION, 
             recs_client=recs_client, 
             emb_client=embedding_client
         )
@@ -201,7 +201,6 @@ Performs a clean, incremental removal of a dataset from the recommendation engin
 )
 async def remove_dataset(
     entity_id: str = Query(..., description="The unique identifier of the dataset to be removed."),
-    application: str = Query("ds2ds", description="The application context for the dataset."),
     claims: dict = Depends(security.require_role(["user", "dg_user"])),
 ):
     user_subject = claims.get("sub")
@@ -230,7 +229,7 @@ async def remove_dataset(
         
         was_removed = await dataset_removal(
             entity_id=entity_id, 
-            application=application,
+            application=DEFAULT_APPLICATION,
             recs_client=recs_client, 
             emb_client=embedding_client
         )
@@ -305,7 +304,6 @@ async def check_existence(
         description="A list of dataset IDs to verify.",
         example=["ds_123", "ds_456"]
     ),
-    application: str = Query("ds2ds", description="The application context for the index."),
     claims: dict = Depends(security.require_role(["user", "dg_user"])),
 ):
     user_subject = claims.get("sub")
@@ -328,6 +326,6 @@ async def check_existence(
         )
 
     # Perform batch check
-    existence_map = recs_client.check_existence_batch(application, entity_ids)
+    existence_map = recs_client.check_existence_batch(DEFAULT_APPLICATION, entity_ids)
     
     return existence_map

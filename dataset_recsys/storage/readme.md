@@ -94,10 +94,10 @@ This index is used to:
 Example Redis keys for the **MathE recommender**:
 
 ```
-recs:ds2ds_mathe:ds2ds
-recs:ds2ds_mathe:6.pdf
-recs:ds2ds_mathe:65.pdf
-recs:ds2ds_mathe:221.pdf
+recs:mathe:ds2ds
+recs:mathe:6.pdf
+recs:mathe:65.pdf
+recs:mathe:221.pdf
 ```
 
 Example Redis keys for the **Datagems recommender**:

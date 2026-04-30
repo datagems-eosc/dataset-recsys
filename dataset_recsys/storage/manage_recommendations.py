@@ -128,12 +128,12 @@ if __name__ == "__main__":
     else:
         parser.print_help()
 
-# python dataset_recsys/storage/manage_recommendations.py ingest data/mathe/mathe_top20_recommendations.json ds2ds_mathe
+# python dataset_recsys/storage/manage_recommendations.py ingest data/mathe/mathe_top20_recommendations.json mathe
 # python dataset_recsys/storage/manage_recommendations.py ingest data/gems_datasets_metadata/moma/datagems_dataset_recommendations_claude-sonnet-4-6.json ds2ds
-# python dataset_recsys/storage/manage_recommendations.py delete-application ds2ds_mathe
+# python dataset_recsys/storage/manage_recommendations.py delete-application mathe
 # python dataset_recsys/storage/manage_recommendations.py delete-application ds2ds
-# python dataset_recsys/storage/manage_recommendations.py list-entities ds2ds_mathe
+# python dataset_recsys/storage/manage_recommendations.py list-entities mathe
 # python dataset_recsys/storage/manage_recommendations.py list-entities ds2ds
-# python dataset_recsys/storage/manage_recommendations.py get ds2ds_mathe 6.pdf
+# python dataset_recsys/storage/manage_recommendations.py get mathe 6.pdf
 # python dataset_recsys/storage/manage_recommendations.py get ds2ds 07382b91-5bc5-42f9-8391-33adc2460c19
-# python dataset_recsys/storage/manage_recommendations.py remove-dataset ds2ds_mathe 7.pdf
+# python dataset_recsys/storage/manage_recommendations.py remove-dataset mathe 7.pdf

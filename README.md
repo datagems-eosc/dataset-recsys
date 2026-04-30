@@ -96,16 +96,23 @@ image: ghcr.io/datagems-eosc/dataset-recsys-api:{tag}
 
 Update `{tag}` to the version you used in **Step 1**
 
+### 5. Deploy the image
+
+Set KUBECONFIG as an environment variable
+```bash
+export KUBECONFIG=~/path/to/.kubeconfig
+```
+
 Apply the changes:
 ```bash
 kubectl apply -f dataset-recsys-api.deployment.yaml
 ```
 
-### 5. Monitor Deployment
+### 6. Monitor Deployment
 
 Watch the pod status:
 ```bash
-kubectl get pods -n athenarc -w
+kubectl get pods -n athenarc -l app=dataset-recsys-api -o wide
 ```
 
 When the new pod is running successfully, the old one will terminate automatically.

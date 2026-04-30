@@ -5,12 +5,13 @@ from datetime import datetime
 from pathlib import Path
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from dataset_recsys.api.security import security
 from dataset_recsys.ingestion.moma_dataset import MomaDataset
 from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.storage.recommendation_client import RecommendationClient
 from dataset_recsys.workflows.incremental_update import process_incremental_update
+from typing import List
 
 logger = structlog.get_logger(__name__)
 accounting_logger = structlog.get_logger("accounting")
@@ -259,3 +260,74 @@ async def remove_dataset(
     except Exception as e:
         log.error(f"Error during removal of {entity_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An unexpected error occurred during removal.")
+
+@router.post(
+    "/dataset/exist",
+    summary="Check dataset existence in catalog",
+    description="""
+Validates the existence of multiple dataset IDs within the application's recommendation index.
+
+**Process:**
+1. Receives a list of entity IDs.
+2. Executes a batch Redis pipeline (`SISMEMBER`) to check availability for each ID simultaneously.
+3. Returns a dictionary mapping each queried ID to a boolean status (`true` if present, `false` otherwise).
+    """,
+    responses={
+        200: {
+            "description": "Existence check successful",
+            "content": {
+                "application/json": {
+                    "example": {"ds_123": True, "ds_456": False}
+                }
+            },
+        },
+        401: {
+            "description": "Unauthorized - Invalid or missing token",
+            "content": {"application/json": {"example": {"detail": "Not authenticated"}}},
+        },
+        403: {
+            "description": "Forbidden - Insufficient permissions",
+            "content": {"application/json": {"example": {"detail": "Access denied"}}},
+        },
+        422: {
+            "description": "Validation Error - Missing or empty list",
+            "content": {"application/json": {"example": {"detail": "List of entity_ids cannot be empty."}}},
+        },
+        500: {
+            "description": "Internal Server Error",
+            "content": {"application/json": {"example": {"detail": "Internal system failure"}}},
+        },
+    },
+)
+async def check_existence(
+    entity_ids: List[str] = Body(
+        ..., 
+        description="A list of dataset IDs to verify.",
+        example=["ds_123", "ds_456"]
+    ),
+    application: str = Query("ds2ds", description="The application context for the index."),
+    claims: dict = Depends(security.require_role(["user", "dg_user"])),
+):
+    user_subject = claims.get("sub")
+    log = logger.bind(UserId=user_subject, ItemIds=entity_ids)
+    accounting_logger.info(
+        "Existence Check Request Received",
+        UserId=user_subject,
+        Action="check_existence",
+        Resource="dataset2dataset_recommender",
+        Domain="datagems",
+        ItemIds=entity_ids,
+        Timestamp=datetime.utcnow().isoformat() + "Z",
+    )
+    
+    # Basic validation
+    if not entity_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="List of entity_ids cannot be empty."
+        )
+
+    # Perform batch check
+    existence_map = recs_client.check_existence_batch(application, entity_ids)
+    
+    return existence_map

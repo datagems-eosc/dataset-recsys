@@ -202,6 +202,21 @@ class RecommendationClient:
 
         return sorted(referring_entities)
 
+    def check_existence_batch(self, application: str, entity_ids: List[str]) -> Dict[str, bool]:
+        """
+        Checks if a list of entity_ids exist in the recommendation catalog for the given application.
+        Returns a dictionary mapping entity_id to a boolean.
+        """
+        index_key = self._index_key(application)
+        
+        # Use a pipeline for atomic/batch execution
+        with self.r.pipeline() as pipe:
+            for eid in entity_ids:
+                pipe.sismember(index_key, eid)
+            results = pipe.execute()
+        
+        return {eid: bool(res) for eid, res in zip(entity_ids, results)}
+
     # -------------------------
     # UTILITIES
     # -------------------------

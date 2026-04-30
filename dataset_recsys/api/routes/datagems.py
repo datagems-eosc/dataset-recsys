@@ -139,7 +139,7 @@ async def get_recommendations(
             )
 
         raw_recs = recs_client.get_recommendations(
-            application="portal", entity_id=request.entity_id
+            application="ds2ds", entity_id=request.entity_id
         )
 
         filtered_recs = [Recommendation(entity_id=item) for item in raw_recs if item in authorized_set]
@@ -192,7 +192,7 @@ Processes an Analytical Pattern (AP) request by extracting the seed dataset and 
             "content": {
                 "application/json": {
                     "examples": {
-                        "Portal Missing Edge": ap_errors_data.get("422_ap_missing_input_edge"),
+                        "Missing Edge": ap_errors_data.get("422_ap_missing_input_edge"),
                         "Operator Missing": ap_errors_data.get("422_ap_missing_operator"),
                     }
                 }
@@ -341,7 +341,7 @@ async def add_dataset(
 
         was_added = await process_incremental_update(
             profile, 
-            "portal", 
+            "ds2ds", 
             recs_client=recs_client, 
             emb_client=embedding_client
         )

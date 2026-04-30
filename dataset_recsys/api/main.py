@@ -137,7 +137,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 # Run the API
 # OIDC_AUDIENCE=dataset-recsys-api REDIS_HOST=localhost REDIS_PORT=6380 uvicorn dataset_recsys.api.main:app --reload
-# OIDC_AUDIENCE=query-recommender REDIS_HOST=localhost REDIS_PORT=6380 uvicorn dataset_recsys.api.main:app --reload
 
 # Open docs:
 # http://127.0.0.1:8000/dataset-recsys/docs
@@ -151,7 +150,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # curl -X GET "http://127.0.0.1:8000/dataset-recsys/health" -v
 
 #
-# Example Portal dataset id for testing:
+# Example datagems' dataset id for testing:
 # 9b25bc46-8bd3-4f7f-94b4-52dbc38c130f
 #
 # To obtain a Bearer token (valid for a few minutes), run:

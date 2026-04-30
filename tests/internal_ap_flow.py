@@ -45,7 +45,7 @@ async def internal_recommend_logic(request: RecsRequest):
     n = request.n
 
     try:
-        recs_set = recs_client.get_recommendations(application="portal", entity_id=entity_id)
+        recs_set = recs_client.get_recommendations(application="ds2ds", entity_id=entity_id)
 
         if not recs_set:
             return RecsResponse(

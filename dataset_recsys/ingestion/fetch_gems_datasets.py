@@ -211,7 +211,7 @@ def extract_dataset_profiles(payload: Dict[str, Any]) -> List[DatasetProfile]:
 
 def run_ingestion(token: str) -> tuple[Dict[str, Any], List[DatasetProfile]]:
     """
-    Fetch portal data and return both the payload and the extracted dataset profiles.
+    Fetch DataGEMS data and return both the payload and the extracted dataset profiles.
     """
     try:
         raw_data = fetch_search(token)

@@ -33,7 +33,7 @@
             }
         },
         {
-            "id": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
+            "id": "07382b91-5bc5-42f9-8391-33adc2460c19",
             "labels": ["sc:Dataset"],
             "properties": {
             "description": "The seed dataset used as the basis for recommendations."
@@ -57,7 +57,7 @@
             "labels": ["consist_of"]
         },
         {
-            "from": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
+            "from": "07382b91-5bc5-42f9-8391-33adc2460c19",
             "to": "operator-recommender",
             "labels": ["input"]
         }

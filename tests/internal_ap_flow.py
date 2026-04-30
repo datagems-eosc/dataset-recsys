@@ -15,7 +15,7 @@ How to run locally:
 3. Test the direct recommendation flow:
    curl -X POST "http://127.0.0.1:8000/test/recommend" \
      -H "Content-Type: application/json" \
-     -d '{"entity_id": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f", "n": 5}'
+     -d '{"entity_id": "07382b91-5bc5-42f9-8391-33adc2460c19", "n": 5}'
 
 4. Test the full AP flow:
    curl -X POST "http://127.0.0.1:8000/test/recommend/ap" \

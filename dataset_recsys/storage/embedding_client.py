@@ -166,6 +166,13 @@ class EmbeddingClient:
             cur.execute(query, (query_embedding, application, query_embedding, top_k))
             return cur.fetchall()
 
+    def delete_single_embedding(self, dataset_id: str) -> int:
+        """Delete a single embedding from the database."""
+        query = f"DELETE FROM {self.schema}.dataset_embeddings WHERE dataset_id = %s"
+        with self.conn.cursor() as cur:
+            cur.execute(query, (dataset_id,))
+            return cur.rowcount
+
     # -------------------------
     # UTILITIES
     # -------------------------

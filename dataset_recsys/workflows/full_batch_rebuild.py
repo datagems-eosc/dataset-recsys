@@ -328,7 +328,7 @@ if __name__ == "__main__":
 
     # TODO: support a "load from existing artifacts" mode to skip Bedrock and
     # embedding recomputation during local debugging.
-    TEST_MODE = True
+    TEST_MODE = False
     test_limit = 1 if TEST_MODE else None
 
     run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -20,6 +20,7 @@ from dataset_recsys.api.logging.logging_config import (
 from dataset_recsys.api.routes.datagems import router as datagems_router
 from dataset_recsys.api.routes.health import router as health_router
 from dataset_recsys.api.routes.mathe import router as mathe_router
+from dataset_recsys.api.routes.admin import router as admin_router
 
 setup_logging()
 logger = structlog.get_logger(__name__)
@@ -44,6 +45,7 @@ app.add_middleware(
 # --- Routers ---
 app.include_router(datagems_router)
 app.include_router(mathe_router)
+app.include_router(admin_router)
 app.include_router(health_router)
 
 
@@ -151,7 +153,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 #
 # Example datagems' dataset id for testing:
-# 9b25bc46-8bd3-4f7f-94b4-52dbc38c130f
+# 07382b91-5bc5-42f9-8391-33adc2460c19
 #
 # To obtain a Bearer token (valid for a few minutes), run:
 # TOKEN=$(curl --location "$DATAGEMS_AUTH_URL" \
@@ -163,7 +165,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 #   --data-urlencode "scope=$DATAGEMS_SCOPE" | jq -r '.access_token')
 #
 # Then call the API with:
-# curl -X POST "http://127.0.0.1:8000/dataset-recsys/recommend?entity_id=9b25bc46-8bd3-4f7f-94b4-52dbc38c130f&n=5" \
+# curl -X POST "http://127.0.0.1:8000/dataset-recsys/recommend?entity_id=07382b91-5bc5-42f9-8391-33adc2460c19&n=5" \
 #      -H "Authorization: Bearer $TOKEN"
 
 # curl -X POST "http://127.0.0.1:8000/dataset-recsys/recommend/ap" \

@@ -16,7 +16,7 @@ def sample_ap_request() -> Dict:
 @pytest.mark.asyncio
 async def test_recommendation_ap_flow(sample_ap_request):
     """
-    Test the full Portal AP flow:
+    Test the full AP flow:
     1. Send AP JSON to /dataset-recsys/recommend/ap
     2. Verify recommendation sc:Dataset nodes were added
     3. Verify the operator is linked to the results via ranked output edges

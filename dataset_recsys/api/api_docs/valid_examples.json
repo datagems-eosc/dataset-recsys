@@ -3,7 +3,7 @@
     "summary": "Successful Entity-to-Entity recommendation",
     "description": "Returns a list of related entity IDs for the given entity.",
     "value": {
-      "entity_id": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
+      "entity_id": "07382b91-5bc5-42f9-8391-33adc2460c19",
       "recommendations": [
         {
           "entity_id": "67f22d91-2b1a-4e8c-8f92-52dbc38c130f"

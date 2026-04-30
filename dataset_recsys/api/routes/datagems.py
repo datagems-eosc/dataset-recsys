@@ -139,7 +139,7 @@ async def get_recommendations(
             )
 
         raw_recs = recs_client.get_recommendations(
-            application="portal", entity_id=request.entity_id
+            application="ds2ds", entity_id=request.entity_id
         )
 
         filtered_recs = [Recommendation(entity_id=item) for item in raw_recs if item in authorized_set]
@@ -192,7 +192,7 @@ Processes an Analytical Pattern (AP) request by extracting the seed dataset and 
             "content": {
                 "application/json": {
                     "examples": {
-                        "Portal Missing Edge": ap_errors_data.get("422_ap_missing_input_edge"),
+                        "Missing Edge": ap_errors_data.get("422_ap_missing_input_edge"),
                         "Operator Missing": ap_errors_data.get("422_ap_missing_operator"),
                     }
                 }
@@ -213,8 +213,8 @@ async def get_recommendations_ap(
         ...,
         description="The Analytical Pattern graph in JSON format",
         openapi_examples={
-            "Portal Request": {
-                "summary": "Standard Portal Request",
+            "Request": {
+                "summary": "Standard Request",
                 "description": "Infers entity_id from the incoming 'input' edge.",
                 "value": ap_request_example,
             }
@@ -238,225 +238,3 @@ async def get_recommendations_ap(
     except Exception as e:
         logger.error(f"Error processing recommendation AP request: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
-
-
-@router.post(
-    "/dataset/add",
-    summary="Add a new dataset to the system",
-    description="""
-Fetch a dataset from external sources, generate its embeddings, and integrate it into the recommendation engine.
-If the dataset already exists, the system will skip the addition to avoid duplicates.
-    """,
-    responses={
-        200: {
-            "description": "Dataset processed successfully",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "status": "success",
-                        "message": "Dataset ds_123 successfully added and recommendations updated."
-                    }
-                }
-            },
-        },
-        401: {
-            "description": "Unauthorized - Invalid or missing token",
-            "content": {
-                "application/json": {
-                    "examples": {"Invalid Token": errors_data.get("401")}
-                }
-            },
-        },
-        403: {
-            "description": "Forbidden - Insufficient permissions",
-            "content": {
-                "application/json": {
-                    "examples": {"Access Denied": errors_data.get("403")}
-                }
-            },
-        },
-        422: {
-            "description": "Validation Error",
-            "content": {
-                "application/json": {
-                    "examples": {
-                        "Missing Entity ID": errors_data.get("422_missing_entity_id")
-                    }
-                }
-            },
-        },
-        404: {
-            "description": "Not Found - Dataset not found in external source",
-            "content": {
-                "application/json": {
-                    "example": {"detail": "Dataset not found in external repository."}
-                }
-            },
-        },
-        500: {
-            "description": "Internal Server Error",
-            "content": {
-                "application/json": {
-                    "examples": {"System Failure": errors_data.get("500")}
-                }
-            },
-        },
-    },
-)
-async def add_dataset(
-    entity_id: str = Query(..., description="The dataset identifier to add."),
-    application: str = Query("portal", description="The application context for the dataset."),
-    claims: dict = Depends(security.require_role(["user", "dg_user"])),
-    token: str = Depends(security.oauth2_scheme),
-):
-    user_subject = claims.get("sub")
-    log = logger.bind(item_id=entity_id, UserId=user_subject)
-
-    accounting_logger.info(
-        "Dataset Addition Request Received",
-        UserId=user_subject,
-        Action="add_dataset",
-        Resource="dataset2dataset_recommender",
-        Domain="datagems",
-        ItemId=entity_id,
-        Timestamp=datetime.utcnow().isoformat() + "Z",
-    )
-
-    entity_id = entity_id.strip()
-    if not entity_id:
-        log.warning("Missing entity_id.")
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Dataset ID is required.",
-        )
-    
-    # It is more efficient to reuse the global recs_client or define these outside 
-    # the request scope, but keeping local as per your original snippet logic.
-    embedding_client = EmbeddingClient()
-    
-    try:
-        moma = MomaDataset(user_token=token)
-        # Assuming get_from_external might raise an error if not found
-        moma.get_from_external(entity_id)
-        profile = moma.to_dataset_profile()
-
-        was_added = await process_incremental_update(
-            profile, 
-            application=application, 
-            recs_client=recs_client, 
-            emb_client=embedding_client
-        )
-
-        if not was_added:
-            return {
-                "status": "ignored",
-                "message": f"Dataset {entity_id} is already in the system.",
-            }
-
-        return {
-            "status": "success",
-            "message": f"Dataset {entity_id} successfully added and recommendations updated.",
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.error(f"Error adding dataset {entity_id}: {e}", exc_info=True)
-        # Providing a cleaner error message for the user while logging the full exception
-        raise HTTPException(
-            status_code=500,
-            detail="An unexpected error occurred while adding the dataset."
-        )
-
-@router.post(
-    "/dataset/remove",
-    summary="Remove a dataset from the system",
-    description="""
-Performs a clean, incremental removal of a dataset from the recommendation engine. 
-
-**Workflow:**
-1. **Inbound Cleanup**: Scans the Redis index to find every other dataset currently recommending this ID and removes the reference.
-2. **Outbound Cleanup**: Deletes the specific recommendation list (ZSET) for this dataset.
-3. **Index Cleanup**: Removes the dataset ID from the application's global index.
-4. **Vector Cleanup**: Deletes the embedding record from the PostgreSQL vector database.
-    """,
-    responses={
-        200: {
-            "description": "Dataset removed successfully",
-            "content": {
-                "application/json": {
-                    "example": {"status": "success", "message": "Dataset ds_123 removed."}
-                }
-            },
-        },
-        404: {
-            "description": "Not Found",
-            "content": {
-                "application/json": {
-                    "example": {"detail": "Dataset not found in the recommendation engine."}
-                }
-            },
-        },
-        500: {"description": "Internal Server Error"}
-    }
-)
-async def remove_dataset(
-    entity_id: str = Query(..., description="The unique identifier of the dataset to be removed."),
-    application: str = Query("portal", description="The application context for the dataset."),
-    claims: dict = Depends(security.require_role(["user", "dg_user"])),
-):
-    user_subject = claims.get("sub")
-    log = logger.bind(item_id=entity_id, UserId=user_subject)
-
-    accounting_logger.info(
-        "Dataset Removal Request Received",
-        UserId=user_subject,
-        Action="remove_dataset",
-        Resource="dataset2dataset_recommender",
-        Domain="datagems",
-        ItemId=entity_id,
-        Timestamp=datetime.utcnow().isoformat() + "Z",
-    )
-
-    # Validate input
-    entity_id = entity_id.strip()
-    if not entity_id:
-        raise HTTPException(status_code=422, detail="Entity ID is required.")
-
-    try:
-        from dataset_recsys.workflows.dataset_removal import dataset_removal
-        
-        # Dependency check: ensuring we have our clients ready
-        embedding_client = EmbeddingClient()
-        
-        was_removed = await dataset_removal(
-            entity_id=entity_id, 
-            application=application,
-            recs_client=recs_client, 
-            emb_client=embedding_client
-        )
-
-        if not was_removed:
-            log.warning("Removal failed: dataset does not exist.")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Dataset {entity_id} not found in the system."
-            )
-
-        accounting_logger.info(
-            "Dataset Removal Processed",
-            UserId=user_subject,
-            Action="remove_dataset",
-            ItemId=entity_id,
-            Timestamp=datetime.utcnow().isoformat() + "Z",
-        )
-
-        return {
-            "status": "success",
-            "message": f"Dataset {entity_id} removed from the system.",
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.error(f"Error during removal of {entity_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred during removal.")

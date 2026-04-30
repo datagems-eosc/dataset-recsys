@@ -1,5 +1,5 @@
 {
-  "Portal Request Success": {
+  "Request Success": {
     "summary": "Successful recommendation for the DataGEMS portal",
     "description": "Returns a graph enriched with recommended dataset nodes linked to the operator through ranked output edges.",
     "value": {    

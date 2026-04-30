@@ -91,21 +91,21 @@ This index is used to:
 
 ### Example full structure
 
-Example Redis keys for the **MathE materials recommender**:
+Example Redis keys for the **MathE recommender**:
 
 ```
-recs:index:mathe
-recs:mathe:6.pdf
-recs:mathe:65.pdf
-recs:mathe:221.pdf
+recs:ds2ds_mathe:ds2ds
+recs:ds2ds_mathe:6.pdf
+recs:ds2ds_mathe:65.pdf
+recs:ds2ds_mathe:221.pdf
 ```
 
-Example Redis keys for the **dataset portal recommender**:
+Example Redis keys for the **Datagems recommender**:
 
 ```
-recs:index:portal
-recs:portal:meteo_era5land
-recs:portal:wikipedia
+recs:index:ds2ds
+recs:ds2ds:meteo_era5land
+recs:ds2ds:wikipedia
 ```
 
 ---
@@ -128,13 +128,13 @@ MathE materials:
 6.pdf → {7.pdf, 9.pdf, 221.pdf}
 ```
 
-Dataset portal:
+Datagems:
 
 ```
 meteo_era5land → {weather_stations_climpact, wikipedia}
 ```
 
-This design allows the same storage layer to support multiple applications (e.g., MathE materials, dataset portal, or other entity collections).
+This design allows the same storage layer to support multiple applications (e.g., MathE materials, datasets, or other entity collections).
 
 ---
 

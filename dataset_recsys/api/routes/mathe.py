@@ -51,7 +51,7 @@ async def get_recommendations(
 
     try:
         raw_recs = recs_client.get_recommendations(
-            application="mathe", entity_id=entity_id
+            application="ds2ds_mathe", entity_id=entity_id
         )
 
         filtered_recs = [Recommendation(entity_id=item) for item in raw_recs]

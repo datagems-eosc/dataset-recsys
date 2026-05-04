@@ -10,11 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from dataset_recsys.api.analytical_patterns.models import Recommendation, RecsResponse
 from dataset_recsys.storage.recommendation_client import RecommendationClient
-
-project_root = "/app" 
-if project_root not in sys.path:
-    sys.path.append(project_root)
-from data.mathe.syncer import MathE_Syncer
+from dataset_recsys.utils.syncer import MathE_Syncer
 
 MATHE_PDF_PATH = Path(os.getenv("MATHE_PDF_PATH", "/mnt/s3/default"))
 syncer = MathE_Syncer(base_dir=MATHE_PDF_PATH)

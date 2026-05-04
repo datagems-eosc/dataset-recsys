@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 import time
 from datetime import datetime
@@ -9,6 +10,10 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from dataset_recsys.api.analytical_patterns.models import Recommendation, RecsResponse
 from dataset_recsys.storage.recommendation_client import RecommendationClient
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
+if project_root not in sys.path:
+    sys.path.append(project_root)
 from data.mathe.syncer import MathE_Syncer
 
 MATHE_PDF_PATH = Path(os.getenv("MATHE_PDF_PATH", "/mnt/s3/default"))

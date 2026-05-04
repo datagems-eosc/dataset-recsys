@@ -12,7 +12,8 @@ from dataset_recsys.api.analytical_patterns.models import Recommendation, RecsRe
 from dataset_recsys.storage.recommendation_client import RecommendationClient
 from dataset_recsys.utils.syncer import MathE_Syncer
 
-MATHE_PDF_PATH = Path(os.getenv("MATHE_PDF_PATH", "/mnt/s3/default"))
+MATHE_PATH = Path(os.getenv("MATHE_PATH", "/mnt/s3/default"))
+MATHE_PDF_PATH = MATHE_PATH / "pdfs"
 syncer = MathE_Syncer(base_dir=MATHE_PDF_PATH)
 
 logger = structlog.get_logger(__name__)

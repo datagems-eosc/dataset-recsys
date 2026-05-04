@@ -60,3 +60,18 @@ class MathE_Syncer:
         if self.data is None:
             self._init_data()
         return list(self.data)
+
+    def count_available_pdfs(self) -> int:
+        """
+        Counts all .pdf files in the base directory (non-recursive).
+        Useful for health checks when data.json is not yet available.
+        """
+        if not self._base_dir.exists():
+            return 0
+        
+        # This counts files ending in .pdf (case-insensitive)
+        pdf_files = [
+            f for f in self._base_dir.iterdir() 
+            if f.is_file() and f.suffix.lower() == ".pdf"
+        ]
+        return len(pdf_files)

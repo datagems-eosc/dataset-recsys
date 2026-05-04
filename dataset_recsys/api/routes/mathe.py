@@ -107,3 +107,14 @@ async def sync_datasets():
     except Exception as e:
         logger.error("Sync failed: Unexpected error", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail="Internal Server Error during sync.")
+
+# Example of how you might call it in your endpoint
+@router.get("/status")
+async def get_status():
+    mathe = MathE_Syncer(base_dir=Path(MATHE_PDF_PATH))
+    count = mathe.count_available_pdfs()
+    return {
+        "status": "ready" if count > 0 else "indexing",
+        "pdf_count": count,
+        "message": f"Found {count} PDFs ready for processing."
+    }

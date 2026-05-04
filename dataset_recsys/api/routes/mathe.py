@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from dataset_recsys.api.analytical_patterns.models import Recommendation, RecsResponse
 from dataset_recsys.storage.recommendation_client import RecommendationClient
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
+project_root = "/app" 
 if project_root not in sys.path:
     sys.path.append(project_root)
 from data.mathe.syncer import MathE_Syncer

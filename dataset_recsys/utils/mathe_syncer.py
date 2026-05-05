@@ -23,6 +23,7 @@ class MathE_Syncer:
         self.bedrock = boto3.client("bedrock-runtime", region_name=self.region, aws_access_key_id=AWS_ACCESS_KEY, aws_secret_access_key=AWS_SECRET_KEY)
         
         # Graceful shutdown handling
+        self.is_running = False  # Add this line        
         self.keep_running = True
         signal.signal(signal.SIGTERM, self._handle_exit)                
 
@@ -95,10 +96,18 @@ class MathE_Syncer:
         }
 
     def sync_and_process(self, limit: Optional[int] = None):
-        print("Starting sync/process lifecycle...")
-        self._init_data()      # Discover new files
-        self.run_batch_ocr(limit=limit) # Perform OCR
-        print("Lifecycle complete.")
+        if self.is_running:
+            print("Sync job is already in progress.")
+            return
+        
+        self.is_running = True
+        try:
+            print("Starting sync/process lifecycle...")
+            self._init_data()      
+            self.run_batch_ocr(limit=limit) 
+            print("Lifecycle complete.")
+        finally:
+            self.is_running = False  # Ensure it always releases the lock
 
     # --- OCR Logic ---
 

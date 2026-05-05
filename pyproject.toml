@@ -1,10 +1,16 @@
-[tool.poetry]
+[project]
 name = "dataset-recsys"
 version = "0.1.0"
 description = "Dataset recommender for the DataGEMS project"
-authors = ["Stavroula Eleftherakis <selefth@yahoo.com>"]
+authors = [
+    { name = "Stavroula Eleftherakis", email = "selefth@yahoo.com" },
+]
 license = "MIT"
 readme = "README.md"
+requires-python = ">=3.11,<4.0"
+dynamic = ["dependencies"]
+
+[tool.poetry]
 packages = [{ include = "dataset_recsys" }, { include = "recs_metrics" }]
 
 [[tool.poetry.source]]
@@ -26,7 +32,10 @@ python-jose = "^3.5.0"
 pydantic-settings = "^2.13.1"
 iniconfig = "^2.3.0"
 psycopg2-binary = "^2.9.11"
-torch = { version = ">=2.6.0", source = "pytorch-cpu" }
+torch = [
+    { version = ">=2.6.0", source = "pytorch-cpu", markers = "platform_system != 'Darwin'" },
+    { version = ">=2.6.0", markers = "platform_system == 'Darwin'" },
+]
 sentence-transformers = "3.0.1"
 
 [tool.poetry.group.train]

@@ -98,10 +98,18 @@ async def sync_data(background_tasks: BackgroundTasks):
 @router.get("/status")
 async def get_status():
     """Returns the current state of the dataset."""
-    df = syncer.get_df()
-    # Return count of pending vs completed
+    df = syncer.get()
+    total = len(df)
+    completed = int(df[df['status'] == 'completed'].shape[0])
+    failed = int(df[df['status'] == 'failed'].shape[0])
+    
+    # Calculate percentage
+    progress = (completed + failed) / total * 100 if total > 0 else 100
+    
     return {
-        "total_files": len(df),
-        "completed": int(df[df['status'] == 'completed'].shape[0]),
-        "pending": int(df[df['status'] == 'pending'].shape[0])
+        "progress_percent": round(progress, 2),
+        "total_files": total,
+        "completed": completed,
+        "failed": failed,
+        "is_syncing": syncer.is_running
     }

@@ -1,3 +1,5 @@
+import signal
+
 import boto3
 import json
 import re
@@ -19,6 +21,14 @@ class MathE_Syncer:
         self.model_id = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
         self.region = "eu-central-1"
         self.bedrock = boto3.client("bedrock-runtime", region_name=self.region, aws_access_key_id=AWS_ACCESS_KEY, aws_secret_access_key=AWS_SECRET_KEY)
+        
+        # Graceful shutdown handling
+        self.keep_running = True
+        signal.signal(signal.SIGTERM, self._handle_exit)                
+
+    def _handle_exit(self, signum, frame):
+        print("Received SIGTERM, finishing current file...")
+        self.keep_running = False
 
     def _init_data(self) -> None:
         """Loads data.json and performs discovery for new PDFs."""
@@ -98,6 +108,10 @@ class MathE_Syncer:
         
         processed = 0
         for entry in self.data:
+            if not self.keep_running:
+                print("Shutdown signaled. Saving and exiting.")
+                break
+            
             if entry.get("claude_ocr_text") and not entry["claude_ocr_text"].startswith("OCR Failed"):
                 continue
             if limit and processed >= limit:
@@ -113,6 +127,13 @@ class MathE_Syncer:
             
             self._save_state()
             processed += 1
+
+        if not self.data or all(e['status'] in ['completed', 'failed'] for e in self.data):
+            self._send_notification("OCR process finished for all files.")
+        
+    def _send_notification(self, msg: str):
+        # Placeholder for notification logic (e.g., email, Slack)
+        print(f"NOTIFICATION: {msg}")
 
     def _perform_claude_call(self, p: Path) -> str:
         # (Same logic as previous step)

@@ -6,11 +6,11 @@ from datetime import datetime
 
 from pydantic import BaseModel
 import structlog
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status, BackgroundTasks
 
 from dataset_recsys.api.analytical_patterns.models import Recommendation, RecsResponse
 from dataset_recsys.storage.recommendation_client import RecommendationClient
-from dataset_recsys.utils.syncer import MathE_Syncer
+from dataset_recsys.utils.mathe_syncer import MathE_Syncer
 
 MATHE_PATH = Path(os.getenv("MATHE_PATH", "/mnt/s3/default"))
 MATHE_PDF_PATH = MATHE_PATH / "pdfs"
@@ -21,11 +21,6 @@ accounting_logger = structlog.get_logger("accounting")
 
 router = APIRouter(prefix="/dataset-recsys/mathe", tags=["MathE Recommendation Service"])
 recs_client = RecommendationClient()
-
-class SyncResponse(BaseModel):
-    message: str
-    datasets_found: int
-    source_folder: str
 
 @router.post(
     "/recommend",
@@ -85,37 +80,28 @@ async def get_recommendations(
         log.error("Unexpected error in MathE recommendations", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
-@router.post(
-    "/sync",
-    response_model=SyncResponse,
-    summary="Synchronize MathE dataset",
-    description="Loads the MathE dataset metadata from the mounted S3 volume and returns the count of items."
-)
-async def sync_datasets():
-    try:
-        # get() triggers _init_data() if self.data is None
-        df = syncer.get()
-        count = len(df)
-        
-        return SyncResponse(
-            message="Synchronization successful.",
-            datasets_found=count,
-            source_folder=str(MATHE_PDF_PATH)
-        )
-    except FileNotFoundError as e:
-        logger.error("Sync failed: File not found", error=str(e))
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.error("Sync failed: Unexpected error", error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal Server Error during sync.")
+@router.post("/sync")
+async def sync_data(background_tasks: BackgroundTasks):
+    """
+    Triggers the sync and OCR process.
+    Uses BackgroundTasks so the API returns immediately.
+    """
+    # Trigger the lifecycle as a background task
+    background_tasks.add_task(syncer.sync_and_process)
+    
+    return {
+        "message": "Sync and OCR process initiated.",
+        "status": "Accepted",
+        "details": "The system is now discovering new PDFs and processing them in the background."
+    }
 
-# Example of how you might call it in your endpoint
 @router.get("/status")
 async def get_status():
-    mathe = MathE_Syncer(base_dir=Path(MATHE_PDF_PATH))
-    count = mathe.count_available_pdfs()
+    """Returns the current state of the dataset."""
+    df = syncer.get_df()
+    # Return count of pending vs completed
     return {
-        "status": "ready" if count > 0 else "indexing",
-        "pdf_count": count,
-        "message": f"Found {count} PDFs ready for processing."
+        "total_files": len(df),
+        "completed": int(df[df['status'] == 'completed'].shape[0]),
+        "pending": int(df[df['status'] == 'pending'].shape[0])
     }

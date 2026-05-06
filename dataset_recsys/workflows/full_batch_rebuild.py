@@ -96,8 +96,6 @@ class FullBatchRebuildWorkflow:
         processed_catalog = self._preprocess_catalog(enriched_catalog)
         embeddings = self._generate_embeddings(processed_catalog)
         self.write_embeddings(embeddings)
-        # TODO: store embedding metadata in a persistent store linked to the embeddings in the vector DB
-        # self.write_embeddings_metadata(processed_catalog, embeddings)
         recommendations = self._compute_recommendations(embeddings, processed_catalog)
         self._write_recommendations(recommendations)
 

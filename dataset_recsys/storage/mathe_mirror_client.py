@@ -34,28 +34,33 @@ class MatheMirrorClient:
     # CONTENT RETRIEVAL
     # -------------------------
 
-    def get_material_id_by_question_id(self, question_id: int) -> Optional[str]:
+    def get_material_by_question_id(self, question_id: int) -> Optional[Dict[str, Any]]:
         """
         Retrieves the most clicked PDF (material type 3) associated with the 
         topic of a specific question.
         """
         query = """
         SELECT 
-            m.id
+            m.id,
+            m.title,
+            m.author,
+            m.description,
+            m.link,
+            m.clicks,
+            m.file_name,
+            m.file_ext
         FROM platform__sna__questions q
         JOIN material_top_sub mts ON q.topic = mts.platformtopicid
         JOIN platform_materials m ON mts.platformmaterialid = m.id
         WHERE q.id = %s 
-          AND m.file_ext = 'pdf'
+        AND m.file_ext = 'pdf'
         ORDER BY m.clicks DESC
         LIMIT 1;
         """
 
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (question_id,))
-            result = cur.fetchone()
-            # result will be a tuple like (465,) or None
-            return str(result[0]) if result else None        
+            return cur.fetchone()
 
     # -------------------------
     # UTILITIES

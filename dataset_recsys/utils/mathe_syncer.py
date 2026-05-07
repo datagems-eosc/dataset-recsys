@@ -107,7 +107,7 @@ class MathE_Syncer:
             print("Starting sync/process lifecycle...")
             self._init_data()
             print(f"Discovered {len(self.data)} total entries, with {self.count_available_pdfs()} available PDFs.")
-            limit = 1 # For testing, process only 1 file at a time. Remove or adjust this for full batch processing.
+            # limit = 1 # For testing, process only 1 file at a time. Remove or adjust this for full batch processing.
             self.run_batch_ocr(limit=limit)
             print("Lifecycle complete.")
         except Exception as e:

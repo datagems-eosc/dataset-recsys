@@ -109,6 +109,7 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
 
     for i in range(0, len(texts), batch_size):
         batch = texts[i : i + batch_size]
+        print(f"Encoding batch {i // batch_size + 1} with {len(batch)} materials...")
         batch_encodings = encode_texts(batch, model_name=DEFAULT_MATHE_EMBEDDING_MODEL)
         all_embeddings.append(batch_encodings)
 

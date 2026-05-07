@@ -8,13 +8,13 @@ from functools import partial
 from time import perf_counter
 import os
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 import numpy as np
 
 from dataset_recsys.ingestion.fetch_gems_datasets import DatasetProfile, fetch_catalog
 from dataset_recsys.utils.bedrock import enrich_batch
 from dataset_recsys.embeddings import build_embedding_text, encode_texts
-from dataset_recsys.retrieval import build_recommendations
+from dataset_recsys.retrieval import RankedNeighbors, rank_similar_entities
 from dataset_recsys.storage.recommendation_client import RecommendationClient
 from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.utils.text_preprocessing import preprocess_catalog
@@ -44,9 +44,8 @@ CatalogPreprocessor = Callable[[list[DatasetProfile]], list[DatasetProfile]]
 EmbeddingGenerator = Callable[[list[DatasetProfile]], Any]
 EmbeddingWriter = Callable[[Any], None]
 # EmbeddingMetadataWriter = Callable[[list[DatasetProfile], Any], None]
-RecommendationList = list[dict[str, Any]]
-RecommendationComputer = Callable[[Any, list[DatasetProfile]], RecommendationList]
-RecommendationWriter = Callable[[RecommendationList], None]
+RecommendationComputer = Callable[[Any, list[DatasetProfile]], RankedNeighbors]
+RecommendationWriter = Callable[[RankedNeighbors], None]
 
 
 @dataclass(slots=True)
@@ -157,7 +156,7 @@ class FullBatchRebuildWorkflow:
         self,
         embeddings: Any,
         processed_catalog: list[DatasetProfile],
-    ) -> RecommendationList:
+    ) -> RankedNeighbors:
         self.logger.info("Computing recommendation lists for full catalog")
         recommendations = self.compute_recommendations(embeddings, processed_catalog)
         self._validate_recommendations(recommendations)
@@ -166,7 +165,7 @@ class FullBatchRebuildWorkflow:
 
     def _write_recommendations(
         self,
-        recommendations: RecommendationList,
+        recommendations: RankedNeighbors,
     ) -> None:
         self.logger.info("Writing recommendations to serving store")
         self.write_recommendations(recommendations)
@@ -178,10 +177,10 @@ class FullBatchRebuildWorkflow:
             raise TypeError("Catalog must be returned as a list of DatasetProfile objects.")
 
     @staticmethod
-    def _validate_recommendations(recommendations: RecommendationList) -> None:
-        if not isinstance(recommendations, list):
+    def _validate_recommendations(recommendations: RankedNeighbors) -> None:
+        if not isinstance(recommendations, dict):
             raise TypeError(
-                "Recommendations must be returned as a list of ranked recommendation entries."
+                "Recommendations must be returned as a ranked-neighbor mapping."
             )
 
 
@@ -292,7 +291,7 @@ def run_full_batch_rebuild(
 
     def compute_recommendations_step(payload, catalog):
         embeddings = payload["embeddings"]
-        return build_recommendations(catalog, embeddings)
+        return rank_similar_entities([profile.id for profile in catalog], embeddings)
 
     def write_recommendations_step(recommendations):
         recs_client.store_recommendations(application=application, data=recommendations)
@@ -401,7 +400,7 @@ if __name__ == "__main__":
 
     def compute_recommendations_step(payload, catalog):
         embeddings = payload["embeddings"]
-        return build_recommendations(catalog, embeddings)
+        return rank_similar_entities([profile.id for profile in catalog], embeddings)
 
     def write_recommendations_step(recommendations):
         stored_entities = recs_client.store_recommendations(application=application, data=recommendations)

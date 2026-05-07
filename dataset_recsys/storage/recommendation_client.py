@@ -46,20 +46,33 @@ class RecommendationClient:
     def _index_key(self, application: str) -> str:
         return f"recs:index:{application}"
 
-    # TODO: In the future, we will keep only dicts of entity_id -> score, 
-    # and remove support for ranked lists without explicit scores.
     def _normalize_recommendations(self, items) -> Dict[str, float]:
         """Convert input into {entity_id: score} mapping."""
-        if isinstance(items, dict):
-            return {str(k): float(v) for k, v in items.items() if k}
-        elif isinstance(items, list):
+        if not items:
+            return {}
+
+        if isinstance(items, list):
+            first_item = items[0]
+            if isinstance(first_item, (tuple, list)) and len(first_item) == 2:
+                return {str(entity_id): float(score) for entity_id, score in items if entity_id}
+
+            # Backward compatibility for legacy ranked lists without explicit scores.
             n = len(items)
-            return {str(k): float(n - i) for i, k in enumerate(items) if k}
-        else:
-            raise ValueError(
-                "Expected recommendations to be a dict of entity_id -> score, "
-                "or a list of entity_ids ranked by relevance."
-            )
+            return {
+                str(entity_id): float(n - rank)
+                for rank, entity_id in enumerate(items)
+                if entity_id
+            }
+
+        # Backward compatibility for precomputed score maps.
+        if isinstance(items, dict):
+            return {str(entity_id): float(score) for entity_id, score in items.items() if entity_id}
+
+        raise ValueError(
+            "Expected recommendations to be a list of (entity_id, score) pairs, "
+            "a dict of entity_id -> score, "
+            "or a legacy ranked list of entity_ids."
+        )
 
     def store_recommendations(self, application: str, data) -> int:
         """Store scored recommendations for one application."""
@@ -143,17 +156,25 @@ class RecommendationClient:
                 pipe.zadd(rec_key, recommendations)
             pipe.execute()
 
-    def update_neighbor_recs(self, application: str, neighbor_id: str, new_entity_id: str, score: float, limit: int = 20):
+    def update_neighbor_recs(
+        self,
+        application: str,
+        neighbor_id: str,
+        new_entity_id: str,
+        score: float,
+        limit: int | None = None,
+    ):
         """
         Inject a new entity into an existing neighbor's recommendation list.
-        Keeps the ZSET capped at 'limit'.
+        If limit is provided, keeps the ZSET capped to that many highest-score entries.
         """
         rec_key = self._recommendation_key(application, neighbor_id)
         
         with self.r.pipeline() as pipe:
             pipe.zadd(rec_key, {new_entity_id: score})
-            # Remove elements outside the top N to keep Redis lean
-            pipe.zremrangebyrank(rec_key, 0, -(limit + 1)) 
+            if limit is not None:
+                # Remove elements outside the top N to keep Redis lean.
+                pipe.zremrangebyrank(rec_key, 0, -(limit + 1))
             pipe.execute()
 
     def remove_single_entity_recs(self, application: str, entity_id: str):

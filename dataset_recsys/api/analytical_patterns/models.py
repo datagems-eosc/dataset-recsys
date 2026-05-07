@@ -9,7 +9,6 @@ class RecsRequest(BaseModel):
     n: int = Field(
         10,
         gt=0,
-        le=20,
         description="Number of similar items to return",
     )
 

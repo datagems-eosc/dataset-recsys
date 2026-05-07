@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Query, status, BackgroundTasks
 from dataset_recsys.api.analytical_patterns.models import Recommendation, RecsResponse
 from dataset_recsys.storage.recommendation_client import RecommendationClient
 from dataset_recsys.utils.mathe_syncer import MathE_Syncer
+from dataset_recsys.workflows.mathe_sync_pipeline import run_mathe_pipeline
 
 MATHE_PATH = Path(os.getenv("MATHE_PATH", "/mnt/s3/default"))
 MATHE_PDF_PATH = MATHE_PATH / "pdfs"
@@ -36,7 +37,7 @@ async def get_recommendations(
         description="The MathE material identifier (for example, `6.pdf`).",
         required=True,
     ),
-    n: int = Query(10, gt=0, le=20, description="Number of similar items to return"),
+    n: int = Query(10, gt=0, description="Number of similar items to return"),
 ):
     start_time = time.time()
 
@@ -60,7 +61,7 @@ async def get_recommendations(
 
     try:
         raw_recs = recs_client.get_recommendations(
-            application="ds2ds_mathe", entity_id=entity_id
+            application="mathe", entity_id=entity_id
         )
 
         filtered_recs = [Recommendation(entity_id=item) for item in raw_recs]
@@ -83,16 +84,16 @@ async def get_recommendations(
 @router.post("/sync")
 async def sync_data(background_tasks: BackgroundTasks):
     """
-    Triggers the sync and OCR process.
+    Triggers the sync, OCR, and recommendation refresh process.
     Uses BackgroundTasks so the API returns immediately.
     """
     # Trigger the lifecycle as a background task
-    background_tasks.add_task(syncer.sync_and_process)
+    background_tasks.add_task(run_mathe_pipeline, syncer)
     
     return {
-        "message": "Sync and OCR process initiated.",
+        "message": "Sync, OCR, and recommendation refresh initiated.",
         "status": "Accepted",
-        "details": "The system is now discovering new PDFs and processing them in the background."
+        "details": "The system is now discovering new PDFs, processing OCR, and rebuilding MathE recommendations in the background."
     }
 
 @router.get("/status")

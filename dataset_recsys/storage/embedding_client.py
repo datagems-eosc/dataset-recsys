@@ -150,20 +150,26 @@ class EmbeddingClient:
         self,
         application: str,
         query_embedding: List[float],
-        top_k: int = 10,
+        top_k: int | None = 10,
     ):
         # Using <=> for cosine distance. Similarity = 1 - (A <=> B)
+        limit_clause = "LIMIT %s" if top_k is not None else ""
         query = f"""
         SELECT dataset_id, 1 - (embedding <=> %s::vector) AS similarity
         FROM {self.schema}.dataset_embeddings
         WHERE application = %s
         ORDER BY embedding <=> %s::vector
-        LIMIT %s
+        {limit_clause}
         """
+        params = (
+            (query_embedding, application, query_embedding, top_k)
+            if top_k is not None
+            else (query_embedding, application, query_embedding)
+        )
 
         with self.conn.cursor() as cur:
             # Note: query_embedding must be a list or np.array
-            cur.execute(query, (query_embedding, application, query_embedding, top_k))
+            cur.execute(query, params)
             return cur.fetchall()
 
     def delete_single_embedding(self, dataset_id: str) -> int:

@@ -83,8 +83,10 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
     """Run MathE sync/OCR, rebuild recommendations, and publish them to Redis."""
     logger.info("Starting MathE online refresh pipeline")
     syncer.sync_and_process()
+    logger.info("MathE sync and OCR complete, loading data for recommendation refresh")
 
     entries = _load_mathe_data(syncer.json_file)
+    logger.info("Loaded %d entries from MathE OCR data file", len(entries))
     materials = _completed_materials(entries)
     if not materials:
         logger.warning("No completed MathE materials with OCR text found")
@@ -106,20 +108,20 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
     recommendations = rank_similar_entities(material_ids, embeddings)
 
     logger.info("Storing MathE recommendations in Redis")
-    
+    logger.info("Recommendations data: %s", recommendations)
     recs_client = _build_recommendation_client()
     redis_keys_updated = recs_client.store_recommendations(
         application=MATHE_APPLICATION,
         data=recommendations,
     )
-    ocr_data_deleted = _delete_ocr_data_file(syncer.json_file)
+    # ocr_data_deleted = _delete_ocr_data_file(syncer.json_file)
 
     summary = {
         "status": "completed",
         "processed_materials": len(materials),
         "redis_keys_updated": redis_keys_updated,
         "application": MATHE_APPLICATION,
-        "ocr_data_deleted": ocr_data_deleted,
+        # "ocr_data_deleted": ocr_data_deleted,
     }
     logger.info("Finished MathE online refresh pipeline: %s", summary)
     return summary

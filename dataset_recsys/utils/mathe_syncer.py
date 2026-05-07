@@ -47,6 +47,7 @@ class MathE_Syncer:
             if f.is_file() and f.suffix.lower() == ".pdf" and f.stem.isnumeric():
                 rel_id = f"./{f.name}"
                 if rel_id not in existing_ids:
+                    print(f"Discovered new PDF: {rel_id}")
                     self.data.append({
                         "id": rel_id,
                         "claude_ocr_text": None,
@@ -55,6 +56,7 @@ class MathE_Syncer:
                     new_found = True
         
         if new_found:
+            print("New PDFs found and added to data.json. Saving state.")
             self._save_state()
 
     def _save_state(self) -> None:
@@ -104,9 +106,12 @@ class MathE_Syncer:
         try:
             print("Starting sync/process lifecycle...")
             self._init_data()
-            print(f"Discovered {len(self.data)} total entries, with {self.count_available_pdfs()} available PDFs.")  
+            print(f"Discovered {len(self.data)} total entries, with {self.count_available_pdfs()} available PDFs.")
+            limit = 1 # For testing, process only 1 file at a time. Remove or adjust this for full batch processing.
             self.run_batch_ocr(limit=limit)
             print("Lifecycle complete.")
+        except Exception as e:
+            print(f"Error during sync/process lifecycle: {e}")
         finally:
             self.is_running = False  # Ensure it always releases the lock
 
@@ -116,6 +121,7 @@ class MathE_Syncer:
         if self.data is None:
             self._init_data()
         
+        print("Starting batch OCR process...")
         processed = 0
         for entry in self.data:
             if not self.keep_running:
@@ -126,6 +132,9 @@ class MathE_Syncer:
                 continue
             if limit and processed >= limit:
                 break
+            
+            print(f"Processing {entry['id']}...")
+            print(f"Current status: {entry.get('status')}, OCR text length: {len(str(entry.get('claude_ocr_text') or ''))}")
                 
             full_path = self._base_dir / entry["id"]
             try:
@@ -135,6 +144,7 @@ class MathE_Syncer:
                 entry["claude_ocr_text"] = f"OCR Failed: {str(e)}"
                 entry["status"] = "failed"
             
+            print(f"Finished processing {entry['id']}. Status: {entry['status']}, OCR text length: {len(str(entry.get('claude_ocr_text') or ''))}")
             self._save_state()
             processed += 1
 
@@ -156,7 +166,7 @@ class MathE_Syncer:
                 "role": "user",
                 "content": [
                     {"document": {"name": p.stem, "format": "pdf", "source": {"bytes": pdf_bytes}}},
-                    {"text": "Extract all text from this math document. Use LaTeX for equations."}
+                    {"text": "Extract all text from this math document. Use LaTeX for equations. Follow the native language of the document. Do not add any commentary or explanations, just return the raw extracted text."}
                 ]
             }],
             inferenceConfig={"temperature": 0.0}

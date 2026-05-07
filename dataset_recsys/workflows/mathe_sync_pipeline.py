@@ -105,6 +105,8 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
     logger.info("Computing full MathE nearest-neighbor recommendations")
     recommendations = rank_similar_entities(material_ids, embeddings)
 
+    logger.info("Storing MathE recommendations in Redis")
+    
     recs_client = _build_recommendation_client()
     redis_keys_updated = recs_client.store_recommendations(
         application=MATHE_APPLICATION,

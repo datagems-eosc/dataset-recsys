@@ -103,8 +103,9 @@ class MathE_Syncer:
         self.is_running = True
         try:
             print("Starting sync/process lifecycle...")
-            self._init_data()      
-            self.run_batch_ocr(limit=limit) 
+            self._init_data()
+            print(f"Discovered {len(self.data)} total entries, with {self.count_available_pdfs()} available PDFs.")  
+            self.run_batch_ocr(limit=limit)
             print("Lifecycle complete.")
         finally:
             self.is_running = False  # Ensure it always releases the lock

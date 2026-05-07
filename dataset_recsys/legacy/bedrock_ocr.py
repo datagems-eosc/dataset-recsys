@@ -88,7 +88,7 @@ def ocr_pdf_with_claude(pdf_path: Path):
                         "source": {"bytes": pdf_bytes}
                     }
                 },
-                {"text": "Extract all text from this math document. Use LaTeX for equations."}
+                {"text": "Extract all text from this math document. Use LaTeX for equations. Follow the native language of the document. Do not add any commentary or explanations, just return the raw extracted text."}
             ]
         }],
         inferenceConfig={"temperature": 0.0}

@@ -71,7 +71,7 @@ async def get_recommendations(
             )
 
         raw_recs = recs_client.get_recommendations(
-            application="mathe", entity_id=material_id
+            application="mathe", entity_id= material_id + ".pdf"
         )
 
         filtered_recs = [MatheRecommendation(material_id=item) for item in raw_recs]

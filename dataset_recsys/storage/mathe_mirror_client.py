@@ -24,7 +24,7 @@ class MatheMirrorClient:
             user=user or os.getenv("DB_DS_USER", "ds_writer"),
             password=password or os.getenv("DB_DS_PASSWORD", "postgres"),
         )
-        self.schema = os.getenv("MATHE_POSTGRES_SCHEMA", "public")
+        self.schema = "public"
         self.conn.autocommit = True
         
         with self.conn.cursor() as cur:

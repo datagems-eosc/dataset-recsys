@@ -63,6 +63,8 @@ async def get_recommendations(
 
     try:
         material_id = mathe_client.get_material_id_by_question_id(question_id)
+        # Cast to string if not None, else keep as None
+        material_id = str(material_id) if material_id is not None else None
         if not material_id:
             log.warning(f"No material found for question_id {question_id}")
             raise HTTPException(

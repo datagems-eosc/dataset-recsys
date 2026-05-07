@@ -28,3 +28,15 @@ class RecsResponse(BaseModel):
         ...,
         description="List of recommendations",
     )
+    
+class MatheRecommendation(BaseModel):
+    material_id: str = Field(..., description="The recommended entity ID")
+class MatheRecsResponse(BaseModel):
+    question_id: str = Field(
+        ...,
+        description="The ID of the question for which we want recommendations",
+    )
+    recommendations: List[MatheRecommendation] = Field(
+        ...,
+        description="List of recommendations",
+    )

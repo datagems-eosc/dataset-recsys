@@ -8,8 +8,9 @@ from pydantic import BaseModel
 import structlog
 from fastapi import APIRouter, HTTPException, Query, status, BackgroundTasks
 
-from dataset_recsys.api.analytical_patterns.models import Recommendation, RecsResponse
+from dataset_recsys.api.analytical_patterns.models import MatheRecommendation, MatheRecsResponse
 from dataset_recsys.storage.recommendation_client import RecommendationClient
+from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 from dataset_recsys.utils.mathe_syncer import MathE_Syncer
 from dataset_recsys.workflows.mathe_sync_pipeline import run_mathe_pipeline
 
@@ -22,57 +23,66 @@ accounting_logger = structlog.get_logger("accounting")
 
 router = APIRouter(prefix="/dataset-recsys/mathe", tags=["MathE Recommendation Service"])
 recs_client = RecommendationClient()
+mathe_client = MatheMirrorClient()
 
 @router.post(
     "/recommend",
-    response_model=RecsResponse,
+    response_model=MatheRecsResponse,
     summary="Get recommendations",
     description="""
 Retrieve the top-N recommendations for a given educational material (only PDFs are currently supported).
     """,
 )
 async def get_recommendations(
-    entity_id: str = Query(
+    question_id: str = Query(
         ...,
-        description="The MathE material identifier (for example, `6.pdf`).",
+        description="The MathE question identifier (for example, `6`).",
         required=True,
     ),
     n: int = Query(10, gt=0, description="Number of similar items to return"),
 ):
     start_time = time.time()
 
-    log = logger.bind(item_id=entity_id)
+    log = logger.bind(item_id=question_id)
     accounting_logger.info(
         "Recommendation Request Received",
         Action="get_recommendations",
         Resource="dataset2dataset_recommender",
         Domain="mathe",
-        ItemId=entity_id,
+        ItemId=question_id,
         Timestamp=datetime.utcnow().isoformat() + "Z",
     )
 
-    entity_id = entity_id.strip()
-    if not entity_id:
-        log.warning("Missing entity_id.")
+    question_id = question_id.strip()
+    if not question_id:
+        log.warning("Missing question_id.")
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Entity ID is required.",
+            detail="Question ID is required.",
         )
 
     try:
+        material_id = mathe_client.get_material_id_by_question_id(question_id)
+        if not material_id:
+            log.warning(f"No material found for question_id {question_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No material found for question_id {question_id}",
+            )
+
         raw_recs = recs_client.get_recommendations(
-            application="mathe", entity_id=entity_id
+            application="mathe", entity_id=material_id
         )
 
-        filtered_recs = [Recommendation(entity_id=item) for item in raw_recs]
+        filtered_recs = [MatheRecommendation(material_id=item) for item in raw_recs]
 
         query_time = time.time() - start_time
         log.info(
-            f"Returning {len(filtered_recs[:n])} MathE recs for {entity_id} in {query_time:.3f}s"
+            f"Returning {len(filtered_recs[:n])} MathE recs for {material_id} in {query_time:.3f}s"
         )
 
-        return RecsResponse(
-            entity_id=entity_id,
+        return MatheRecsResponse(
+            question_id=question_id,
             recommendations=filtered_recs[:n],
         )
     except HTTPException:

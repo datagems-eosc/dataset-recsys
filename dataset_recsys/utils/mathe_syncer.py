@@ -128,7 +128,7 @@ class MathE_Syncer:
                 print("Shutdown signaled. Saving and exiting.")
                 break
             
-            if entry.get("claude_ocr_text") and not entry["claude_ocr_text"].startswith("OCR Failed"):
+            if entry.get("status") == "completed" or (entry.get("claude_ocr_text") and not entry["claude_ocr_text"].startswith("OCR Failed")):
                 continue
             if limit and processed >= limit:
                 break
@@ -138,9 +138,11 @@ class MathE_Syncer:
                 
             full_path = self._base_dir / entry["id"]
             try:
-                entry["claude_ocr_text"] = self._perform_claude_call(full_path)
-                entry["status"] = "completed"
+                if not entry.get("status") == "failed":
+                    entry["claude_ocr_text"] = self._perform_claude_call(full_path)
+                    entry["status"] = "completed"
             except Exception as e:
+                print(f"Error processing {entry['id']}: {e}")
                 entry["claude_ocr_text"] = f"OCR Failed: {str(e)}"
                 entry["status"] = "failed"
             

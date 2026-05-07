@@ -9,7 +9,7 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 COPY pyproject.toml poetry.lock ./
 
 RUN poetry config virtualenvs.create false && \
-  poetry install --without train --without dev --without docs --no-interaction --no-ansi --no-root
+  poetry install --only main --no-interaction --no-ansi --no-root
 
 COPY dataset_recsys/ ./dataset_recsys/
 COPY recs_metrics/ ./recs_metrics/

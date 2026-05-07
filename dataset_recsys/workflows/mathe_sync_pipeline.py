@@ -10,6 +10,7 @@ from dataset_recsys.storage.recommendation_client import RecommendationClient
 from dataset_recsys.retrieval import rank_similar_entities
 from dataset_recsys.utils.mathe_syncer import MathE_Syncer
 from dataset_recsys.embeddings import encode_texts
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,18 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
 
     logger.info("Generating MathE OCR text embeddings for %d materials", len(materials))
 
-    embeddings = encode_texts(texts, model_name=DEFAULT_MATHE_EMBEDDING_MODEL)
+    # Conceptual fix inside run_mathe_pipeline
+    batch_size = 32
+    all_embeddings = []
+
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i : i + batch_size]
+        batch_encodings = encode_texts(batch, model_name=DEFAULT_MATHE_EMBEDDING_MODEL)
+        all_embeddings.append(batch_encodings)
+
+    # Combine results
+    embeddings = np.vstack(all_embeddings)
+    # embeddings = encode_texts(texts, model_name=DEFAULT_MATHE_EMBEDDING_MODEL)
 
     logger.info("Computing full MathE nearest-neighbor recommendations")
     recommendations = rank_similar_entities(material_ids, embeddings)

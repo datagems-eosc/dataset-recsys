@@ -19,4 +19,4 @@ The core engine for graph transformation. It handles the lifecycle of an AP requ
 Defines the Pydantic schemas used for internal data validation and API documentation.
 * **`RecsRequest`**: Standardizes the input parameters (`entity_id`, `n`) extracted from the AP.
 * **`RecsResponse`**: Structure for the final recommendation payload (recommended dataset IDs).
-* **Validation**: Enforces constraints such as limits on the number of recommendations ($n \le 20$).
+* **Validation**: Ensures the requested number of recommendations (`n`) is a positive integer.

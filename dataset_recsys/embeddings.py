@@ -2,15 +2,22 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+from chonky import ParagraphSplitter
 from transformers import AutoModel, AutoTokenizer
 from transformers.modeling_outputs import BaseModelOutput
+from sentence_transformers import SentenceTransformer
 from dataset_recsys.ingestion.fetch_gems_datasets import DatasetProfile
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 EMBEDDING_MODEL_CONFIG = {
     "allenai/specter2_base": {
+        "backend": "transformers",
         "max_length": 512,
+    },
+    "BAAI/bge-m3": {
+        "backend": "sentence_transformers",
+        "max_length": 8192,
     }
 }
 
@@ -37,10 +44,83 @@ def load_embedding_model(model_name: str) -> tuple[AutoTokenizer, AutoModel]:
     return tokenizer, model
 
 
+def _token_count(text: str, tokenizer) -> int:
+    return len(tokenizer(text, truncation=False)["input_ids"])
+
+
+def _encode_with_optional_chunking(
+    text: str,
+    model: SentenceTransformer,
+    max_length: int,
+) -> np.ndarray:
+    tokenizer = model.tokenizer
+    if _token_count(text, tokenizer) <= max_length:
+        return model.encode(text, convert_to_numpy=True, show_progress_bar=False)
+
+    splitter = ParagraphSplitter(device=DEVICE)
+    chunks = [str(chunk) for chunk in splitter(text) if str(chunk).strip()]
+    if not chunks:
+        return model.encode(text, convert_to_numpy=True, show_progress_bar=False)
+
+    chunk_embeddings = model.encode(
+        chunks,
+        batch_size=8,
+        convert_to_numpy=True,
+        show_progress_bar=False,
+    )
+    return np.mean(chunk_embeddings, axis=0)
+
+
+def _encode_sentence_transformer_texts(
+    texts: list[str],
+    model_name: str,
+) -> np.ndarray:
+    model = SentenceTransformer(model_name, device=DEVICE)
+    max_length = get_default_max_length(model_name)
+    if hasattr(model, "max_seq_length"):
+        model.max_seq_length = max_length
+
+    if not texts:
+        return np.empty((0, 0))
+
+    tokenizer = model.tokenizer
+    token_counts = [_token_count(text, tokenizer) for text in texts]
+    embeddings: list[np.ndarray | None] = [None] * len(texts)
+
+    short_indices = [
+        index for index, token_count in enumerate(token_counts)
+        if token_count <= max_length
+    ]
+    if short_indices:
+        short_embeddings = model.encode(
+            [texts[index] for index in short_indices],
+            batch_size=8,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
+        for index, embedding in zip(short_indices, short_embeddings, strict=False):
+            embeddings[index] = embedding
+
+    for index, token_count in enumerate(token_counts):
+        if token_count > max_length:
+            embeddings[index] = _encode_with_optional_chunking(
+                texts[index],
+                model=model,
+                max_length=max_length,
+            )
+
+    return np.stack([embedding for embedding in embeddings if embedding is not None])
+
 def encode_texts(
     texts: list[str],
     model_name: str,
 ) -> np.ndarray:
+    config = EMBEDDING_MODEL_CONFIG.get(model_name)
+    if config is None:
+        raise ValueError(f"Unsupported embedding model: {model_name}")
+    if config.get("backend") == "sentence_transformers":
+        return _encode_sentence_transformer_texts(texts, model_name=model_name)
+
     tokenizer, model = load_embedding_model(model_name)
     max_length = get_default_max_length(model_name)
     inputs = tokenizer(

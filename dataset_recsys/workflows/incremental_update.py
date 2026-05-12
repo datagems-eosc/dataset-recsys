@@ -62,9 +62,8 @@ async def process_incremental_update(dataset_profile, application: str, enrichme
     )
     
     # 5. NEW DATASET RECS (Outbound)
-    # Find neighbors using the new Cosine Similarity logic
-    # We fetch top_k + 1 in case the new ID is returned in results
-    neighbors = emb_client.find_similar(application, vector, top_k=21)
+    # Store the full ranked neighbor list; API endpoints decide how many to return.
+    neighbors = emb_client.find_similar(application, vector, top_k=None)
 
     outbound_recs = {
         row[0]: float(row[1]) 
@@ -82,7 +81,7 @@ async def process_incremental_update(dataset_profile, application: str, enrichme
             neighbor_id=neighbor_id,
             new_entity_id=enriched_profile.id,
             score=similarity_score,
-            limit=20 # Keep ZSETs at original top_k size
+            limit=None,
         )
     
     return True

@@ -1,6 +1,8 @@
 from __future__ import annotations
 import numpy as np
-from dataset_recsys.ingestion.fetch_gems_datasets import DatasetProfile
+
+RankedNeighbors = dict[str, list[tuple[str, float]]]
+
 
 def cosine_similarity_matrix(embeddings: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
@@ -8,46 +10,35 @@ def cosine_similarity_matrix(embeddings: np.ndarray) -> np.ndarray:
     normalized = embeddings / norms
     return normalized @ normalized.T
 
-def build_recommendations(
-    profiles: list[DatasetProfile],
+
+def rank_similar_entities(
+    entity_ids: list[str],
     embeddings: np.ndarray,
     top_k: int | None = None,
-) -> list[dict]:
-    """
-    If `top_k` is None, all other datasets are returned in ranked order.
-    """
-    if len(profiles) != len(embeddings):
-        raise ValueError(
-            "The number of profiles must match the number of embedding vectors."
-        )
+) -> RankedNeighbors:
+    """Rank similar entities by cosine similarity."""
+    if len(entity_ids) != len(embeddings):
+        raise ValueError("The number of entity ids must match the embedding count.")
     if top_k is not None and top_k <= 0:
         raise ValueError("top_k must be a positive integer or None.")
 
     similarity = cosine_similarity_matrix(embeddings)
-    recommendations: list[dict] = []
+    np.fill_diagonal(similarity, -np.inf)
+    neighbor_count = max(len(entity_ids) - 1, 0)
+    result_count = neighbor_count if top_k is None else min(top_k, neighbor_count)
+    ranked_indices = np.argsort(-similarity, axis=1)[:, :result_count]
 
-    for i, profile in enumerate(profiles):
-        ranked_indices = np.argsort(similarity[i])[::-1]
-        ranked_indices = [j for j in ranked_indices if j != i]
-        if top_k is not None:
-            ranked_indices = ranked_indices[:top_k]
-
-        recommendations.append(
-            {
-                "id": profile.id,
-                "title": profile.title,
-                "recommendations": [
-                    {
-                        "id": profiles[j].id,
-                        "title": profiles[j].title,
-                        "score": float(similarity[i, j]),
-                    }
-                    for j in ranked_indices
-                ],
-            }
-        )
-
-    return recommendations
+    return {
+        entity_id: [
+            (entity_ids[j], float(similarity[i, j]))
+            for j in ranked_indices[i]
+        ]
+        for i, entity_id in enumerate(entity_ids)
+    }
 
 
-__all__ = ["build_recommendations", "cosine_similarity_matrix"]
+__all__ = [
+    "RankedNeighbors",
+    "cosine_similarity_matrix",
+    "rank_similar_entities",
+]

@@ -1,10 +1,8 @@
 import os
-import sys
 from pathlib import Path
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
-from pydantic import BaseModel
 import structlog
 from fastapi import APIRouter, HTTPException, Query, status, BackgroundTasks
 
@@ -16,6 +14,7 @@ from dataset_recsys.workflows.mathe_sync_pipeline import run_mathe_pipeline
 
 MATHE_PATH = Path(os.getenv("MATHE_PATH", "/mnt/s3/default"))
 MATHE_PDF_PATH = MATHE_PATH / "pdfs"
+SYNC_HEARTBEAT_STALE_AFTER = timedelta(minutes=30)
 syncer = MathE_Syncer(base_dir=MATHE_PDF_PATH)
 
 logger = structlog.get_logger(__name__)
@@ -23,33 +22,69 @@ accounting_logger = structlog.get_logger("accounting")
 
 router = APIRouter(prefix="/dataset-recsys/mathe", tags=["MathE Recommendation Service"])
 recs_client = RecommendationClient()
-mathe_client = MatheMirrorClient()
+mathe_client: MatheMirrorClient | None = None
+
+
+def get_mathe_client() -> MatheMirrorClient:
+    global mathe_client
+    if mathe_client is None:
+        mathe_client = MatheMirrorClient()
+    return mathe_client
+
+
+def _parse_utc_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _resolve_sync_status(sync_status: dict) -> str:
+    status = sync_status.get("sync_status", "never_run")
+    if status != "running":
+        return status
+
+    heartbeat_at = _parse_utc_timestamp(sync_status.get("last_sync_heartbeat_at"))
+    if heartbeat_at is None:
+        return "stale"
+
+    if datetime.now(timezone.utc) - heartbeat_at > SYNC_HEARTBEAT_STALE_AFTER:
+        return "stale"
+
+    return "running"
 
 @router.post(
     "/recommend",
     response_model=MatheRecsResponse,
-    summary="Get recommendations",
+    summary="Get material recommendations for a math question",
     description="""
-Retrieve the top-N recommendations for a given educational material (only PDFs are currently supported).
+Given a MathE question ID, return a list of recommended PDF materials. 
     """,
+# The request input is a question ID. Internally, the service
+# maps the question to its highest-clicked PDF material and uses that material as
+# the recommendation seed.
 )
 async def get_recommendations(
     question_id: str = Query(
         ...,
-        description="The MathE question identifier (for example, `6`).",
+        description="The MathE question identifier for which to get material recommendations.",
+        examples=["6"],
         required=True,
     ),
-    n: int = Query(10, gt=0, description="Number of similar items to return"),
+    n: int = Query(10, gt=0, description="Number of recommended PDF materials to return"),
 ):
     start_time = time.time()
 
-    log = logger.bind(item_id=question_id)
+    log = logger.bind(question_id=question_id)
     accounting_logger.info(
         "Recommendation Request Received",
         Action="get_recommendations",
-        Resource="dataset2dataset_recommender",
+        Resource="question_to_material_recommender",
         Domain="mathe",
-        ItemId=question_id,
+        QuestionId=question_id,
         Timestamp=datetime.utcnow().isoformat() + "Z",
     )
 
@@ -62,7 +97,7 @@ async def get_recommendations(
         )
 
     try:
-        material = mathe_client.get_material_by_question_id(question_id)
+        material = get_mathe_client().get_material_by_question_id(question_id)
         # Cast to string if not None, else keep as None
         material_id = str(material['id']) if material else None
         if not material_id:
@@ -80,7 +115,8 @@ async def get_recommendations(
 
         query_time = time.time() - start_time
         log.info(
-            f"Returning {len(filtered_recs[:n])} MathE recs for {material_id} in {query_time:.3f}s"
+            f"Returning {len(filtered_recs[:n])} MathE material recs for question "
+            f"{question_id} in {query_time:.3f}s"
         )
 
         return MatheRecsResponse(
@@ -110,19 +146,26 @@ async def sync_data(background_tasks: BackgroundTasks):
 
 @router.get("/status")
 async def get_status():
-    """Returns the current state of the dataset."""
+    """Returns the current MathE sync status and metadata about the materials being processed."""
     df = syncer.get()
     total = len(df)
-    completed = int(df[df['status'] == 'completed'].shape[0])
-    failed = int(df[df['status'] == 'failed'].shape[0])
-    
-    # Calculate percentage
-    progress = (completed + failed) / total * 100 if total > 0 else 100
+    completed = int(df[df["status"] == "completed"].shape[0]) if "status" in df else 0
+    pending = int(df[df["status"] == "pending"].shape[0]) if "status" in df else 0
+    failed_material_ids = (
+        df.loc[df["status"] == "failed", "material_id"].dropna().astype(str).tolist()
+        if {"status", "material_id"}.issubset(df.columns)
+        else []
+    )
+    sync_status = syncer.get_sync_status()
     
     return {
-        "progress_percent": round(progress, 2),
-        "total_files": total,
-        "completed": completed,
-        "failed": failed,
-        "is_syncing": syncer.is_running
+        "sync_status": _resolve_sync_status(sync_status),
+        "last_sync_started_at": sync_status.get("last_sync_started_at"),
+        "last_sync_heartbeat_at": sync_status.get("last_sync_heartbeat_at"),
+        "last_sync_completed_at": sync_status.get("last_sync_completed_at"),
+        "total_materials": total,
+        "ocr_completed_materials": completed,
+        "ocr_pending_materials": pending,
+        "ocr_failed_material_ids": failed_material_ids,
+        "embeddings_created": sync_status.get("embeddings_created", 0),
     }

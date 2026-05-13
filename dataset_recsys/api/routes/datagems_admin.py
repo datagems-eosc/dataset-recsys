@@ -1,52 +1,32 @@
-
-
-import json
 from datetime import datetime
-from pathlib import Path
+from typing import List
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+
+from dataset_recsys.api.api_docs_loader import DOCS_ERROR_EXAMPLES_PATH, load_json_file
 from dataset_recsys.api.security import security
 from dataset_recsys.ingestion.moma_dataset import MomaDataset
 from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.storage.recommendation_client import RecommendationClient
 from dataset_recsys.workflows.incremental_update import process_incremental_update
-from typing import List
 
 logger = structlog.get_logger(__name__)
 accounting_logger = structlog.get_logger("accounting")
-router = APIRouter(prefix="/dataset-recsys", tags=["Administrative Operations"])
+router = APIRouter(prefix="/dataset-recsys", tags=["DataGEMS Dataset Management"])
 recs_client = RecommendationClient()
 
-DOCS_VALID_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/valid_examples.json")
-DOCS_ERROR_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/error_examples.json")
-AP_DOCS_VALID_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/ap_valid_examples.json")
-AP_DOCS_ERROR_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/ap_error_examples.json")
-AP_REQUEST_EXAMPLE_PATH = Path("dataset_recsys/api/api_docs/ap_request_example.json")
 DEFAULT_APPLICATION = "ds2ds"
 
-
-def load_json_file(path: Path) -> dict:
-    if not path.exists():
-        logger.warning(f"File '{path}' does not exist.")
-        return {}
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Failed to load file from {path}: {e}")
-        return {}
-
-examples_data, errors_data = (load_json_file(DOCS_VALID_EXAMPLES_PATH), load_json_file(DOCS_ERROR_EXAMPLES_PATH))
-ap_examples_data, ap_errors_data = (load_json_file(AP_DOCS_VALID_EXAMPLES_PATH), load_json_file(AP_DOCS_ERROR_EXAMPLES_PATH))
-ap_request_example = load_json_file(AP_REQUEST_EXAMPLE_PATH)
+errors_data = load_json_file(DOCS_ERROR_EXAMPLES_PATH)
 
 @router.post(
     "/dataset/add",
-    summary="Add a new dataset to the system",
+    summary="Add a dataset",
     description="""
-Fetch a dataset from external sources, generate its embeddings, and integrate it into the recommendation engine.
-If the dataset already exists, the system will skip the addition to avoid duplicates.
+Adds a dataset to the DataGEMS recommender.
+
+The service retrieves the dataset metadata, builds its embedding, stores it in the vector database, and updates the recommendation index. If the dataset already exists, the request is ignored to avoid duplicate entries.
     """,
     responses={
         200: {
@@ -118,7 +98,7 @@ async def add_dataset(
         Action="add_dataset",
         Resource="dataset2dataset_recommender",
         Domain="datagems",
-        ItemId=entity_id,
+        DatasetId=entity_id,
         Timestamp=datetime.utcnow().isoformat() + "Z",
     )
 
@@ -169,15 +149,11 @@ async def add_dataset(
 
 @router.post(
     "/dataset/remove",
-    summary="Remove a dataset from the system",
+    summary="Remove a dataset",
     description="""
-Performs a clean, incremental removal of a dataset from the recommendation engine. 
+Removes a dataset from the DataGEMS recommender.
 
-**Workflow:**
-1. **Inbound Cleanup**: Scans the Redis index to find every other dataset currently recommending this ID and removes the reference.
-2. **Outbound Cleanup**: Deletes the specific recommendation list (ZSET) for this dataset.
-3. **Index Cleanup**: Removes the dataset ID from the application's global index.
-4. **Vector Cleanup**: Deletes the embedding record from the PostgreSQL vector database.
+The service deletes the dataset embedding, removes its recommendation list, removes the dataset from the recommendation index, and cleans references to it from other recommendation lists.
     """,
     responses={
         200: {
@@ -212,7 +188,7 @@ async def remove_dataset(
         Action="remove_dataset",
         Resource="dataset2dataset_recommender",
         Domain="datagems",
-        ItemId=entity_id,
+        DatasetId=entity_id,
         Timestamp=datetime.utcnow().isoformat() + "Z",
     )
 
@@ -245,7 +221,7 @@ async def remove_dataset(
             "Dataset Removal Processed",
             UserId=user_subject,
             Action="remove_dataset",
-            ItemId=entity_id,
+            DatasetId=entity_id,
             Timestamp=datetime.utcnow().isoformat() + "Z",
         )
 
@@ -262,14 +238,11 @@ async def remove_dataset(
 
 @router.post(
     "/dataset/exist",
-    summary="Check dataset existence in catalog",
+    summary="Check dataset existence",
     description="""
-Validates the existence of multiple dataset IDs within the application's recommendation index.
+Checks whether one or more datasets are currently registered in the DataGEMS recommendation index.
 
-**Process:**
-1. Receives a list of entity IDs.
-2. Executes a batch Redis pipeline (`SISMEMBER`) to check availability for each ID simultaneously.
-3. Returns a dictionary mapping each queried ID to a boolean status (`true` if present, `false` otherwise).
+The endpoint receives a list of dataset IDs and returns a mapping from each ID to a boolean value indicating whether it exists in the recommender.
     """,
     responses={
         200: {
@@ -307,14 +280,14 @@ async def check_existence(
     claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
 ):
     user_subject = claims.get("sub")
-    log = logger.bind(UserId=user_subject, ItemIds=entity_ids)
+    log = logger.bind(UserId=user_subject, DatasetCount=len(entity_ids))
     accounting_logger.info(
         "Existence Check Request Received",
         UserId=user_subject,
         Action="check_existence",
         Resource="dataset2dataset_recommender",
         Domain="datagems",
-        ItemIds=entity_ids,
+        DatasetCount=len(entity_ids),
         Timestamp=datetime.utcnow().isoformat() + "Z",
     )
     

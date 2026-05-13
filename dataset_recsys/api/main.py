@@ -20,7 +20,7 @@ from dataset_recsys.api.logging.logging_config import (
 from dataset_recsys.api.routes.datagems import router as datagems_router
 from dataset_recsys.api.routes.health import router as health_router
 from dataset_recsys.api.routes.mathe import router as mathe_router
-from dataset_recsys.api.routes.admin import router as admin_router
+from dataset_recsys.api.routes.datagems_admin import router as datagems_admin_router
 
 setup_logging()
 logger = structlog.get_logger(__name__)
@@ -45,7 +45,7 @@ app.add_middleware(
 # --- Routers ---
 app.include_router(datagems_router)
 app.include_router(mathe_router)
-app.include_router(admin_router)
+app.include_router(datagems_admin_router)
 app.include_router(health_router)
 
 

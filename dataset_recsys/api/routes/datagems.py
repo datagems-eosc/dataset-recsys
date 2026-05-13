@@ -1,9 +1,6 @@
 
-
-import json
 import time
 from datetime import datetime
-from pathlib import Path
 
 import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
@@ -17,37 +14,26 @@ from dataset_recsys.api.analytical_patterns.models import (
     RecsRequest,
     RecsResponse,
 )
+from dataset_recsys.api.api_docs_loader import (
+    AP_DOCS_ERROR_EXAMPLES_PATH,
+    AP_DOCS_VALID_EXAMPLES_PATH,
+    AP_REQUEST_EXAMPLE_PATH,
+    DOCS_ERROR_EXAMPLES_PATH,
+    DOCS_VALID_EXAMPLES_PATH,
+    load_json_file,
+)
 from dataset_recsys.api.security import security
-from dataset_recsys.ingestion.moma_dataset import MomaDataset
-from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.storage.recommendation_client import RecommendationClient
-from dataset_recsys.workflows.incremental_update import process_incremental_update
 
 logger = structlog.get_logger(__name__)
 accounting_logger = structlog.get_logger("accounting")
 router = APIRouter(prefix="/dataset-recsys", tags=["DataGEMS Recommendation Service"])
 recs_client = RecommendationClient()
 
-DOCS_VALID_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/valid_examples.json")
-DOCS_ERROR_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/error_examples.json")
-AP_DOCS_VALID_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/ap_valid_examples.json")
-AP_DOCS_ERROR_EXAMPLES_PATH = Path("dataset_recsys/api/api_docs/ap_error_examples.json")
-AP_REQUEST_EXAMPLE_PATH = Path("dataset_recsys/api/api_docs/ap_request_example.json")
-
-
-def load_json_file(path: Path) -> dict:
-    if not path.exists():
-        logger.warning(f"File '{path}' does not exist.")
-        return {}
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Failed to load file from {path}: {e}")
-        return {}
-
-examples_data, errors_data = (load_json_file(DOCS_VALID_EXAMPLES_PATH), load_json_file(DOCS_ERROR_EXAMPLES_PATH))
-ap_examples_data, ap_errors_data = (load_json_file(AP_DOCS_VALID_EXAMPLES_PATH), load_json_file(AP_DOCS_ERROR_EXAMPLES_PATH))
+examples_data = load_json_file(DOCS_VALID_EXAMPLES_PATH)
+errors_data = load_json_file(DOCS_ERROR_EXAMPLES_PATH)
+ap_examples_data = load_json_file(AP_DOCS_VALID_EXAMPLES_PATH)
+ap_errors_data = load_json_file(AP_DOCS_ERROR_EXAMPLES_PATH)
 ap_request_example = load_json_file(AP_REQUEST_EXAMPLE_PATH)
 
 @router.post(

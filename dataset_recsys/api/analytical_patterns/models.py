@@ -9,17 +9,15 @@ class RecsRequest(BaseModel):
     n: int = Field(
         10,
         gt=0,
-        description="Number of similar items to return",
+        description="Number of similar entities to return",
     )
+
 
 class Recommendation(BaseModel):
     entity_id: str = Field(..., description="The recommended entity ID")
 
+
 class RecsResponse(BaseModel):
-    # query_time: float = Field(
-    #     ...,
-    #     description="Time taken to process the recommendation request in seconds",
-    # )
     entity_id: str = Field(
         ...,
         description="The ID of the entity for which we want recommendations",
@@ -28,15 +26,18 @@ class RecsResponse(BaseModel):
         ...,
         description="List of recommendations",
     )
-    
+
+
 class MatheRecommendation(BaseModel):
-    material_id: str = Field(..., description="The recommended entity ID")
+    material_id: str = Field(..., description="The recommended MathE material ID")
+
+
 class MatheRecsResponse(BaseModel):
     question_id: str = Field(
         ...,
-        description="The ID of the question for which we want recommendations",
+        description="The MathE question ID used to generate the recommendations",
     )
     recommendations: List[MatheRecommendation] = Field(
         ...,
-        description="List of recommendations",
+        description="List of recommended MathE materials",
     )

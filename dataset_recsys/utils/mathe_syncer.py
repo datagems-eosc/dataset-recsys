@@ -2,19 +2,37 @@ import signal
 
 import boto3
 import json
-import re
+import logging
 import os
 import pandas as pd
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
+logger = logging.getLogger(__name__)
+
+
+def _progress_bar(current: int, total: int, width: int = 20) -> str:
+    if total <= 0:
+        return "[" + "-" * width + "] 0/0 0%"
+
+    filled = round(width * current / total)
+    percent = round(100 * current / total)
+    return f"[{'#' * filled}{'-' * (width - filled)}] {current}/{total} {percent}%"
+
+
+def _has_completed_ocr(entry: Dict[str, Any]) -> bool:
+    ocr_text = str(entry.get("claude_ocr_text") or "")
+    return entry.get("status") == "completed" or (
+        bool(ocr_text) and not ocr_text.startswith("OCR Failed")
+    )
 
 class MathE_Syncer:
     def __init__(self, base_dir: Path) -> None:
         self._base_dir = base_dir
         self.json_file = self._base_dir / "data.json"
+        self.status_file = self._base_dir / "sync_status.json"
         self.data: Optional[List[Dict]] = None
         
         # Claude 4.5 Global Configuration
@@ -42,6 +60,10 @@ class MathE_Syncer:
         existing_ids = {entry["id"] for entry in self.data}
         new_found = False
 
+        if not self._base_dir.exists():
+            print(f"MathE base directory does not exist: {self._base_dir}")
+            return
+
         # Scan base_dir directly for numeric PDFs
         for f in self._base_dir.iterdir():
             if f.is_file() and f.suffix.lower() == ".pdf" and f.stem.isnumeric():
@@ -63,12 +85,33 @@ class MathE_Syncer:
         with open(self.json_file, "w", encoding="utf-8") as f:
             json.dump(self.data, f, indent=4)
 
+    def get_sync_status(self) -> Dict[str, Any]:
+        if not self.status_file.exists():
+            return {
+                "sync_status": "never_run",
+                "last_sync_started_at": None,
+                "last_sync_completed_at": None,
+            }
+
+        with open(self.status_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def save_sync_status(self, status: Dict[str, Any]) -> None:
+        self.status_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.status_file, "w", encoding="utf-8") as f:
+            json.dump(status, f, indent=4)
+
     # --- Data Access Methods ---
 
     def get(self) -> pd.DataFrame:
         """Returns the main table as a DataFrame."""
         if self.data is None:
             self._init_data()
+
+        if not self.data:
+            return pd.DataFrame(
+                columns=["id", "claude_ocr_text", "status", "material_id", "pdf_path"]
+            )
             
         df = pd.DataFrame(self.data)
         # ID is already in format './70.pdf'
@@ -121,34 +164,57 @@ class MathE_Syncer:
         if self.data is None:
             self._init_data()
         
-        print("Starting batch OCR process...")
+        pending_entries = [
+            entry
+            for entry in self.data
+            if not _has_completed_ocr(entry) and entry.get("status") != "failed"
+        ]
+        if limit is not None:
+            pending_entries = pending_entries[:limit]
+
+        skipped = len(self.data) - len(pending_entries)
+        logger.info(
+            "Starting MathE OCR batch: %s pending, %s already completed/failed",
+            len(pending_entries),
+            skipped,
+        )
+        print(
+            f"Starting batch OCR process: {len(pending_entries)} pending, "
+            f"{skipped} already completed/failed."
+        )
         processed = 0
-        for entry in self.data:
+        for entry in pending_entries:
             if not self.keep_running:
                 print("Shutdown signaled. Saving and exiting.")
                 break
             
-            if entry.get("status") == "completed" or (entry.get("claude_ocr_text") and not entry["claude_ocr_text"].startswith("OCR Failed")):
-                continue
-            if limit and processed >= limit:
-                break
-            
-            print(f"Processing {entry['id']}...")
+            print(
+                f"OCR progress {_progress_bar(processed + 1, len(pending_entries))} "
+                f"processing {entry['id']}"
+            )
             print(f"Current status: {entry.get('status')}, OCR text length: {len(str(entry.get('claude_ocr_text') or ''))}")
                 
             full_path = self._base_dir / entry["id"]
             try:
-                if not entry.get("status") == "failed":
-                    entry["claude_ocr_text"] = self._perform_claude_call(full_path)
-                    entry["status"] = "completed"
+                entry["claude_ocr_text"] = self._perform_claude_call(full_path)
+                entry["status"] = "completed"
             except Exception as e:
                 print(f"Error processing {entry['id']}: {e}")
                 entry["claude_ocr_text"] = f"OCR Failed: {str(e)}"
                 entry["status"] = "failed"
             
             print(f"Finished processing {entry['id']}. Status: {entry['status']}, OCR text length: {len(str(entry.get('claude_ocr_text') or ''))}")
+            logger.info(
+                "MathE OCR progress %s material=%s status=%s",
+                _progress_bar(processed + 1, len(pending_entries)),
+                Path(entry["id"]).name,
+                entry["status"],
+            )
             self._save_state()
             processed += 1
+
+        if not pending_entries:
+            logger.info("MathE OCR progress %s; no new OCR work needed", _progress_bar(0, 0))
 
         if not self.data or all(e['status'] in ['completed', 'failed'] for e in self.data):
             self._send_notification("OCR process finished for all files.")

@@ -58,8 +58,8 @@
       "labels": ["consist_of"]
     },
     {
-      "from": "07382b91-5bc5-42f9-8391-33adc2460c19",
-      "to": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
+      "from": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
+      "to": "07382b91-5bc5-42f9-8391-33adc2460c19",
       "labels": ["input"]
     }
   ]

@@ -81,17 +81,18 @@ def parse_recommendation_request_ap(analytical_pattern: Dict) -> RecsRequest:
     n_value = props.get("n", 10)
 
     input_edge = next(
-        (e for e in edges if e["to"] == operator_id and "input" in e["labels"]),
+        (e for e in edges if e["from"] == operator_id and "input" in e["labels"]),
         None,
     )
     if not input_edge:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Malformed AP Graph: No input dataset linked to the Recommender Operator.",
+            detail="Malformed AP Graph: No input dataset linked to the Recommender Operator. Expected edge direction: Operator --input--> seed dataset.",
         )
 
-    # The 'from' field of the input edge is the UUID of the sc:Dataset node that serves as the seed for recommendations
-    entity_id = input_edge["from"]
+    # The 'to' field of the input edge is the UUID of the sc:Dataset node that serves as the seed for recommendations.
+    # This follows the AP/MoMa convention: Operator --input--> input entity.
+    entity_id = input_edge["to"]
 
     return RecsRequest(
         entity_id=entity_id,
@@ -119,6 +120,12 @@ def create_recommendation_response_ap(
         )
     
     op_id = operator_node["id"]
+
+    # Normalize input edge direction to follow the AP/MoMa convention:
+    # Operator --input--> seed entity.
+    for edge in analytical_pattern["edges"]:
+        if "input" in edge["labels"] and edge["to"] == op_id:
+            edge["from"], edge["to"] = edge["to"], edge["from"]
 
     # Cleanup old output nodes
     old_output_nodes = [
@@ -150,24 +157,4 @@ def create_recommendation_response_ap(
             "properties": {"rank": rank}
         })
 
-    # Remove input nodes and edges to avoid exposing the input dataset in the response (since the operator has already consumed it)
-    input_edges = [
-        e for e in analytical_pattern["edges"]
-        if "input" in e["labels"]
-    ]
-
-    input_node_ids = {e["from"] for e in input_edges}
-
-    # Remove input edges
-    analytical_pattern["edges"] = [
-        e for e in analytical_pattern["edges"]
-        if "input" not in e["labels"]
-    ]
-
-    # Remove input nodes
-    analytical_pattern["nodes"] = [
-        n for n in analytical_pattern["nodes"]
-        if n["id"] not in input_node_ids
-    ]
-    
     return analytical_pattern

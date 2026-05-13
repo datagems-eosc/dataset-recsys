@@ -96,8 +96,8 @@
                 ]
             },
             {
-                "from": "seed-dataset-001",
-                "to": "operator-recommender",
+                "from": "operator-recommender",
+                "to": "seed-dataset-001",
                 "labels": [
                 "input"
                 ]

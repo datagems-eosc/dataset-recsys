@@ -42,7 +42,16 @@
       }
     },
     {
-      "id": "8930240b-a0e8-46e7-ace8-aab2b42fcc01",
+      "id": "07382b91-5bc5-42f9-8391-33adc2460c19",
+      "labels": [
+        "sc:Dataset"
+      ],
+      "properties": {
+        "description": "The seed dataset used as the basis for recommendations."
+      }
+    },
+    {
+      "id": "1f6fba0c-9aea-4345-b5a3-457c924f9e0c",
       "labels": [
         "sc:Dataset"
       ],
@@ -51,7 +60,7 @@
       }
     },
     {
-      "id": "a36dde9d-7f95-40ff-8a9b-f687d0a72318",
+      "id": "d5c34990-9acf-4349-91d4-924f58565922",
       "labels": [
         "sc:Dataset"
       ],
@@ -84,7 +93,14 @@
     },
     {
       "from": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
-      "to": "8930240b-a0e8-46e7-ace8-aab2b42fcc01",
+      "to": "07382b91-5bc5-42f9-8391-33adc2460c19",
+      "labels": [
+        "input"
+      ]
+    },
+    {
+      "from": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
+      "to": "1f6fba0c-9aea-4345-b5a3-457c924f9e0c",
       "labels": [
         "output"
       ],
@@ -94,7 +110,7 @@
     },
     {
       "from": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
-      "to": "a36dde9d-7f95-40ff-8a9b-f687d0a72318",
+      "to": "d5c34990-9acf-4349-91d4-924f58565922",
       "labels": [
         "output"
       ],

@@ -1,10 +1,10 @@
 {
     "422_ap_missing_input_edge": {
         "summary": "Malformed AP - Missing Input Edge",
-        "description": "Raised when the operator has no incoming 'input' edge to provide a dataset ID.",
+        "description": "Raised when the operator has no outgoing 'input' edge pointing to the seed dataset ID.",
         "value": {
         "code": 422,
-        "error": "Malformed AP Graph: No input dataset linked to the Recommender Operator."
+        "error": "Malformed AP Graph: No input dataset linked to the Recommender Operator. Expected edge direction: Operator --input--> seed dataset."
         }
     },
     "422_ap_missing_operator": {

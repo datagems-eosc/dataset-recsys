@@ -5,13 +5,14 @@ from datetime import datetime, timedelta, timezone
 import token
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, security, status, BackgroundTasks, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 
 from dataset_recsys.api.analytical_patterns.models import MatheRecommendation, MatheRecsResponse
 from dataset_recsys.storage.recommendation_client import RecommendationClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 from dataset_recsys.utils.mathe_syncer import MathE_Syncer
 from dataset_recsys.workflows.mathe_sync_pipeline import run_mathe_pipeline
+from dataset_recsys.api.security import security
 
 MATHE_PATH = Path(os.getenv("MATHE_PATH", "/mnt/s3/default"))
 MATHE_PDF_PATH = MATHE_PATH / "pdfs"

@@ -2,9 +2,10 @@ import os
 from pathlib import Path
 import time
 from datetime import datetime, timedelta, timezone
+import token
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, security, status, BackgroundTasks, Depends
 
 from dataset_recsys.api.analytical_patterns.models import MatheRecommendation, MatheRecsResponse
 from dataset_recsys.storage.recommendation_client import RecommendationClient
@@ -14,6 +15,7 @@ from dataset_recsys.workflows.mathe_sync_pipeline import run_mathe_pipeline
 
 MATHE_PATH = Path(os.getenv("MATHE_PATH", "/mnt/s3/default"))
 MATHE_PDF_PATH = MATHE_PATH / "pdfs"
+MATHE_DATASET_ID = "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f"
 SYNC_HEARTBEAT_STALE_AFTER = timedelta(minutes=30)
 syncer = MathE_Syncer(base_dir=MATHE_PDF_PATH)
 
@@ -75,17 +77,21 @@ async def get_recommendations(
         required=True,
     ),
     n: int = Query(10, gt=0, description="Number of recommended PDF materials to return"),
+    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
+    token: str = Depends(security.oauth2_scheme),
 ):
     start_time = time.time()
+    user_subject = claims.get("sub")
 
-    log = logger.bind(question_id=question_id)
+    log = logger.bind(question_id=question_id, UserId=user_subject)
     accounting_logger.info(
         "Recommendation Request Received",
         Action="get_recommendations",
         Resource="question_to_material_recommender",
         Domain="mathe",
         QuestionId=question_id,
-        Timestamp=datetime.utcnow().isoformat() + "Z",
+        UserId=user_subject,
+        Timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     )
 
     question_id = question_id.strip()
@@ -105,6 +111,18 @@ async def get_recommendations(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"No material found for question_id {question_id}",
+            )
+
+        # Fetch authorized items from security context
+        authorized_list = await security.get_authorized_entity_ids(token)
+        authorized_set = set(authorized_list)
+        
+        # Checj if the authorized set contains the mathe dataset ID
+        if MATHE_DATASET_ID not in authorized_set:
+            log.warning(f"User {user_subject} not authorized for MathE dataset {MATHE_DATASET_ID}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions to access MathE recommendations.",
             )
 
         raw_recs = recs_client.get_recommendations(
@@ -130,11 +148,23 @@ async def get_recommendations(
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 @router.post("/sync")
-async def sync_data(background_tasks: BackgroundTasks):
+async def sync_data(
+    background_tasks: BackgroundTasks,
+    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
+    token: str = Depends(security.oauth2_scheme),
+):
     """
     Triggers the sync, OCR, and recommendation refresh process.
     Uses BackgroundTasks so the API returns immediately.
     """
+    user_subject = claims.get("sub")
+    accounting_logger.info(
+        "Sync Pipeline Triggered",
+        Action="sync_data",
+        Domain="mathe",
+        UserId=user_subject,
+        Timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    )    
     # Trigger the lifecycle as a background task
     background_tasks.add_task(run_mathe_pipeline, syncer)
     
@@ -145,8 +175,20 @@ async def sync_data(background_tasks: BackgroundTasks):
     }
 
 @router.get("/status")
-async def get_status():
+async def get_status(
+    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
+    token: str = Depends(security.oauth2_scheme),    
+):
     """Returns the current MathE sync status and metadata about the materials being processed."""
+    user_subject = claims.get("sub")
+    accounting_logger.info(
+        "Sync Status Requested",
+        Action="get_status",
+        Domain="mathe",
+        UserId=user_subject,
+        Timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    )
+
     df = syncer.get()
     total = len(df)
     completed = int(df[df["status"] == "completed"].shape[0]) if "status" in df else 0

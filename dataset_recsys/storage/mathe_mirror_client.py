@@ -155,6 +155,55 @@ class MatheMirrorClient:
 
         return scored_candidates[:k]
 
+    def get_pdf_material_details(
+        self,
+        material_ids: list[str | int],
+    ) -> list[Dict[str, Any]]:
+        """Retrieve metadata for PDF materials."""
+        db_ids: list[int] = []
+        for material_id in material_ids:
+            normalized_id = str(material_id).removesuffix(".pdf")
+            if normalized_id.isdigit():
+                db_ids.append(int(normalized_id))
+
+        if not db_ids:
+            return []
+
+        query = """
+        SELECT
+            m.id AS material_id,
+            m.title,
+            m.author,
+            m.description,
+            m.file_name,
+            ARRAY_REMOVE(ARRAY_AGG(DISTINCT t.name), NULL) AS topics,
+            ARRAY_REMOVE(ARRAY_AGG(DISTINCT s.name), NULL) AS subtopics,
+            ARRAY_REMOVE(ARRAY_AGG(DISTINCT k.name), NULL) AS keywords
+        FROM platform_materials m
+        LEFT JOIN material_top_sub mts
+            ON m.id = mts.platformmaterialid
+        LEFT JOIN platform__topic t
+            ON mts.platformtopicid = t.id
+        LEFT JOIN platform__subtopic s
+            ON mts.platformsubtopicid = s.id
+        LEFT JOIN platform_material_keyword mk
+            ON m.id = mk.platformmaterialid
+        LEFT JOIN platform__keywords k
+            ON mk.platformkeywordid = k.id
+        WHERE m.id = ANY(%s)
+        AND LOWER(COALESCE(m.file_ext, '')) = 'pdf'
+        GROUP BY
+            m.id,
+            m.title,
+            m.author,
+            m.description,
+            m.file_name;
+        """
+
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query, (db_ids,))
+            return cur.fetchall()
+
     # -------------------------
     # UTILITIES
     # -------------------------

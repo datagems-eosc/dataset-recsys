@@ -60,6 +60,8 @@ class EmbeddingClient:
                 embedding VECTOR(1024) NOT NULL,
                 embedding_input TEXT,
                 embedding_model TEXT NOT NULL,
+                enrichment_llm TEXT,
+                prompt_version TEXT,
                 run_id TEXT,
                 created_at TIMESTAMP DEFAULT NOW(),
                 PRIMARY KEY (material_id)
@@ -95,8 +97,8 @@ class EmbeddingClient:
                 embedding.tolist(),  # numpy -> list
                 embedding_input,
                 embedding_model,
-                kwargs.get("enrichment_llm"),
-                kwargs.get("prompt_version"),
+                kwargs.get("enrichment_llm", "none"),
+                kwargs.get("prompt_version", "none"),
                 run_id,
             )
             for dataset_id, embedding, embedding_input in zip(dataset_ids, embeddings, embedding_inputs)

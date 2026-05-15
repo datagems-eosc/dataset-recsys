@@ -1,12 +1,13 @@
 import os
 from typing import List, Any
+from pandas.plotting import table
 import psycopg2
 from psycopg2.extras import execute_values
 
 
 class EmbeddingClient:
     """
-    PostgreSQL + pgvector client for storing dataset embeddings with enriched metadata.
+    PostgreSQL + pgvector client for storing dataset and MathE embeddings.
     """
 
     def __init__(
@@ -26,10 +27,19 @@ class EmbeddingClient:
         )
         self.schema = os.getenv("DATAGEMS_POSTGRES_SCHEMA", "public")
         self.conn.autocommit = True
+        
+        # Table Names
+        self.TABLE_DATASET = "dataset_embeddings"
+        self.TABLE_MATHE = "mathe_embeddings"
+
+        self._init_db()
+
+    def _init_db(self):
+        """Initialize necessary tables and extensions."""
         with self.conn.cursor() as cur:
             cur.execute(f"SET search_path TO {self.schema};")
             cur.execute(f"""
-            CREATE TABLE IF NOT EXISTS {self.schema}.dataset_embeddings (
+            CREATE TABLE IF NOT EXISTS {self.TABLE_DATASET} (
                 application TEXT NOT NULL,
                 dataset_id TEXT NOT NULL,
                 embedding VECTOR(768) NOT NULL,
@@ -40,6 +50,19 @@ class EmbeddingClient:
                 run_id TEXT,
                 created_at TIMESTAMP DEFAULT NOW(),
                 PRIMARY KEY (dataset_id)
+            );
+            """)
+
+            cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS {self.TABLE_MATHE} (
+                application TEXT NOT NULL,
+                material_id TEXT NOT NULL,
+                embedding VECTOR(1024) NOT NULL,
+                embedding_input TEXT,
+                embedding_model TEXT NOT NULL,
+                run_id TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (material_id)
             );
             """)
 
@@ -54,13 +77,14 @@ class EmbeddingClient:
         embeddings: Any,
         embedding_inputs: List[str],
         embedding_model: str,
-        enrichment_llm: str | None = None,
-        prompt_version: str | None = None,
+        table: str = "dataset_embeddings",        
         run_id: str | None = None,
+        **kwargs
     ) -> int:
         """
         Store embeddings in bulk with metadata (replaces existing entries for the application).
         """
+        id_column = "material_id" if table == self.TABLE_MATHE else "dataset_id"        
 
         self.delete_application(application)
 
@@ -71,17 +95,17 @@ class EmbeddingClient:
                 embedding.tolist(),  # numpy -> list
                 embedding_input,
                 embedding_model,
-                enrichment_llm,
-                prompt_version,
+                kwargs.get("enrichment_llm"),
+                kwargs.get("prompt_version"),
                 run_id,
             )
             for dataset_id, embedding, embedding_input in zip(dataset_ids, embeddings, embedding_inputs)
         ]
 
         query = f"""
-        INSERT INTO {self.schema}.dataset_embeddings (
+        INSERT INTO {self.schema}.{table} (
             application,
-            dataset_id,
+            {id_column},
             embedding,
             embedding_input,
             embedding_model,
@@ -90,7 +114,7 @@ class EmbeddingClient:
             run_id
         )
         VALUES %s
-        ON CONFLICT (dataset_id)
+        ON CONFLICT ({id_column})
         DO UPDATE SET
             embedding = EXCLUDED.embedding,
             embedding_input = EXCLUDED.embedding_input,
@@ -151,12 +175,14 @@ class EmbeddingClient:
         application: str,
         query_embedding: List[float],
         top_k: int | None = 10,
+        table: str = "dataset_embeddings"        
     ):
+        id_column = "material_id" if table == self.TABLE_MATHE else "dataset_id"
         # Using <=> for cosine distance. Similarity = 1 - (A <=> B)
         limit_clause = "LIMIT %s" if top_k is not None else ""
         query = f"""
-        SELECT dataset_id, 1 - (embedding <=> %s::vector) AS similarity
-        FROM {self.schema}.dataset_embeddings
+        SELECT {id_column}, 1 - (embedding <=> %s::vector) AS similarity
+        FROM {self.schema}.{table}
         WHERE application = %s
         ORDER BY embedding <=> %s::vector
         {limit_clause}
@@ -183,12 +209,9 @@ class EmbeddingClient:
     # UTILITIES
     # -------------------------
 
-    def delete_application(self, application: str) -> int:
+    def delete_application(self, application: str, table: str = "dataset_embeddings") -> int:
         with self.conn.cursor() as cur:
-            cur.execute(
-                f"DELETE FROM {self.schema}.dataset_embeddings WHERE application = %s",
-                (application,),
-            )
+            cur.execute(f"DELETE FROM {table} WHERE application = %s", (application,))
             return cur.rowcount
 
     def get_schema_overview(self) -> dict:

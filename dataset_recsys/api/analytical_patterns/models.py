@@ -27,6 +27,10 @@ class RecsResponse(BaseModel):
         description="List of recommendations",
     )
 
+class MatheRecsRequest(BaseModel):
+    question: str = Field(..., description="The math question in LaTeX format", examples=["\\int x^2 dx"])
+    question_id: str = Field(..., description="The ID of the question to use as a seed", examples=["6"])
+    n: int = Field(10, gt=0, description="Number of materials to return")
 
 class MatheRecommendation(BaseModel):
     material_id: str = Field(..., description="The recommended MathE material ID")

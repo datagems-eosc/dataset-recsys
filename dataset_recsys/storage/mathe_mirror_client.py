@@ -3,6 +3,9 @@ from typing import Dict, Any, Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from dataset_recsys.mathe_seed_scoring import score_pdf_seed_candidates
+
+
 class MatheMirrorClient:
     """
     PostgreSQL client for the MatheMirror platform, providing access to 
@@ -61,6 +64,96 @@ class MatheMirrorClient:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (question_id,))
             return cur.fetchone()
+
+    def get_question_metadata(self, question_id: int) -> Optional[Dict[str, Any]]:
+        """Retrieve topic, subtopic, and keywords for a question."""
+        query = """
+        SELECT
+            q.id AS question_id,
+            q.topic AS topic_id,
+            q.subtopic AS subtopic_id,
+            ARRAY_REMOVE(ARRAY_AGG(DISTINCT k.name), NULL) AS keywords
+        FROM platform__sna__questions q
+        LEFT JOIN platform_keyword_snaquestion qk
+            ON q.id = qk.platformsnaquestionid
+        LEFT JOIN platform__keywords k
+            ON qk.platformkeywordid = k.id
+        WHERE q.id = %s
+        GROUP BY
+            q.id,
+            q.topic,
+            q.subtopic;
+        """
+
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query, (question_id,))
+            return cur.fetchone()
+
+    def get_pdf_seed_candidates(
+        self,
+        question_id: int,
+    ) -> list[Dict[str, Any]]:
+        """
+        Retrieve PDF seed candidates and their metadata based on question attributes.
+        """
+        query = """
+        SELECT
+            m.id AS material_id,
+            mts.platformtopicid AS topic_id,
+            mts.platformsubtopicid AS subtopic_id,
+            ARRAY_REMOVE(ARRAY_AGG(DISTINCT k.name), NULL) AS keywords
+        FROM platform__sna__questions q
+        JOIN platform_materials m
+            ON LOWER(COALESCE(m.file_ext, '')) = 'pdf'
+        LEFT JOIN material_top_sub mts
+            ON m.id = mts.platformmaterialid
+        LEFT JOIN platform_material_keyword mk
+            ON m.id = mk.platformmaterialid
+        LEFT JOIN platform__keywords k
+            ON mk.platformkeywordid = k.id
+        WHERE q.id = %s
+        AND (
+            q.topic = mts.platformtopicid
+            OR q.subtopic = mts.platformsubtopicid
+            OR EXISTS (
+                SELECT 1
+                FROM platform_keyword_snaquestion qk
+                JOIN platform_material_keyword mk_match
+                    ON qk.platformkeywordid = mk_match.platformkeywordid
+                WHERE qk.platformsnaquestionid = q.id
+                AND mk_match.platformmaterialid = m.id
+            )
+        )
+        GROUP BY
+            m.id,
+            mts.platformtopicid,
+            mts.platformsubtopicid;
+        """
+
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query, (question_id,))
+            return cur.fetchall()
+
+    def recommend_pdf_seeds_for_question(
+        self,
+        question_id: int,
+        k: int = 10,
+    ) -> list[Dict[str, Any]]:
+        """Return the top-k PDF seed materials for a question."""
+        if k <= 0:
+            return []
+
+        question_metadata = self.get_question_metadata(question_id)
+        if not question_metadata:
+            return []
+
+        seed_candidates = self.get_pdf_seed_candidates(question_id)
+        scored_candidates = score_pdf_seed_candidates(
+            dict(question_metadata),
+            [dict(candidate) for candidate in seed_candidates],
+        )
+
+        return scored_candidates[:k]
 
     # -------------------------
     # UTILITIES

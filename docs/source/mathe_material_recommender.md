@@ -174,6 +174,17 @@ If OCR failed for a seed material, Redis has no recommendation key for that
 seed. The seed can still be returned because it matched the question metadata,
 but it will not contribute OCR-neighbor expansion.
 
+### Future File-Name Alignment
+
+If the sync pipeline is changed so that stored PDFs and Redis keys use
+`platform_materials.file_name` instead of `<platform_materials.id>.pdf`, update
+the MathE mirror client in one place:
+
+- return `m.file_name AS material_redis_id` instead of `m.id::text || '.pdf'`
+- resolve Redis IDs back to DB rows with `m.file_name = ANY(%s)` instead of
+  parsing IDs and filtering by `m.id = ANY(%s)`
+- keep API responses unchanged: return PostgreSQL `platform_materials.id`
+
 The intended embedding score is the maximum similarity from any seed. This is
 used because a PDF only needs to be highly similar to one strong seed to be
 useful. Averaging similarities could unfairly penalize a PDF that is relevant

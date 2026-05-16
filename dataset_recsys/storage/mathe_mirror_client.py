@@ -6,6 +6,41 @@ from psycopg2.extras import RealDictCursor
 from dataset_recsys.mathe_seed_scoring import score_pdf_seed_candidates
 
 
+def material_id_to_redis_id(material_id: Any) -> str:
+    """Convert a MathE DB material ID to the Redis/OCR entity ID."""
+    return f"{str(material_id).strip().removesuffix('.pdf')}.pdf"
+
+
+def redis_id_to_material_id(material_redis_id: Any) -> int | None:
+    """Convert a Redis/OCR entity ID back to a MathE DB material ID."""
+    material_id = str(material_redis_id).strip().removesuffix(".pdf")
+    return int(material_id) if material_id.isdigit() else None
+
+
+def _material_ids_from_redis_ids(material_redis_ids: list[str]) -> list[int]:
+    """Return unique DB material IDs represented by current Redis IDs.
+
+    Current production sync stores PDFs and Redis entities as
+    `<platform_materials.id>.pdf`, even though Postgres `file_name` can be
+    something else, e.g. `221 -> ChainRule.pdf -> Redis 221.pdf`.
+
+    Future migration note:
+    If synced PDFs/Redis keys are changed to use `platform_materials.file_name`,
+    update the SELECT aliases below to `m.file_name AS material_redis_id` and
+    change detail/metadata lookup methods to filter with `m.file_name = ANY(%s)`
+    instead of parsing Redis IDs back to integer DB IDs.
+    """
+    material_ids = [
+        material_id
+        for material_id in (
+            redis_id_to_material_id(material_redis_id)
+            for material_redis_id in material_redis_ids
+        )
+        if material_id is not None
+    ]
+    return list(dict.fromkeys(material_ids))
+
+
 class MatheMirrorClient:
     """
     PostgreSQL client for the MatheMirror platform, providing access to 
@@ -44,7 +79,8 @@ class MatheMirrorClient:
         """
         query = """
         SELECT 
-            m.id,
+            m.id AS material_id,
+            m.id::text || '.pdf' AS material_redis_id,
             m.title,
             m.author,
             m.description,
@@ -99,12 +135,13 @@ class MatheMirrorClient:
         query = """
         SELECT
             m.id AS material_id,
-            mts.platformtopicid AS topic_id,
-            mts.platformsubtopicid AS subtopic_id,
+            m.id::text || '.pdf' AS material_redis_id,
+            ARRAY_REMOVE(ARRAY_AGG(DISTINCT mts.platformtopicid), NULL) AS topic_ids,
+            ARRAY_REMOVE(ARRAY_AGG(DISTINCT mts.platformsubtopicid), NULL) AS subtopic_ids,
             ARRAY_REMOVE(ARRAY_AGG(DISTINCT k.name), NULL) AS keywords
         FROM platform__sna__questions q
         JOIN platform_materials m
-            ON LOWER(COALESCE(m.file_ext, '')) = 'pdf'
+            ON m.file_ext = 'pdf'
         LEFT JOIN material_top_sub mts
             ON m.id = mts.platformmaterialid
         LEFT JOIN platform_material_keyword mk
@@ -125,9 +162,7 @@ class MatheMirrorClient:
             )
         )
         GROUP BY
-            m.id,
-            mts.platformtopicid,
-            mts.platformsubtopicid;
+            m.id;
         """
 
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -157,21 +192,23 @@ class MatheMirrorClient:
 
     def get_pdf_material_details(
         self,
-        material_ids: list[str | int],
+        material_redis_ids: list[str],
     ) -> list[Dict[str, Any]]:
-        """Retrieve metadata for PDF materials."""
-        db_ids: list[int] = []
-        for material_id in material_ids:
-            normalized_id = str(material_id).removesuffix(".pdf")
-            if normalized_id.isdigit():
-                db_ids.append(int(normalized_id))
+        """Retrieve display metadata for PDF materials by Redis material ID.
 
-        if not db_ids:
+        This is intentionally for API/debug presentation: title, author,
+        description, file_name, and human-readable topic/subtopic/keyword names.
+        Scoring uses get_pdf_material_metadata_by_redis_ids to avoid fetching
+        display fields and topic/subtopic names it does not need.
+        """
+        material_ids = _material_ids_from_redis_ids(material_redis_ids)
+        if not material_ids:
             return []
 
         query = """
         SELECT
             m.id AS material_id,
+            m.id::text || '.pdf' AS material_redis_id,
             m.title,
             m.author,
             m.description,
@@ -191,17 +228,50 @@ class MatheMirrorClient:
         LEFT JOIN platform__keywords k
             ON mk.platformkeywordid = k.id
         WHERE m.id = ANY(%s)
-        AND LOWER(COALESCE(m.file_ext, '')) = 'pdf'
+        AND m.file_ext = 'pdf'
         GROUP BY
             m.id,
+            m.file_name,
             m.title,
             m.author,
-            m.description,
-            m.file_name;
+            m.description;
         """
 
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(query, (db_ids,))
+            cur.execute(query, (material_ids,))
+            return cur.fetchall()
+
+    def get_pdf_material_metadata_by_redis_ids(
+        self,
+        material_redis_ids: list[str],
+    ) -> list[Dict[str, Any]]:
+        """Retrieve minimal PDF metadata needed for recommendation scoring."""
+        material_ids = _material_ids_from_redis_ids(material_redis_ids)
+        if not material_ids:
+            return []
+
+        query = """
+        SELECT
+            m.id AS material_id,
+            m.id::text || '.pdf' AS material_redis_id,
+            ARRAY_REMOVE(ARRAY_AGG(DISTINCT mts.platformtopicid), NULL) AS topic_ids,
+            ARRAY_REMOVE(ARRAY_AGG(DISTINCT mts.platformsubtopicid), NULL) AS subtopic_ids,
+            ARRAY_REMOVE(ARRAY_AGG(DISTINCT k.name), NULL) AS keywords
+        FROM platform_materials m
+        LEFT JOIN material_top_sub mts
+            ON m.id = mts.platformmaterialid
+        LEFT JOIN platform_material_keyword mk
+            ON m.id = mk.platformmaterialid
+        LEFT JOIN platform__keywords k
+            ON mk.platformkeywordid = k.id
+        WHERE m.id = ANY(%s)
+        AND m.file_ext = 'pdf'
+        GROUP BY
+            m.id;
+        """
+
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query, (material_ids,))
             return cur.fetchall()
 
     # -------------------------

@@ -154,10 +154,11 @@ scale of `embedding_score`.
 OCR-neighbor expansion is only used when metadata scoring returns fewer than
 the requested number of recommendations.
 
-Redis stores material-to-material OCR-neighbor rankings:
+Redis stores material-to-material OCR-neighbor rankings and similarity scores:
 
 ```text
-seed material -> ranked similar materials
+recs:mathe:<seed_material_redis_id>
+  -> Redis ZSET of <neighbor_material_redis_id> scored by OCR cosine similarity
 ```
 
 The Redis material identifier is derived from the PostgreSQL material ID:
@@ -185,27 +186,29 @@ the MathE mirror client in one place:
   parsing IDs and filtering by `m.id = ANY(%s)`
 - keep API responses unchanged: return PostgreSQL `platform_materials.id`
 
-The intended embedding score is the maximum similarity from any seed. This is
-used because a PDF only needs to be highly similar to one strong seed to be
-useful. Averaging similarities could unfairly penalize a PDF that is relevant
-to one seed but unrelated to others.
+## Embedding Score
 
-## Current Redis Constraint
+Redis stores MathE OCR-neighbor recommendations in sorted sets. The sorted-set
+score is the OCR embedding cosine similarity computed during the MathE sync
+pipeline.
 
-Redis currently stores OCR neighbors as ranked lists, not raw similarity scores.
-Until raw similarity scores are available, `embedding_score` is derived from
-neighbor rank:
+At request time, the recommender reads Redis with scores and uses the stored
+similarity directly:
 
 ```text
-embedding_score = (total_neighbors - rank) / total_neighbors
+embedding_score = Redis ZSET score
 ```
 
-This means:
+If the same PDF appears as a neighbor of multiple seed PDFs, the recommender
+keeps the maximum stored similarity score:
 
-- the first OCR neighbor receives the strongest expansion score
-- lower-ranked OCR neighbors receive progressively weaker scores
-- if a PDF appears as a neighbor of multiple seeds, the recommender keeps the
-  maximum rank-derived score
+```text
+embedding_score = max(similarity from any seed PDF)
+```
+
+This is used because a PDF only needs to be highly similar to one strong seed to
+be useful. Averaging similarities could unfairly penalize a PDF that is relevant
+to one seed but unrelated to others.
 
 ## Configuration
 
@@ -248,13 +251,16 @@ scoring layers:
 
 - `dataset_recsys/api/routes/mathe.py`
   - `get_recommendations`
-  - `_rank_expanded_recommendations`
+  - `_rank_expanded_candidates`
 - `dataset_recsys/storage/mathe_mirror_client.py`
   - `get_question_metadata`
   - `get_pdf_seed_candidates`
+  - `get_pdf_material_metadata_by_redis_ids`
+  - `get_pdf_material_details`
   - `recommend_pdf_seeds_for_question`
 - `dataset_recsys/mathe_seed_scoring.py`
   - `compute_keyword_jaccard`
   - `score_pdf_seed_candidates`
 - `dataset_recsys/storage/recommendation_client.py`
   - `get_recommendations`
+  - `get_recommendations_with_scores`

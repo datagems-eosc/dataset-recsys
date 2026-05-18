@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from dataset_recsys.storage.recommendation_client import RecommendationClient
+from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.retrieval import rank_similar_entities
 from dataset_recsys.utils.mathe_syncer import MathE_Syncer
 from dataset_recsys.embeddings import encode_texts
@@ -156,6 +157,7 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
         batch_size = 32
         all_embeddings = []
         embeddings_created = 0
+        client = EmbeddingClient()
 
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
@@ -177,6 +179,15 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
             )
 
         embeddings = np.vstack(all_embeddings)
+        client.store_embeddings(
+            application=MATHE_APPLICATION,
+            dataset_ids=material_ids,
+            embeddings=embeddings,
+            embedding_inputs=texts,
+            embedding_model=DEFAULT_MATHE_EMBEDDING_MODEL,
+            table=client.TABLE_MATHE,
+            run_id=started_at,
+        )
 
         logger.info("Computing full MathE nearest-neighbor recommendations")
         recommendations = rank_similar_entities(material_ids, embeddings)

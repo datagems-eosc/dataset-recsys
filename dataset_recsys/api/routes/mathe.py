@@ -4,17 +4,19 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks, Body
 
-from dataset_recsys.api.analytical_patterns.models import MatheRecommendation, MatheRecsResponse
+from dataset_recsys.api.analytical_patterns.models import MatheRecommendation, MatheRecsResponse, MatheRecsRequest
 from dataset_recsys.mathe_recommenders.metadata_ocr import (
     recommend_from_metadata_seeds,
 )
 from dataset_recsys.storage.recommendation_client import RecommendationClient
+from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 from dataset_recsys.utils.mathe_syncer import MathE_Syncer
 from dataset_recsys.workflows.mathe_sync_pipeline import run_mathe_pipeline
 from dataset_recsys.api.security import security
+from dataset_recsys.workflows.mathe_sync_pipeline import encode_texts, DEFAULT_MATHE_EMBEDDING_MODEL
 
 MATHE_PATH = Path(os.getenv("MATHE_PATH", "/mnt/s3/default"))
 MATHE_PDF_PATH = MATHE_PATH / "pdfs"
@@ -28,7 +30,7 @@ accounting_logger = structlog.get_logger("accounting")
 router = APIRouter(prefix="/dataset-recsys/mathe", tags=["MathE Recommendation Service"])
 recs_client = RecommendationClient()
 mathe_client: MatheMirrorClient | None = None
-
+embedding_client = EmbeddingClient()
 
 def get_mathe_client() -> MatheMirrorClient:
     global mathe_client
@@ -159,6 +161,93 @@ async def get_recommendations(
         log.error("Unexpected error in MathE recommendations", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
+@router.post(
+    "/recommend/v2",
+    response_model=MatheRecsResponse,
+    summary="Get material recommendations for a math question",
+    description="""
+Given a MathE question ID, return a list of recommended PDF materials. 
+    """,
+)
+async def get_recommendations_v2(
+    request: MatheRecsRequest = Body(...),
+    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
+    token: str = Depends(security.oauth2_scheme),
+):
+    start_time = time.time()
+    user_subject = claims.get("sub")
+    log = logger.bind(question_id=request.question_id, UserId=user_subject)
+    accounting_logger.info(
+        "Recommendation Request Received",
+        Action="get_recommendations",
+        Resource="question_to_material_recommender",
+        Domain="mathe",
+        QuestionId=request.question_id,
+        UserId=user_subject,
+        Timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    )
+
+    # Fetch authorized items from security context
+    authorized_list = await security.get_authorized_entity_ids(token)
+    authorized_set = set(authorized_list)
+    
+    # Check if the authorized set contains the mathe dataset ID
+    if MATHE_DATASET_ID not in authorized_set:
+        log.warning(f"User {user_subject} not authorized for MathE dataset {MATHE_DATASET_ID}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions to access MathE recommendations.",
+        )
+
+    question = request.question.strip()
+    question_id = request.question_id.strip()
+    n = request.n
+    if not question_id:
+        log.warning("Missing question ID.")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Question ID is required.",
+        )
+    
+    if not question:
+        log.warning("Missing question text.")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Question text is required.",
+        )
+
+    try:
+        log.info("Encoding LaTeX question for vector search")
+        question_embeddings = encode_texts(
+            [question], 
+            model_name=DEFAULT_MATHE_EMBEDDING_MODEL
+        )
+        query_vector = question_embeddings[0].tolist()   
+        
+        results = embedding_client.find_similar(
+            application="mathe",
+            query_embedding=query_vector,
+            top_k=request.n,
+            table=embedding_client.TABLE_MATHE
+        )
+        
+        recs = [
+            MatheRecommendation(material_id=res[0]) 
+            for res in results
+        ]
+
+        query_time = time.time() - start_time
+        log.info(f"Vector search complete. Found {len(recs)} matches in {query_time:.3f}s")
+
+        return MatheRecsResponse(
+            question_id=request.question_id,
+            recommendations=recs,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error("Unexpected error in MathE recommendations", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 @router.post("/sync")
 async def sync_data(

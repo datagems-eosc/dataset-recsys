@@ -3,8 +3,6 @@ from typing import Dict, Any, Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from dataset_recsys.mathe_seed_scoring import score_pdf_seed_candidates
-
 
 def material_id_to_redis_id(material_id: Any) -> str:
     """Convert a MathE DB material ID to the Redis/OCR entity ID."""
@@ -176,27 +174,6 @@ class MatheMirrorClient:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (question_id,))
             return cur.fetchall()
-
-    def recommend_pdf_seeds_for_question(
-        self,
-        question_id: int,
-        k: int = 10,
-    ) -> list[Dict[str, Any]]:
-        """Return the top-k PDF seed materials for a question."""
-        if k <= 0:
-            return []
-
-        question_metadata = self.get_question_metadata(question_id)
-        if not question_metadata:
-            return []
-
-        seed_candidates = self.get_pdf_seed_candidates(question_id)
-        scored_candidates = score_pdf_seed_candidates(
-            dict(question_metadata),
-            [dict(candidate) for candidate in seed_candidates],
-        )
-
-        return scored_candidates[:k]
 
     def get_pdf_material_details(
         self,

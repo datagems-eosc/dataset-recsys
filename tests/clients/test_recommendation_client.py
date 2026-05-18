@@ -24,9 +24,16 @@ class FakePipeline:
 class FakeRedis:
     def __init__(self):
         self.pipeline_instance = FakePipeline()
+        self.calls = []
 
     def pipeline(self):
         return self.pipeline_instance
+
+    def zrevrange(self, *args, **kwargs):
+        self.calls.append(("zrevrange", args, kwargs))
+        if kwargs.get("withscores"):
+            return [("8.pdf", 0.8), ("7.pdf", 0.7)]
+        return ["8.pdf", "7.pdf"]
 
 
 def test_normalize_recommendations_accepts_scored_pairs():
@@ -64,8 +71,7 @@ def test_normalize_recommendations_accepts_empty_inputs():
     assert client._normalize_recommendations({}) == {}
 
 
-# This test ensures that when the limit is None, the method does not attempt to trim the sorted set, 
-# which would involve a call to zremrangebyrank.
+# This test ensures that when the limit is None, the method does not attempt to trim the sorted set.
 def test_update_neighbor_recs_does_not_trim_when_limit_is_none():
     client = RecommendationClient.__new__(RecommendationClient)
     client.r = FakeRedis()
@@ -81,3 +87,41 @@ def test_update_neighbor_recs_does_not_trim_when_limit_is_none():
     calls = client.r.pipeline_instance.calls
     assert ("zadd", ("recs:mathe:6.pdf", {"8.pdf": 0.8})) in calls
     assert not any(name == "zremrangebyrank" for name, _args in calls)
+
+
+# This test ensures that when a limit is provided, the method attempts to trim the sorted set 
+# to maintain only the top N recommendations, which involves a call to zremrangebyrank.
+def test_get_recommendations_can_limit_redis_range():
+    client = RecommendationClient.__new__(RecommendationClient)
+    client.r = FakeRedis()
+
+    recommendations = client.get_recommendations(
+        application="mathe",
+        entity_id="6.pdf",
+        limit=2,
+    )
+
+    assert recommendations == ["8.pdf", "7.pdf"]
+    assert client.r.calls == [("zrevrange", ("recs:mathe:6.pdf", 0, 1), {})]
+
+
+# This test ensures that recommendaitons with scores are correctly retrieved from Redis 
+# when the withscores option is used, and that the correct Redis command is issued.
+def test_get_recommendations_with_scores_returns_redis_scores():
+    client = RecommendationClient.__new__(RecommendationClient)
+    client.r = FakeRedis()
+
+    recommendations = client.get_recommendations_with_scores(
+        application="mathe",
+        entity_id="6.pdf",
+        limit=2,
+    )
+
+    assert recommendations == [("8.pdf", 0.8), ("7.pdf", 0.7)]
+    assert client.r.calls == [
+        (
+            "zrevrange",
+            ("recs:mathe:6.pdf", 0, 1),
+            {"withscores": True},
+        )
+    ]

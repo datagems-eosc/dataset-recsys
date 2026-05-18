@@ -250,17 +250,15 @@ The MathE material recommender is implemented across the API, storage, and
 scoring layers:
 
 - `dataset_recsys/api/routes/mathe.py`
-  - `get_recommendations`
-  - `_rank_expanded_candidates`
-- `dataset_recsys/storage/mathe_mirror_client.py`
-  - `get_question_metadata`
-  - `get_pdf_seed_candidates`
-  - `get_pdf_material_metadata_by_redis_ids`
-  - `get_pdf_material_details`
+- `dataset_recsys/mathe_recommenders/metadata_ocr.py`
+  - production rec method
   - `recommend_pdf_seeds_for_question`
-- `dataset_recsys/mathe_seed_scoring.py`
-  - `compute_keyword_jaccard`
-  - `score_pdf_seed_candidates`
+- `dataset_recsys/mathe_recommenders/popular_seed.py`
+  - method based on the most popular material under the same topic with the given question
+- `dataset_recsys/mathe_recommenders/comparison.py`
+- `dataset_recsys/mathe_recommenders/compare_cli.py`
+  - internal CLI for comparing strategies without exposing them in the API
+- `dataset_recsys/storage/mathe_mirror_client.py`
+  - data retrieval only
+- `dataset_recsys/mathe_recommenders/seed_scoring.py`
 - `dataset_recsys/storage/recommendation_client.py`
-  - `get_recommendations`
-  - `get_recommendations_with_scores`

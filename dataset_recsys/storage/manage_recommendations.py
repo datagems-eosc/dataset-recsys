@@ -67,13 +67,13 @@ def remove_dataset(application: str, entity_id: str):
     except Exception as e:
         print(f"❌ Remove dataset failed: {e}")
 
-def get_recommendations(application: str, entity_id: str):
+def get_recommendations(application: str, entity_id: str, limit: int):
     client = get_client()
     if client is None:
         return
 
     print(f"🔍 Fetching recommendations for '{entity_id}' in application '{application}'...")
-    recs = client.get_recommendations(application, entity_id)
+    recs = client.get_recommendations(application, entity_id, limit=limit)
     
     if not recs:
         print(f"⚠️ No recommendations found for entity '{entity_id}'.")
@@ -102,6 +102,7 @@ if __name__ == "__main__":
     get_parser = subparsers.add_parser("get", help="Get recommendations for a specific entity")
     get_parser.add_argument("application", help="Application name")
     get_parser.add_argument("entity_id", help="The ID to lookup (e.g. 6.pdf or a UUID)")
+    get_parser.add_argument("--limit", type=int, default=10, help="Maximum recommendations to fetch")
 
     delete_parser = subparsers.add_parser("delete-application", help="Delete all recommendations for one application")
     delete_parser.add_argument("application", help="Application name")
@@ -118,7 +119,7 @@ if __name__ == "__main__":
     if args.command == "ingest":
         ingest_recommendations(args.file, args.application)
     elif args.command == "get":
-        get_recommendations(args.application, args.entity_id)
+        get_recommendations(args.application, args.entity_id, args.limit)
     elif args.command == "delete-application":
         delete_application(args.application)
     elif args.command == "list-entities":

@@ -195,17 +195,52 @@ class RecommendationClient:
     # -------------------------
     # QUERYING
     # -------------------------
-    def get_recommendations(self, application: str, entity_id: str) -> List[str]:
+    def get_recommendations(
+        self,
+        application: str,
+        entity_id: str,
+        limit: int | None = None,
+    ) -> List[str]:
         """
         Return recommended entity IDs for one entity, ordered by score descending.
         Returns an empty list if the entity_id does not exist or has no recs.
         """
         if not entity_id:
             return []
+        if limit is not None and limit <= 0:
+            return []
             
         key = self._recommendation_key(application, entity_id)
         # ZREVRANGE returns items from highest score to lowest
-        return self.r.zrevrange(key, 0, -1)
+        stop = -1 if limit is None else max(limit - 1, 0)
+        return self.r.zrevrange(key, 0, stop)
+
+    def get_recommendations_with_scores(
+        self,
+        application: str,
+        entity_id: str,
+        limit: int | None = None,
+    ) -> List[tuple[str, float]]:
+        """
+        Return recommended entity IDs with their stored Redis ZSET scores.
+        Scores are cosine similarities for MathE OCR recommendations.
+        """
+        if not entity_id:
+            return []
+        if limit is not None and limit <= 0:
+            return []
+
+        key = self._recommendation_key(application, entity_id)
+        stop = -1 if limit is None else max(limit - 1, 0)
+        return [
+            (str(recommended_id), float(score))
+            for recommended_id, score in self.r.zrevrange(
+                key,
+                0,
+                stop,
+                withscores=True,
+            )
+        ]
 
     # TODO: Check whether this returns only the entity IDs that have recommendations, or also those with empty recommendation ZSETs. If the latter, we may want to filter those out.
     def list_entities(self, application: str) -> List[str]:

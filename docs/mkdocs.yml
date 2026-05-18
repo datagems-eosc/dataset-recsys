@@ -6,6 +6,7 @@ nav:
   - System:
     - Architecture: architecture.md
     - Workflows: workflows.md
+    - MathE Material Recommender: mathe_material_recommender.md
   - API: index.md
   - License: license.md
   - DataGEMS Home: https://datagems-eosc.github.io/

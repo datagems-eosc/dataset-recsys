@@ -125,19 +125,25 @@ async def get_recommendations(
             )
 
         raw_recs = recs_client.get_recommendations(
-            application="ds2ds", entity_id=request.entity_id
+            application="ds2ds",
+            entity_id=request.entity_id,
+            limit=request.n,
         )
 
-        filtered_recs = [Recommendation(entity_id=item) for item in raw_recs if item in authorized_set]
+        filtered_recs = [
+            Recommendation(entity_id=item)
+            for item in raw_recs
+            if item in authorized_set
+        ]
 
         query_time = time.time() - start_time
         log.info(
-            f"Returning {len(filtered_recs[:request.n])} recs for {lookup_id} in {query_time:.3f}s"
+            f"Returning {len(filtered_recs)} recs for {lookup_id} in {query_time:.3f}s"
         )
 
         return RecsResponse(
             entity_id=request.entity_id,
-            recommendations=filtered_recs[:request.n],
+            recommendations=filtered_recs,
         )
     except HTTPException:
         raise

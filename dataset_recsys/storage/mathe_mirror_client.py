@@ -108,8 +108,14 @@ class MatheMirrorClient:
             q.id AS question_id,
             q.topic AS topic_id,
             q.subtopic AS subtopic_id,
+            t.name AS topic,
+            s.name AS subtopic,
             ARRAY_REMOVE(ARRAY_AGG(DISTINCT k.name), NULL) AS keywords
         FROM platform__sna__questions q
+        LEFT JOIN platform__topic t
+            ON q.topic = t.id
+        LEFT JOIN platform__subtopic s
+            ON q.subtopic = s.id
         LEFT JOIN platform_keyword_snaquestion qk
             ON q.id = qk.platformsnaquestionid
         LEFT JOIN platform__keywords k
@@ -118,7 +124,9 @@ class MatheMirrorClient:
         GROUP BY
             q.id,
             q.topic,
-            q.subtopic;
+            q.subtopic,
+            t.name,
+            s.name;
         """
 
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:

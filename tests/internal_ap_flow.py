@@ -45,7 +45,11 @@ async def internal_recommend_logic(request: RecsRequest):
     n = request.n
 
     try:
-        recs_set = recs_client.get_recommendations(application="ds2ds", entity_id=entity_id)
+        recs_set = recs_client.get_recommendations(
+            application="ds2ds",
+            entity_id=entity_id,
+            limit=n,
+        )
 
         if not recs_set:
             return RecsResponse(
@@ -58,7 +62,7 @@ async def internal_recommend_logic(request: RecsRequest):
         print(f"Generated {len(recs_list)} recommendations for {entity_id}.")
         print(f"Recommendations: {recs_list[:n]}")
 
-        recs = [Recommendation(entity_id=rec_id) for rec_id in recs_list[:n]]
+        recs = [Recommendation(entity_id=rec_id) for rec_id in recs_list]
 
         return RecsResponse(
             entity_id=entity_id,

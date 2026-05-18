@@ -2,12 +2,14 @@ import os
 from pathlib import Path
 import time
 from datetime import datetime, timedelta, timezone
-import token
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 
 from dataset_recsys.api.analytical_patterns.models import MatheRecommendation, MatheRecsResponse
+from dataset_recsys.mathe_recommenders.metadata_ocr import (
+    recommend_from_metadata_seeds,
+)
 from dataset_recsys.storage.recommendation_client import RecommendationClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 from dataset_recsys.utils.mathe_syncer import MathE_Syncer
@@ -59,6 +61,7 @@ def _resolve_sync_status(sync_status: dict) -> str:
 
     return "running"
 
+
 @router.post(
     "/recommend",
     response_model=MatheRecsResponse,
@@ -66,9 +69,6 @@ def _resolve_sync_status(sync_status: dict) -> str:
     description="""
 Given a MathE question ID, return a list of recommended PDF materials. 
     """,
-# The request input is a question ID. Internally, the service
-# maps the question to its highest-clicked PDF material and uses that material as
-# the recommendation seed.
 )
 async def get_recommendations(
     question_id: str = Query(
@@ -104,14 +104,12 @@ async def get_recommendations(
         )
 
     try:
-        material = get_mathe_client().get_material_by_question_id(question_id)
-        # Cast to string if not None, else keep as None
-        material_id = str(material['id']) if material else None
-        if not material_id:
-            log.warning(f"No material found for question_id {question_id}")
+        try:
+            question_id_int = int(question_id)
+        except ValueError:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No material found for question_id {question_id}",
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Question ID must be an integer.",
             )
 
         # Fetch authorized items from security context
@@ -126,11 +124,24 @@ async def get_recommendations(
                 detail="Insufficient permissions to access MathE recommendations.",
             )
 
-        raw_recs = recs_client.get_recommendations(
-            application="mathe", entity_id= material_id + ".pdf"
+        recommended_material_ids = recommend_from_metadata_seeds(
+            question_id=question_id_int,
+            k=n,
+            mathe_mirror_client=get_mathe_client(),
+            recommendation_client=recs_client,
         )
 
-        filtered_recs = [MatheRecommendation(material_id=item) for item in raw_recs]
+        if not recommended_material_ids:
+            log.warning(f"No PDF recommendations found for question_id {question_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No PDF recommendations found for question_id {question_id}",
+            )
+
+        filtered_recs = [
+            MatheRecommendation(material_id=material_id)
+            for material_id in recommended_material_ids
+        ]
 
         query_time = time.time() - start_time
         log.info(
@@ -147,6 +158,7 @@ async def get_recommendations(
     except Exception as e:
         log.error("Unexpected error in MathE recommendations", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail="Internal Server Error")
+
 
 @router.post("/sync")
 async def sync_data(

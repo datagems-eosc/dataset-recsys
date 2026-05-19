@@ -1,6 +1,5 @@
 import os
 from typing import List, Any
-from pandas.plotting import table
 import psycopg2
 from psycopg2.extras import execute_values
 
@@ -9,6 +8,8 @@ class EmbeddingClient:
     """
     PostgreSQL + pgvector client for storing dataset and MathE embeddings.
     """
+    TABLE_DATASET = "dataset_embeddings"
+    TABLE_MATHE = "mathe_embeddings"
 
     def __init__(
         self,
@@ -28,10 +29,6 @@ class EmbeddingClient:
         self.schema = os.getenv("DATAGEMS_POSTGRES_SCHEMA", "public")
         self.conn.autocommit = True
         
-        # Table Names
-        self.TABLE_DATASET = "dataset_embeddings"
-        self.TABLE_MATHE = "mathe_embeddings"
-
         self._init_db()
 
     def _init_db(self):
@@ -86,15 +83,15 @@ class EmbeddingClient:
         """
         Store embeddings in bulk with metadata (replaces existing entries for the application).
         """
-        id_column = "material_id" if table == self.TABLE_MATHE else "dataset_id"        
+        id_column = "material_id" if table == self.TABLE_MATHE else "dataset_id"
 
-        self.delete_application(application)
+        self.delete_application(application, table=table)
 
         rows = [
             (
                 application,
                 dataset_id,
-                embedding.tolist(),  # numpy -> list
+                embedding.tolist(),
                 embedding_input,
                 embedding_model,
                 kwargs.get("enrichment_llm", "none"),
@@ -213,7 +210,7 @@ class EmbeddingClient:
 
     def delete_application(self, application: str, table: str = "dataset_embeddings") -> int:
         with self.conn.cursor() as cur:
-            cur.execute(f"DELETE FROM {table} WHERE application = %s", (application,))
+            cur.execute(f"DELETE FROM {self.schema}.{table} WHERE application = %s", (application,))
             return cur.rowcount
 
     def get_schema_overview(self) -> dict:
@@ -258,3 +255,7 @@ class EmbeddingClient:
                 return True
         except Exception:
             return False
+
+    def close(self) -> None:
+        if self.conn:
+            self.conn.close()

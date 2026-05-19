@@ -3,9 +3,22 @@ from dataset_recsys.mathe_recommenders.metadata_ocr import (
     rank_expanded_candidates,
     seed_redis_id,
 )
+from dataset_recsys.mathe_recommenders.question_embedding import (
+    recommend_from_question_embedding,
+)
 from dataset_recsys.mathe_recommenders.popular_seed import recommend_from_popular_seed
+from dataset_recsys.mathe_recommenders.seed_scoring import score_pdf_seed_candidates
+from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 from dataset_recsys.storage.recommendation_client import RecommendationClient
+
+
+METADATA_SCORE_KEYS = (
+    "keyword_jaccard",
+    "same_subtopic",
+    "same_topic",
+    "metadata_score",
+)
 
 
 def _details_by_material_id(
@@ -49,11 +62,47 @@ def _enrich_recommendations(
     return enriched
 
 
+def _metadata_scores_for_materials(
+    material_ids: list[str],
+    question_metadata: dict,
+    mathe_mirror_client: MatheMirrorClient,
+) -> dict[str, dict]:
+    if not material_ids:
+        return {}
+
+    material_metadata = mathe_mirror_client.get_pdf_material_metadata_by_redis_ids(
+        material_ids
+    )
+    scored_materials = score_pdf_seed_candidates(
+        question_metadata,
+        material_metadata,
+    )
+
+    return {
+        str(material["material_redis_id"]).strip(): {
+            key: material[key]
+            for key in METADATA_SCORE_KEYS
+            if key in material
+        }
+        for material in scored_materials
+    }
+
+
+def _metadata_score_fields(candidate: dict) -> dict:
+    return {
+        key: candidate[key]
+        for key in METADATA_SCORE_KEYS
+        if key in candidate
+    }
+
+
 def compare_question_recommenders(
     question_id: int,
     k: int,
     mathe_mirror_client: MatheMirrorClient,
     recommendation_client: RecommendationClient,
+    question_text: str | None = None,
+    embedding_client: EmbeddingClient | None = None,
 ) -> dict:
     """Build an internal comparison report for MathE recommender strategies."""
     question_metadata = mathe_mirror_client.get_question_metadata(question_id)
@@ -79,21 +128,15 @@ def compare_question_recommenders(
         seed_redis_id(candidate)
         for candidate in metadata_candidates
     ]
-    metadata_scores = {
-        seed_redis_id(candidate): {
-            key: candidate[key]
-            for key in (
-                "keyword_jaccard",
-                "same_subtopic",
-                "same_topic",
-                "metadata_score",
-                "embedding_score",
-                "final_score",
-            )
-            if key in candidate
-        }
-        for candidate in metadata_candidates
-    }
+    metadata_scores = {}
+    for candidate in metadata_candidates:
+        material_id = seed_redis_id(candidate)
+        scores = _metadata_score_fields(candidate)
+        if "embedding_score" in candidate:
+            scores["material_to_material_similarity"] = candidate["embedding_score"]
+        if "final_score" in candidate:
+            scores["total_score"] = candidate["final_score"]
+        metadata_scores[material_id] = scores
 
     popular_ids = recommend_from_popular_seed(
         question_id=question_id,
@@ -107,10 +150,42 @@ def compare_question_recommenders(
         if popular_seed
         else None
     )
+    question_embedding_candidates = (
+        recommend_from_question_embedding(
+            question_text,
+            k,
+            embedding_client=embedding_client,
+            question_metadata=dict(question_metadata),
+            mathe_mirror_client=mathe_mirror_client,
+        )
+        if question_text
+        else []
+    )
+    question_embedding_ids = [
+        str(candidate["material_redis_id"]).strip()
+        for candidate in question_embedding_candidates
+    ]
+    question_embedding_scores = {}
+    for candidate in question_embedding_candidates:
+        material_id = seed_redis_id(candidate)
+        scores = _metadata_score_fields(candidate)
+        scores["question_to_material_similarity"] = candidate.get(
+            "question_to_material_similarity"
+        )
+        scores["total_score"] = candidate.get("total_score")
+        question_embedding_scores[material_id] = scores
+
+    popular_material_ids = popular_ids + ([popular_seed_id] if popular_seed_id else [])
+    popular_scores = _metadata_scores_for_materials(
+        popular_material_ids,
+        dict(question_metadata),
+        mathe_mirror_client,
+    )
     material_ids_for_details = list(
         dict.fromkeys(
             metadata_ids
             + popular_ids
+            + question_embedding_ids
             + ([popular_seed_id] if popular_seed_id else [])
         )
     )
@@ -143,6 +218,7 @@ def compare_question_recommenders(
                     _enrich_recommendations(
                         [popular_seed_id],
                         details_by_id,
+                        popular_scores,
                     )[0]
                     if popular_seed_id
                     else None
@@ -150,7 +226,17 @@ def compare_question_recommenders(
                 "recommendations": _enrich_recommendations(
                     popular_ids,
                     details_by_id,
+                    popular_scores,
                 ),
+            },
+            "question_embedding": {
+                "description": "Experimental flow: embed provided question text, then query MathE material embeddings in pgvector.",
+                "recommendations": _enrich_recommendations(
+                    question_embedding_ids,
+                    details_by_id,
+                    question_embedding_scores,
+                ),
+                "available": bool(question_text),
             },
         },
     }

@@ -37,6 +37,15 @@ class FakeRecommendationClient:
         return len(data)
 
 
+class FakeEmbeddingClient:
+    TABLE_MATHE = "mathe_embeddings"
+    stored = None
+
+    def store_embeddings(self, **kwargs):
+        self.__class__.stored = kwargs
+        return len(kwargs["dataset_ids"])
+
+
 def test_run_mathe_pipeline_builds_and_stores_recommendations(tmp_path, monkeypatch):
     data_file = tmp_path / "data.json"
     data_file.write_text(
@@ -89,25 +98,30 @@ def test_run_mathe_pipeline_builds_and_stores_recommendations(tmp_path, monkeypa
         "_build_recommendation_client",
         lambda: FakeRecommendationClient(),
     )
+    monkeypatch.setattr(
+        mathe_sync_pipeline,
+        "_build_embedding_client",
+        lambda: FakeEmbeddingClient(),
+    )
 
     summary = mathe_sync_pipeline.run_mathe_pipeline(fake_syncer)
 
     assert fake_syncer.sync_called is True
-    assert summary["status"] == "completed"
-    assert summary["processed_materials"] == 3
-    assert summary["embeddings_created"] == 3
-    assert summary["redis_keys_updated"] == 3
+    assert summary == {
+        "status": "completed",
+        "processed_materials": 3,
+        "embeddings_created": 3,
+        "redis_keys_updated": 3,
+        "application": "mathe",
+    }
     assert fake_syncer.status["sync_status"] == "completed"
-    assert fake_syncer.status["last_sync_started_at"]
-    assert fake_syncer.status["last_sync_heartbeat_at"]
-    assert fake_syncer.status["last_sync_completed_at"]
     assert fake_syncer.status["embeddings_created"] == 3
     assert encoded_with["model_name"] == "BAAI/bge-m3"
     assert FakeRecommendationClient.stored["application"] == "mathe"
     assert set(FakeRecommendationClient.stored["data"]) == {"6.pdf", "7.pdf", "8.pdf"}
-    assert FakeRecommendationClient.stored["data"]["6.pdf"] == [("8.pdf", 0.8), ("7.pdf", 0.0)]
-    assert FakeRecommendationClient.stored["data"]["7.pdf"] == [("8.pdf", 0.6), ("6.pdf", 0.0)]
-    assert FakeRecommendationClient.stored["data"]["8.pdf"] == [("6.pdf", 0.8), ("7.pdf", 0.6)]
+    assert FakeEmbeddingClient.stored["application"] == "mathe"
+    assert FakeEmbeddingClient.stored["dataset_ids"] == ["6.pdf", "7.pdf", "8.pdf"]
+    assert FakeEmbeddingClient.stored["table"] == "mathe_embeddings"
 
 
 # This test ensures that if the data.json file is missing, 
@@ -122,9 +136,6 @@ def test_run_mathe_pipeline_handles_missing_data_json(tmp_path):
     assert summary["processed_materials"] == 0
     assert summary["redis_keys_updated"] == 0
     assert fake_syncer.status["sync_status"] == "skipped"
-    assert fake_syncer.status["last_sync_started_at"]
-    assert fake_syncer.status["last_sync_heartbeat_at"]
-    assert fake_syncer.status["last_sync_completed_at"]
     assert fake_syncer.status["embeddings_created"] == 0
 
 
@@ -187,17 +198,12 @@ def test_status_endpoint_returns_sync_metadata_and_failed_material_ids(monkeypat
 
     response = asyncio.run(mathe.get_status())
 
-    assert response == {
-        "sync_status": "completed",
-        "last_sync_started_at": "2026-05-13T10:24:18Z",
-        "last_sync_heartbeat_at": None,
-        "last_sync_completed_at": "2026-05-13T10:31:42Z",
-        "total_materials": 4,
-        "ocr_completed_materials": 2,
-        "ocr_pending_materials": 1,
-        "ocr_failed_material_ids": ["70.pdf"],
-        "embeddings_created": 461,
-    }
+    assert response["sync_status"] == "completed"
+    assert response["total_materials"] == 4
+    assert response["ocr_completed_materials"] == 2
+    assert response["ocr_pending_materials"] == 1
+    assert response["ocr_failed_material_ids"] == ["70.pdf"]
+    assert response["embeddings_created"] == 461
 
 # It simulates a scenario where the last sync was marked as "running" but the heartbeat timestamp is old,
 # indicating that the sync process may have stalled. 

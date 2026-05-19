@@ -255,10 +255,15 @@ scoring layers:
   - `recommend_pdf_seeds_for_question`
 - `dataset_recsys/mathe_recommenders/popular_seed.py`
   - method based on the most popular material under the same topic with the given question
+- `dataset_recsys/mathe_recommenders/question_embedding.py`
+  - experimental method that embeds provided question text and queries MathE pgvector embeddings
 - `dataset_recsys/mathe_recommenders/comparison.py`
 - `dataset_recsys/mathe_recommenders/compare_cli.py`
   - internal CLI for comparing strategies without exposing them in the API
+  - supports batch comparison from a JSON question file
 - `dataset_recsys/storage/mathe_mirror_client.py`
   - data retrieval only
 - `dataset_recsys/mathe_recommenders/seed_scoring.py`
 - `dataset_recsys/storage/recommendation_client.py`
+- `dataset_recsys/storage/embedding_client.py`
+  - stores/queries MathE material embeddings

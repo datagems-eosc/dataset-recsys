@@ -1,0 +1,200 @@
+[
+  {
+    "id": 553,
+    "id_lect": 81,
+    "description": "",
+    "question": "Consider the usual scalar product of the vectors $u=(-1, 2, 1)$ and $v=(3, -6, -3)$ of $\\mathbb{R}^3$. \nChoose the right answer:",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 554,
+    "id_lect": 81,
+    "description": "",
+    "question": "Consider the usual scalar product in $\\mathbb{R}^2$. The distance from the point $P = (-3, 5)$ to the line $r:\\quad y=x-2$ is: ",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 1487,
+    "id_lect": 2956,
+    "description": "",
+    "question": "On the Argand's plane, the image of the complex numbers $z$ that satisfy the condition $iz+\\overline{z}=0$ is:",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 172,
+    "id_lect": 58,
+    "description": "",
+    "question": "Find the general solution for the differential equation system\n\n$\\begin{cases}\nx'(t)=2x+y \\\\\ny'(t)=x+3y-z \\\\\nz'(t)=-x+2y+3z\n\\end{cases}$",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 159,
+    "id_lect": 59,
+    "description": "",
+    "question": "Solve the Cauchy problem $xy'-ny=x^{n+1}e^x$ with $y(1)=1$ and $n\\in\\mathbb{N}$.",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 272,
+    "id_lect": 57,
+    "description": "",
+    "question": "Differentiate $y = (2x^3 - 5x)^5$.",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 1047,
+    "id_lect": 80,
+    "description": "",
+    "question": "Consider the function $z=x^2 + xy$, where $x= \\sin (t)$ and $y=3t$. Use the Chain Rule to find $\\dfrac{d z}{d t}$.",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 1986,
+    "id_lect": 58,
+    "description": "",
+    "question": "Find the directional derivative of the function $f:\\mathbb{R}^{3}\\rightarrow\\mathbb{R},\\ \\ f(x,y,z)=xy^{2}-4x^{2}y+z^{2}$ at the point $M(1,-1,2)$ in the direction $\\overrightarrow{s}$, where $\\overrightarrow{s}$ is the unit vector of $\\overrightarrow{v}=6\\overrightarrow{i}+2\\overrightarrow{j}+3\\overrightarrow{k}.$",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 1752,
+    "id_lect": 2956,
+    "description": "",
+    "question": "Solve the following recurrence equation\r\n$$a_n=2a_{n-1}+3a_{n-2}$$ with initial conditions $a_1=3$ and $a_2=7$.",
+    "level": "Advanced",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 1810,
+    "id_lect": 2956,
+    "description": "",
+    "question": "Determine $\\mathcal{P}(\\mathcal{P}( \\emptyset ))$.",
+    "level": "Advanced",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 1858,
+    "id_lect": 50,
+    "description": "",
+    "question": "Simplify:\r\n\r\n$(x-2y)+(4x+y)$",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 1256,
+    "id_lect": 2417,
+    "description": "",
+    "question": "If a triangle has a square angle and the two adjacent sides are equal in length, what are the other two angles in the triangle?",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 1181,
+    "id_lect": 1666,
+    "description": "",
+    "question": "Evaluate $\\displaystyle \\int_{0}^{\\dfrac{\\pi}{4}} \\tan{(x)} \\: dx$",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 654,
+    "id_lect": 38,
+    "description": "",
+    "question": "Find $\\displaystyle\\int_{}\\int_{D}{y}^{2}+3{x} \\: dA$ where $D$ is the region in the 3$^{rd}$  quadrant between $\\displaystyle x^2+y^2=1$ and $\\displaystyle x^2+y^2=9$.",
+    "level": "Advanced",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 414,
+    "id_lect": 38,
+    "description": "",
+    "question": "Find $\\displaystyle\\int\\dfrac{x^3-3x+2}{x^4}\\, dx$.",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 1423,
+    "id_lect": 2943,
+    "description": "",
+    "question": "Evaluate the surface integral $\\displaystyle \\iint\\limits_S (x+y+z)\\,dS\\,$, where S is the parallelogram with parametric equations $x=u+v\\,$, $y=u-v\\,$, $z=1+2u+v\\,$, $0\\leq\\,u\\leq\\,2\\,$, $0\\leq\\,v\\leq\\,1$.",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 1287,
+    "id_lect": 2943,
+    "description": "",
+    "question": "Evaluate $\\displaystyle\\iiint\\limits_E 1\\,dV$ where E  is defined by $\\displaystyle E=\\{(x,y,z)\\in\\mathbb{R}^3:\\,\\sqrt{x^2+y^2}\\leq \\,z\\leq\\,1-2\\sqrt{x^2+y^2}\\} $",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 620,
+    "id_lect": 127,
+    "description": "",
+    "question": "The characteristic polynomial of the matrix $A = \\begin{bmatrix}\n2 & 0 & 0 \\\\\n3 & -1 & 0 \\\\\n0 & 4 & 3 \\end{bmatrix}$ is:",
+    "level": "Advanced",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 1931,
+    "id_lect": 43,
+    "description": "",
+    "question": "For which values of $a,b,c\\in\\mathbb{R}$ the following linear system has no solutions?\r\n$$\\left\\{\\begin{array}{cccccccc}\r\n3x & - & y & + & 2z & = & a\\\\\r\n-x & + & 2y & - & 3z & = & b\\\\\r\nx & + & 2y & + & z & = & c\r\n\\end{array}\\right.$$",
+    "level": "Advanced",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 776,
+    "id_lect": 81,
+    "description": "",
+    "question": "Consider the linear transformation $F:\\mathbb{R}^2 \\longrightarrow \\mathbb{R}^2$, such that $F(x, y)=(x+2y, 2x+3y)$. Choose the right answer: ",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 131,
+    "id_lect": 52,
+    "description": "",
+    "question": "What is the determinant of the matrix  $A=\\left( \r\n \\begin{array}{rrrr}\r\nx & 0 &  0 & -x  \\\\ \r\n0 & -x & -1 & 1  \\\\ \r\n 1 & 0 & x & -1  \\\\ \r\nx & 0 &  0 & 1 \\end{array}\r\n\\right)$, $x\\neq 0$?",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  },
+  {
+    "id": 454,
+    "id_lect": 81,
+    "description": "",
+    "question": "Choose the set of vectors which is a basis for $\\mathbb{R}^2$.",
+    "level": "Basic",
+    "file_name": null,
+    "file_ext": null
+  }
+]

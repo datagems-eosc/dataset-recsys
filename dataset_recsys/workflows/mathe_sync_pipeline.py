@@ -73,6 +73,10 @@ def _build_recommendation_client():
     return RecommendationClient()
 
 
+def _build_embedding_client():
+    return EmbeddingClient()
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -157,7 +161,7 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
         batch_size = 32
         all_embeddings = []
         embeddings_created = 0
-        client = EmbeddingClient()
+        client = _build_embedding_client()
 
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]

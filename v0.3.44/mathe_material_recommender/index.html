@@ -1,0 +1,1150 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="../workflows/">
+      
+      
+        <link rel="next" href="../mathe_recommender_testing/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../images/favicon.jpg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>MathE Material Recommender - Dataset Recommendation Service</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/custom-footer.css">
+    
+      <link rel="stylesheet" href="../stylesheets/mkdocsoad.css">
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#mathe-material-recommender" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+    
+  <div>
+    You're not viewing the latest version.
+    <a href="../..">
+      <strong>Click here to go to latest.</strong>
+    </a>
+  </div>
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL(".."),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Dataset Recommendation Service" class="md-header__button md-logo" aria-label="Dataset Recommendation Service" data-md-component="logo">
+      
+  <img src="../images/datagems-portal-icon.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Dataset Recommendation Service
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              MathE Material Recommender
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/datagems-eosc/dataset-recsys" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Dataset Recommendation Service" class="md-nav__button md-logo" aria-label="Dataset Recommendation Service" data-md-component="logo">
+      
+  <img src="../images/datagems-portal-icon.png" alt="logo">
+
+    </a>
+    Dataset Recommendation Service
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/datagems-eosc/dataset-recsys" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    System
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workflows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MathE Material Recommender
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MathE Material Recommender
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#purpose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Purpose
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#request-time-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Request-Time Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recommendation-logic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommendation Logic
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metadata-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metadata Score
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ocr-expansion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OCR Expansion
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="OCR Expansion">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#future-file-name-alignment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future File-Name Alignment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#embedding-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Embedding Score
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation Map
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mathe_recommender_testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MathE Recommender Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../license/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    License
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://datagems-eosc.github.io/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DataGEMS Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#purpose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Purpose
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#request-time-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Request-Time Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recommendation-logic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommendation Logic
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metadata-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metadata Score
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ocr-expansion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OCR Expansion
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="OCR Expansion">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#future-file-name-alignment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future File-Name Alignment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#embedding-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Embedding Score
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation Map
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href=".." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    API
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="../architecture/" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    System
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="mathe-material-recommender">MathE Material Recommender<a class="headerlink" href="#mathe-material-recommender" title="Permanent link">&para;</a></h1>
+<p>Here we describe the MathE educational material recommender. The service
+receives a MathE quiz/question ID and returns learning materials that are
+aligned with the question metadata.</p>
+<h2 id="purpose">Purpose<a class="headerlink" href="#purpose" title="Permanent link">&para;</a></h2>
+<p>The purpose of this recommender is to help students better understand and answer quiz questions by recommending relevant educational materials (currently pdfs only), particularly when they answer a question incorrectly.</p>
+<p>For each question, the available signals are:</p>
+<ul>
+<li>topic</li>
+<li>subtopic</li>
+<li>keywords</li>
+</ul>
+<p>For each PDF material, the available signals are:</p>
+<ul>
+<li>topic</li>
+<li>subtopic</li>
+<li>keywords</li>
+<li>OCR-extracted textual content</li>
+</ul>
+<h2 id="request-time-architecture">Request-Time Architecture<a class="headerlink" href="#request-time-architecture" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>%%{init: {'flowchart': {'nodeSpacing': 22, 'rankSpacing': 22, 'curve': 'linear'}, 'themeVariables': {'fontSize': '12px', 'lineColor': '#9E9E9E', 'edgeLabelBackground':'#ffffff', 'primaryBorderColor':'#BDBDBD', 'clusterBorder':'#E0E0E0', 'lineWidth':'0.9px'}}}%%
+flowchart TB
+    A[MathE Question ID] --&gt; B[Read Question Metadata]
+    B --&gt; C[Retrieve PDF Seed Candidates]
+    C --&gt; D[Score Seeds with Metadata]
+    D --&gt; E{Enough Seed Materials?}
+    E -- Yes --&gt; F[Return Top-k Seeds based on Metadata]
+    E -- No --&gt; G[Fetch OCR Neighbors from Redis]
+    G --&gt; H[Merge Seeds and Neighbors]
+    H --&gt; I[Rank with Final Score]
+    I --&gt; J[Return Top-k PDF Materials]
+
+    classDef request fill:#E8F5E9,stroke:#43A047,stroke-width:2px,color:#1B5E20;
+    classDef metadata fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px,color:#0D47A1;
+    classDef compute fill:#FFF3E0,stroke:#FB8C00,stroke-width:2px,color:#E65100;
+    classDef storage fill:#F3E5F5,stroke:#8E24AA,stroke-width:2px,color:#4A148C;
+    classDef result fill:#FFFDE7,stroke:#FBC02D,stroke-width:2px,color:#5D4037;
+
+    class A request;
+    class B,C metadata;
+    class D,E,H,I compute;
+    class G storage;
+    class F,J result;</code></pre>
+<h2 id="recommendation-logic">Recommendation Logic<a class="headerlink" href="#recommendation-logic" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>Input:
+  question_id
+  K = number of requested recommendations
+
+Step 1 - Retrieve question metadata
+  question_id
+  -&gt; topic_id
+  -&gt; subtopic_id
+  -&gt; keywords
+
+Step 2 - Retrieve PDF seed candidates
+  Find PDF materials that match at least one:
+    - shared keyword
+    - same subtopic
+    - same topic
+
+Step 3 - Score seeds using metadata
+  For each candidate PDF:
+
+  keyword_jaccard =
+    |question_keywords intersection material_keywords|
+    /
+    |question_keywords union material_keywords|
+
+  same_subtopic =
+    1 if question_subtopic is in material_subtopics else 0
+
+  same_topic =
+    1 if question_topic is in material_topics else 0
+
+  metadata_score =
+    (keyword_jaccard + same_subtopic + same_topic) / 3
+
+Step 4 - If enough seeds exist
+  If number_of_seeds &gt;= K:
+      return top-K PDFs ranked by metadata_score
+
+Step 5 - If not enough seeds exist
+  If number_of_seeds &lt; K:
+      keep all seed PDFs
+      use them as anchors
+      retrieve top-N OCR-neighbor PDFs for each seed PDF
+
+Step 6 - Merge candidates
+  final candidate pool =
+      seed PDFs
+    + OCR-neighbor PDFs
+
+  remove duplicates
+
+Step 7 - Compute embedding score
+  For each candidate PDF:
+
+  embedding_score =
+      max similarity score with any seed PDF
+
+  Fetch metadata for OCR-neighbor PDFs and compute metadata_score for them
+  using the same keyword, subtopic, and topic signals used for seed PDFs.
+
+Step 8 - Final score
+  For each candidate:
+
+  final_score =
+      lambda * embedding_score
+    + (1 - lambda) * metadata_score
+
+Step 9 - Return recommendations
+  Return top-K PDFs ranked by final_score DESC
+</code></pre></div>
+<h2 id="metadata-score">Metadata Score<a class="headerlink" href="#metadata-score" title="Permanent link">&para;</a></h2>
+<p>The metadata score combines three educational alignment signals:</p>
+<div class="highlight"><pre><span></span><code>metadata_score =
+  (
+      keyword_jaccard
+    + same_subtopic
+    + same_topic
+  ) / 3
+</code></pre></div>
+<p><code>keyword_jaccard</code> measures keyword overlap between the question and material:</p>
+<div class="highlight"><pre><span></span><code>keyword_jaccard =
+  |question_keywords intersection material_keywords|
+  /
+  |question_keywords union material_keywords|
+</code></pre></div>
+<p>If both keyword sets are empty, <code>keyword_jaccard</code> is <code>0.0</code>.</p>
+<p>The division by <code>3</code> keeps <code>metadata_score</code> in the <code>[0, 1]</code> range, matching the
+scale of <code>embedding_score</code>.</p>
+<h2 id="ocr-expansion">OCR Expansion<a class="headerlink" href="#ocr-expansion" title="Permanent link">&para;</a></h2>
+<p>OCR-neighbor expansion is only used when metadata scoring returns fewer than
+the requested number of recommendations.</p>
+<p>Redis stores material-to-material OCR-neighbor rankings and similarity scores:</p>
+<div class="highlight"><pre><span></span><code>recs:mathe:&lt;seed_material_redis_id&gt;
+  -&gt; Redis ZSET of &lt;neighbor_material_redis_id&gt; scored by OCR cosine similarity
+</code></pre></div>
+<p>The Redis material identifier is derived from the PostgreSQL material ID:</p>
+<div class="highlight"><pre><span></span><code>platform_materials.id = 221 -&gt; Redis entity ID = 221.pdf
+</code></pre></div>
+<p>The API response still returns the PostgreSQL <code>platform_materials.id</code>.
+The original <code>platform_materials.file_name</code> is display metadata only and is not
+used as the Redis lookup key.</p>
+<p>If OCR failed for a seed material, Redis has no recommendation key for that
+seed. The seed can still be returned because it matched the question metadata,
+but it will not contribute OCR-neighbor expansion.</p>
+<h3 id="future-file-name-alignment">Future File-Name Alignment<a class="headerlink" href="#future-file-name-alignment" title="Permanent link">&para;</a></h3>
+<p>If the sync pipeline is changed so that stored PDFs and Redis keys use
+<code>platform_materials.file_name</code> instead of <code>&lt;platform_materials.id&gt;.pdf</code>, update
+the MathE mirror client in one place:</p>
+<ul>
+<li>return <code>m.file_name AS material_redis_id</code> instead of <code>m.id::text || '.pdf'</code></li>
+<li>resolve Redis IDs back to DB rows with <code>m.file_name = ANY(%s)</code> instead of
+  parsing IDs and filtering by <code>m.id = ANY(%s)</code></li>
+<li>keep API responses unchanged: return PostgreSQL <code>platform_materials.id</code></li>
+</ul>
+<h2 id="embedding-score">Embedding Score<a class="headerlink" href="#embedding-score" title="Permanent link">&para;</a></h2>
+<p>Redis stores MathE OCR-neighbor recommendations in sorted sets. The sorted-set
+score is the OCR embedding cosine similarity computed during the MathE sync
+pipeline.</p>
+<p>At request time, the recommender reads Redis with scores and uses the stored
+similarity directly:</p>
+<div class="highlight"><pre><span></span><code>embedding_score = Redis ZSET score
+</code></pre></div>
+<p>If the same PDF appears as a neighbor of multiple seed PDFs, the recommender
+keeps the maximum stored similarity score:</p>
+<div class="highlight"><pre><span></span><code>embedding_score = max(similarity from any seed PDF)
+</code></pre></div>
+<p>This is used because a PDF only needs to be highly similar to one strong seed to
+be useful. Averaging similarities could unfairly penalize a PDF that is relevant
+to one seed but unrelated to others.</p>
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
+<p>The final interpolation weight is controlled by:</p>
+<div class="highlight"><pre><span></span><code>MATHE_EMBEDDING_WEIGHT
+</code></pre></div>
+<p>This value is lambda in:</p>
+<div class="highlight"><pre><span></span><code>final_score =
+    lambda * embedding_score
+  + (1 - lambda) * metadata_score
+</code></pre></div>
+<p>Default:</p>
+<div class="highlight"><pre><span></span><code>MATHE_EMBEDDING_WEIGHT=0.5
+</code></pre></div>
+<p>The number of Redis OCR neighbors retrieved per seed is controlled by:</p>
+<div class="highlight"><pre><span></span><code>MATHE_NEIGHBORS_PER_SEED
+</code></pre></div>
+<p>Default:</p>
+<div class="highlight"><pre><span></span><code>MATHE_NEIGHBORS_PER_SEED=20
+</code></pre></div>
+<h2 id="implementation-map">Implementation Map<a class="headerlink" href="#implementation-map" title="Permanent link">&para;</a></h2>
+<p>The MathE material recommender is implemented across the API, storage, and
+scoring layers:</p>
+<ul>
+<li><code>dataset_recsys/api/routes/mathe.py</code></li>
+<li><code>dataset_recsys/mathe_recommenders/metadata_ocr.py</code></li>
+<li>production rec method</li>
+<li><code>recommend_pdf_seeds_for_question</code></li>
+<li><code>dataset_recsys/mathe_recommenders/popular_seed.py</code></li>
+<li>method based on the most popular material under the same topic with the given question</li>
+<li><code>dataset_recsys/mathe_recommenders/question_embedding.py</code></li>
+<li>experimental method that embeds provided question text and queries MathE pgvector embeddings</li>
+<li><code>dataset_recsys/mathe_recommenders/comparison.py</code></li>
+<li><code>dataset_recsys/mathe_recommenders/compare_cli.py</code></li>
+<li>internal CLI for comparing strategies without exposing them in the API</li>
+<li>supports batch comparison from a JSON question file</li>
+<li><code>dataset_recsys/storage/mathe_mirror_client.py</code></li>
+<li>data retrieval only</li>
+<li><code>dataset_recsys/mathe_recommenders/seed_scoring.py</code></li>
+<li><code>dataset_recsys/storage/recommendation_client.py</code></li>
+<li><code>dataset_recsys/storage/embedding_client.py</code></li>
+<li>stores/queries MathE material embeddings</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+  <footer class="custom-footer">
+    <div class="footer-content">
+      <img src="../images/EN-Funded-by-the-EU-POS-7.png" alt="EU logo" class="footer-logo" />
+      <p class="footer-text">
+        DataGEMS is a Research and Innovation Action funded by the European Union under the Horizon Europe Research and Innovation Programme via Grant Agreement No 101188416.
+      </p>
+
+      <div class="footer-social-icons">
+        
+          <a href="https://github.com/datagems-eosc/" target="_blank" rel="noopener">
+            <span class="icon">
+              <i class="fab fa-github"></i>
+            </span>
+          </a>
+        
+          <a href="https://www.instagram.com/datagems_eosc" target="_blank" rel="noopener">
+            <span class="icon">
+              <i class="fab fa-instagram"></i>
+            </span>
+          </a>
+        
+          <a href="https://x.com/datagems_eosc" target="_blank" rel="noopener">
+            <span class="icon">
+              <i class="fab fa-x-twitter"></i>
+            </span>
+          </a>
+        
+          <a href="https://www.youtube.com/@DataGEMS-65n" target="_blank" rel="noopener">
+            <span class="icon">
+              <i class="fab fa-youtube"></i>
+            </span>
+          </a>
+        
+          <a href="https://www.linkedin.com/company/eosc-datagems" target="_blank" rel="noopener">
+            <span class="icon">
+              <i class="fab fa-linkedin"></i>
+            </span>
+          </a>
+        
+          <a href="https://www.facebook.com/datagems.eosc/" target="_blank" rel="noopener">
+            <span class="icon">
+              <i class="fab fa-facebook"></i>
+            </span>
+          </a>
+        
+      </div>
+    </div>
+  </footer>
+
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.path", "navigation.top"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://unpkg.com/mermaid@10/dist/mermaid.min.js"></script>
+      
+    
+  </body>
+</html>

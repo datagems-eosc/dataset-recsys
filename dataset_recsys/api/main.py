@@ -110,7 +110,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # 2. Make sure you are connected to the required VPN/network
 # (cluster is on private IP, e.g., 172.x.x.x)
 
-# 3. Find the current Redis pod (names CHANGE over time!)
+# 3. Find the current Redis pod
 # kubectl get pods -n athenarc | grep dataset-recsys-redis
 #
 # Example output:
@@ -175,5 +175,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 # MathE recommendations
 # curl -X POST "http://127.0.0.1:8000/dataset-recsys/mathe/recommend" \
+#   -H "Authorization: Bearer $TOKEN" \
 #   -H "Content-Type: application/json" \
 #   -d '{"question_id":"82","question":"Differentiate y = (2x^3 - 5x)^5.","n":5}'

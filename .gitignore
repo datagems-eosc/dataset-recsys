@@ -27,4 +27,4 @@ dataset_recsys/pipelines/temp.py
 # VSCode settings
 .vscode/settings.json
 
-temp/
+outputs/

@@ -17,8 +17,8 @@ from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 from dataset_recsys.storage.recommendation_client import RecommendationClient
 
 
-DEFAULT_JSON_OUTPUT = Path("temp/mathe_recommender_comparison.json")
-DEFAULT_TABLE_OUTPUT = Path("temp/mathe_recommender_comparison.csv")
+DEFAULT_JSON_OUTPUT = Path("outputs/mathe_recommender_comparison.json")
+DEFAULT_TABLE_OUTPUT = Path("outputs/mathe_recommender_comparison.csv")
 TABLE_COLUMNS = [
     "strategy",
     "question_id",
@@ -98,8 +98,8 @@ def main() -> None:
     parser.add_argument("--question", help="Question text for single-question embedding comparison.")
     parser.add_argument("--questions-file", type=Path, help="JSON file with question cases for batch comparison.")
     parser.add_argument("--limit", type=int, help="Process only the first N cases from --questions-file.")
-    parser.add_argument("--json-output", type=Path, help="Full JSON output path. Batch default: temp/mathe_recommender_comparison.json")
-    parser.add_argument("--table-output", type=Path, help="CSV table output path. Batch default: temp/mathe_recommender_comparison.csv")
+    parser.add_argument("--json-output", type=Path, help="Full JSON output path. Batch default: outputs/mathe_recommender_comparison.json")
+    parser.add_argument("--table-output", type=Path, help="CSV table output path. Batch default: outputs/mathe_recommender_comparison.csv")
     parser.add_argument("--env-file", default=".env")
     parser.add_argument("--redis-host")
     parser.add_argument("--redis-port")

@@ -42,8 +42,8 @@ poetry run python -m dataset_recsys.mathe_recommenders.compare_cli \
 This writes:
 
 ```text
-temp/mathe_recommender_comparison.json
-temp/mathe_recommender_comparison.csv
+outputs/mathe_recommender_comparison.json
+outputs/mathe_recommender_comparison.csv
 ```
 
 The CSV is the easiest file to inspect because it has one row per:

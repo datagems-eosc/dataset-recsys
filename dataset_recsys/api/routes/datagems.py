@@ -1,5 +1,3 @@
-
-from cmath import log
 import time
 from datetime import datetime
 

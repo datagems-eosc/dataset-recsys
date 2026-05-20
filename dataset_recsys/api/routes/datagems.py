@@ -88,7 +88,7 @@ Retrieve the top-N recommendations for a given dataset.
 async def get_recommendations(
     entity_id: str = Query(..., description="The dataset identifier.", required=True),
     n: int = Query(10, gt=0, description="Number of similar items to return"),
-    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
+    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system", "dg_ds-browse"])),
     token: str = Depends(security.oauth2_scheme),
 ):
     request = RecsRequest(entity_id=entity_id, n=n)
@@ -117,6 +117,12 @@ async def get_recommendations(
     try:
         authorized_list = await security.get_authorized_entity_ids(token)
         authorized_set = set(authorized_list)
+        
+        log.warning(
+            "Fetched authorized entity IDs for user",
+            authorized_count=len(authorized_set),
+            authorized_ids=list(authorized_set)  # Show a sample of authorized IDs for debugging
+        )
 
         if lookup_id not in authorized_set:
             log.warning(f"User {user_subject} not authorized for source entity {lookup_id}")
@@ -131,7 +137,7 @@ async def get_recommendations(
             limit=request.n,
         )
 
-        log.debug(
+        log.warning(
             "Fetched raw recommendations from Redis", 
             raw_count=len(raw_recs),
             raw_sample=raw_recs[:5]  # Shows the top 5 raw IDs to see what Redis returned
@@ -155,7 +161,7 @@ async def get_recommendations(
             for item in authorized_recs[:request.n]
         ]
 
-        log.debug(
+        log.warning(
             "Applied pagination/limit slicing",
             requested_n=request.n,
             final_returned_count=len(filtered_recs)

@@ -1,4 +1,5 @@
 
+from cmath import log
 import time
 from datetime import datetime
 
@@ -130,12 +131,36 @@ async def get_recommendations(
             limit=request.n,
         )
 
+        log.debug(
+            "Fetched raw recommendations from Redis", 
+            raw_count=len(raw_recs),
+            raw_sample=raw_recs[:5]  # Shows the top 5 raw IDs to see what Redis returned
+        )
+
+        # Filter against authorized sets first
+        authorized_recs = [item for item in raw_recs if item in authorized_set]
+
+        dropped_count = len(raw_recs) - len(authorized_recs)
+        if dropped_count > 0:
+            log.info(
+                "Filter applied: unauthorized recommendations removed",
+                unauthorized_dropped_count=dropped_count,
+                authorized_count=len(authorized_recs)
+            )
+
+
+        # Then slice to the requested 'n' and convert to Pydantic models
         filtered_recs = [
             Recommendation(entity_id=item)
-            for item in raw_recs
-            if item in authorized_set
+            for item in authorized_recs[:request.n]
         ]
 
+        log.debug(
+            "Applied pagination/limit slicing",
+            requested_n=request.n,
+            final_returned_count=len(filtered_recs)
+        )
+        
         query_time = time.time() - start_time
         log.info(
             f"Returning {len(filtered_recs)} recs for {lookup_id} in {query_time:.3f}s"

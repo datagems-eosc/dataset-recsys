@@ -132,7 +132,7 @@ async def get_recommendations(
         raw_recs = recs_client.get_recommendations(
             application="ds2ds",
             entity_id=request.entity_id,
-            limit=request.n,
+            limit=None,  # Fetch all and filter/slice in-memory to ensure we can apply auth filtering before limiting
         )
 
         log.warning(

@@ -131,6 +131,51 @@ class MatheMirrorClient:
             cur.execute(query, (question_id,))
             return cur.fetchone()
 
+    def get_questions_by_topic_subtopics(
+        self,
+        topic_subtopics: list[tuple[str, str]],
+    ) -> list[Dict[str, Any]]:
+        """
+        Retrieve MathE questions for topic/subtopic name pairs.
+
+        Topic and subtopic names are matched case-insensitively.
+        """
+        normalized_pairs = [
+            (topic.strip().lower(), subtopic.strip().lower())
+            for topic, subtopic in topic_subtopics
+            if topic and subtopic
+        ]
+        if not normalized_pairs:
+            return []
+
+        values_clause = ", ".join(["(%s, %s)"] * len(normalized_pairs))
+        params = [
+            value
+            for topic_subtopic in normalized_pairs
+            for value in topic_subtopic
+        ]
+        query = f"""
+        SELECT
+            q.id AS question_id,
+            t.name AS topic_name,
+            s.name AS subtopic_name,
+            q.question
+        FROM platform__sna__questions q
+        JOIN platform__topic t ON q.topic = t.id
+        JOIN platform__subtopic s ON q.subtopic = s.id
+        JOIN (VALUES {values_clause}) AS target(topic_name, subtopic_name)
+            ON LOWER(t.name) = target.topic_name
+            AND LOWER(s.name) = target.subtopic_name
+        ORDER BY
+            LOWER(t.name),
+            LOWER(s.name),
+            q.id;
+        """
+
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query, params)
+            return list(cur.fetchall())
+
     def get_pdf_seed_candidates(
         self,
         question_id: int,

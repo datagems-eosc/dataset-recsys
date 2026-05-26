@@ -38,3 +38,23 @@ class FakeEmbeddingClient:
             }
         )
         return self.results[:top_k]
+
+    def find_similar_by_ids(self, application, query_embedding, entity_ids, table):
+        self.calls.append(
+            {
+                "method": "find_similar_by_ids",
+                "application": application,
+                "query_embedding": query_embedding,
+                "entity_ids": entity_ids,
+                "table": table,
+            }
+        )
+        scores_by_id = {
+            str(material_id).strip(): similarity
+            for material_id, similarity in self.results
+        }
+        return [
+            (entity_id, scores_by_id[entity_id])
+            for entity_id in entity_ids
+            if entity_id in scores_by_id
+        ]

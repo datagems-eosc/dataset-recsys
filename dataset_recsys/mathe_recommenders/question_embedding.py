@@ -21,6 +21,44 @@ MATHE_QUESTION_EMBEDDING_CANDIDATES = int(
 )
 
 
+def encode_question(
+    question: str,
+    embedding_model: str = DEFAULT_MATHE_EMBEDDING_MODEL,
+) -> list[float]:
+    question_embedding = encode_texts(
+        [question],
+        model_name=embedding_model,
+    )[0]
+    return (
+        question_embedding.tolist()
+        if hasattr(question_embedding, "tolist")
+        else question_embedding
+    )
+
+
+def score_question_similarity_for_material_ids(
+    question_embedding: list[float],
+    material_redis_ids: list[str],
+    embedding_client: EmbeddingClient,
+) -> dict[str, float]:
+    """
+    Score requested materials against the question embedding.
+
+    Materials without a stored MathE embedding are absent from the returned
+    mapping; callers decide the default score for those candidates.
+    """
+    similarities = embedding_client.find_similar_by_ids(
+        application=MATHE_APPLICATION,
+        query_embedding=question_embedding,
+        entity_ids=material_redis_ids,
+        table=embedding_client.TABLE_MATHE,
+    )
+    return {
+        str(material_id).strip(): float(similarity)
+        for material_id, similarity in similarities
+    }
+
+
 def recommend_from_question_embedding(
     question: str,
     k: int,
@@ -38,12 +76,7 @@ def recommend_from_question_embedding(
 
     embedding_client = embedding_client or EmbeddingClient()
     top_k = max(k, candidate_limit)
-    question_embedding = encode_texts(
-        [question],
-        model_name=embedding_model,
-    )[0]
-    if hasattr(question_embedding, "tolist"):
-        question_embedding = question_embedding.tolist()
+    question_embedding = encode_question(question, embedding_model)
 
     results = embedding_client.find_similar(
         application=MATHE_APPLICATION,

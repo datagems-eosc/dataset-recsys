@@ -71,3 +71,26 @@ def test_find_similar_uses_material_id_for_mathe_table():
     assert "SELECT material_id" in cursor.executed_query
     assert "FROM public.mathe_embeddings" in cursor.executed_query
     assert cursor.executed_params == ([0.1, 0.2], "mathe", [0.1, 0.2], 5)
+
+
+def test_find_similar_by_ids_filters_to_requested_mathe_materials():
+    client = EmbeddingClient.__new__(EmbeddingClient)
+    client.schema = "public"
+    client.conn = FakeConnection()
+
+    client.find_similar_by_ids(
+        "mathe",
+        [0.1, 0.2],
+        entity_ids=["100.pdf", "101.pdf"],
+        table=client.TABLE_MATHE,
+    )
+
+    cursor = client.conn.cursor_instance
+    assert "SELECT material_id" in cursor.executed_query
+    assert "FROM public.mathe_embeddings" in cursor.executed_query
+    assert "material_id = ANY(%s)" in cursor.executed_query
+    assert cursor.executed_params == (
+        [0.1, 0.2],
+        "mathe",
+        ["100.pdf", "101.pdf"],
+    )

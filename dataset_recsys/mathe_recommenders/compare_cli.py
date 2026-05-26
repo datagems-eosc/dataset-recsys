@@ -25,8 +25,11 @@ TABLE_COLUMNS = [
     "question",
     "material_id",
     "title",
-    "metadata_score",
     "rank",
+    "metadata_score",
+    "material_to_material_similarity",
+    "question_to_material_similarity",
+    "total_score",
 ]
 
 
@@ -67,8 +70,17 @@ def _table_rows(results: list[dict]) -> list[dict]:
                         "question": input_case.get("question_text", ""),
                         "material_id": rec.get("material_id", ""),
                         "title": rec.get("title", ""),
-                        "metadata_score": scores.get("metadata_score", ""),
                         "rank": rec.get("rank", ""),
+                        "metadata_score": scores.get("metadata_score", ""),
+                        "material_to_material_similarity": scores.get(
+                            "material_to_material_similarity",
+                            "",
+                        ),
+                        "question_to_material_similarity": scores.get(
+                            "question_to_material_similarity",
+                            "",
+                        ),
+                        "total_score": scores.get("total_score", ""),
                     }
                 )
 

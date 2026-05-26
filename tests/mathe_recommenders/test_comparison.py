@@ -61,3 +61,15 @@ def test_compare_question_recommenders_includes_question_embedding_scores(
         "question_to_material_similarity": 0.91,
         "total_score": approx(0.955),
     }
+
+    hybrid_recommendation = report["strategies"]["hybrid"]["recommendations"][0]
+    assert hybrid_recommendation["material_id"] == 220
+    assert hybrid_recommendation["scores"] == {
+        "keyword_jaccard": 1.0,
+        "same_subtopic": 1,
+        "same_topic": 1,
+        "metadata_score": 1.0,
+        "material_to_material_similarity": 0.0,
+        "question_to_material_similarity": 0.91,
+        "total_score": approx(0.7365),
+    }

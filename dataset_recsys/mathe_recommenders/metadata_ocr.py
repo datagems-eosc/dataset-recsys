@@ -6,7 +6,7 @@ from dataset_recsys.storage.recommendation_client import RecommendationClient
 
 
 MATHE_APPLICATION = "mathe"
-MATHE_EMBEDDING_WEIGHT = min(
+MATHE_MATERIAL_SIMILARITY_WEIGHT = min(
     max(float(os.getenv("MATHE_EMBEDDING_WEIGHT", "0.5")), 0.0),
     1.0,
 )
@@ -17,7 +17,7 @@ def seed_redis_id(seed: dict) -> str:
     return str(seed["material_redis_id"]).strip()
 
 
-def _score_candidate_metadata(
+def add_metadata_scores(
     candidates: dict[str, dict],
     question_metadata: dict,
     mathe_mirror_client: MatheMirrorClient,
@@ -43,7 +43,7 @@ def rank_expanded_candidates(
     recommendation_client: RecommendationClient,
     question_metadata: dict | None = None,
     mathe_mirror_client: MatheMirrorClient | None = None,
-    embedding_weight: float = MATHE_EMBEDDING_WEIGHT,
+    material_similarity_weight: float = MATHE_MATERIAL_SIMILARITY_WEIGHT,
     neighbors_per_seed: int = MATHE_NEIGHBORS_PER_SEED,
 ) -> list[dict]:
     """
@@ -63,7 +63,7 @@ def rank_expanded_candidates(
             {
                 **seed,
                 "material_redis_id": entity_id,
-                "embedding_score": 0.0,
+                "material_to_material_similarity": 0.0,
                 "final_score": float(seed.get("metadata_score", 0.0)),
             }
             for entity_id, seed in list(seed_by_entity_id.items())[:k]
@@ -76,7 +76,7 @@ def rank_expanded_candidates(
             "material_id": seed.get("material_id"),
             "material_redis_id": entity_id,
             "metadata_score": metadata_score,
-            "embedding_score": 1.0,
+            "material_to_material_similarity": 1.0,
         }
 
     for seed_entity_id in seed_by_entity_id:
@@ -88,7 +88,7 @@ def rank_expanded_candidates(
             limit=neighbors_per_seed,
         )
 
-        for neighbor_id, embedding_score in neighbors:
+        for neighbor_id, material_to_material_similarity in neighbors:
             neighbor_id = str(neighbor_id).strip()
             candidate = candidates.setdefault(
                 neighbor_id,
@@ -96,16 +96,16 @@ def rank_expanded_candidates(
                     "material_id": None,
                     "material_redis_id": neighbor_id,
                     "metadata_score": 0.0,
-                    "embedding_score": 0.0,
+                    "material_to_material_similarity": 0.0,
                 },
             )
-            candidate["embedding_score"] = max(
-                float(candidate["embedding_score"]),
-                embedding_score,
+            candidate["material_to_material_similarity"] = max(
+                float(candidate["material_to_material_similarity"]),
+                material_to_material_similarity,
             )
 
     if question_metadata and mathe_mirror_client:
-        _score_candidate_metadata(
+        add_metadata_scores(
             candidates,
             question_metadata,
             mathe_mirror_client,
@@ -113,8 +113,10 @@ def rank_expanded_candidates(
 
     for candidate in candidates.values():
         candidate["final_score"] = (
-            embedding_weight * float(candidate["embedding_score"])
-            + (1.0 - embedding_weight) * float(candidate["metadata_score"])
+            material_similarity_weight
+            * float(candidate["material_to_material_similarity"])
+            + (1.0 - material_similarity_weight)
+            * float(candidate["metadata_score"])
         )
 
     ranked_candidates = sorted(
@@ -122,7 +124,7 @@ def rank_expanded_candidates(
         key=lambda candidate: (
             candidate["final_score"],
             candidate["metadata_score"],
-            candidate["embedding_score"],
+            candidate["material_to_material_similarity"],
         ),
         reverse=True,
     )

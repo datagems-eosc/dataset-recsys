@@ -6,6 +6,7 @@ from dataset_recsys.mathe_recommenders.metadata_ocr import (
 from dataset_recsys.mathe_recommenders.question_embedding import (
     recommend_from_question_embedding,
 )
+from dataset_recsys.mathe_recommenders.hybrid import recommend_hybrid_candidates
 from dataset_recsys.mathe_recommenders.popular_seed import recommend_from_popular_seed
 from dataset_recsys.mathe_recommenders.seed_scoring import score_pdf_seed_candidates
 from dataset_recsys.storage.embedding_client import EmbeddingClient
@@ -132,8 +133,10 @@ def compare_question_recommenders(
     for candidate in metadata_candidates:
         material_id = seed_redis_id(candidate)
         scores = _metadata_score_fields(candidate)
-        if "embedding_score" in candidate:
-            scores["material_to_material_similarity"] = candidate["embedding_score"]
+        if "material_to_material_similarity" in candidate:
+            scores["material_to_material_similarity"] = candidate[
+                "material_to_material_similarity"
+            ]
         if "final_score" in candidate:
             scores["total_score"] = candidate["final_score"]
         metadata_scores[material_id] = scores
@@ -175,6 +178,35 @@ def compare_question_recommenders(
         scores["total_score"] = candidate.get("total_score")
         question_embedding_scores[material_id] = scores
 
+    hybrid_candidates = (
+        recommend_hybrid_candidates(
+            question_id=question_id,
+            question=question_text,
+            k=k,
+            mathe_mirror_client=mathe_mirror_client,
+            recommendation_client=recommendation_client,
+            embedding_client=embedding_client,
+        )
+        if question_text
+        else []
+    )
+    hybrid_ids = [
+        str(candidate["material_redis_id"]).strip()
+        for candidate in hybrid_candidates
+    ]
+    hybrid_scores = {}
+    for candidate in hybrid_candidates:
+        material_id = seed_redis_id(candidate)
+        scores = _metadata_score_fields(candidate)
+        scores["material_to_material_similarity"] = candidate.get(
+            "material_to_material_similarity"
+        )
+        scores["question_to_material_similarity"] = candidate.get(
+            "question_to_material_similarity"
+        )
+        scores["total_score"] = candidate.get("final_score")
+        hybrid_scores[material_id] = scores
+
     popular_material_ids = popular_ids + ([popular_seed_id] if popular_seed_id else [])
     popular_scores = _metadata_scores_for_materials(
         popular_material_ids,
@@ -186,6 +218,7 @@ def compare_question_recommenders(
             metadata_ids
             + popular_ids
             + question_embedding_ids
+            + hybrid_ids
             + ([popular_seed_id] if popular_seed_id else [])
         )
     )
@@ -235,6 +268,15 @@ def compare_question_recommenders(
                     question_embedding_ids,
                     details_by_id,
                     question_embedding_scores,
+                ),
+                "available": bool(question_text),
+            },
+            "hybrid": {
+                "description": "Experimental flow: merge metadata/OCR candidates with a small set of question-text embedding candidates, then rerank with metadata, material OCR, and question similarity scores.",
+                "recommendations": _enrich_recommendations(
+                    hybrid_ids,
+                    details_by_id,
+                    hybrid_scores,
                 ),
                 "available": bool(question_text),
             },

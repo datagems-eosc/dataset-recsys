@@ -197,6 +197,33 @@ class EmbeddingClient:
             cur.execute(query, params)
             return cur.fetchall()
 
+    def find_similar_by_ids(
+        self,
+        application: str,
+        query_embedding: List[float],
+        entity_ids: List[str],
+        table: str = "dataset_embeddings",
+    ):
+        """
+        Return query-vector similarities for the requested IDs that have stored
+        embeddings. IDs missing from the embedding table are omitted from the
+        result, so callers should keep an explicit default for missing scores.
+        """
+        if not entity_ids:
+            return []
+
+        id_column = "material_id" if table == self.TABLE_MATHE else "dataset_id"
+        query = f"""
+        SELECT {id_column}, 1 - (embedding <=> %s::vector) AS similarity
+        FROM {self.schema}.{table}
+        WHERE application = %s
+          AND {id_column} = ANY(%s)
+        """
+
+        with self.conn.cursor() as cur:
+            cur.execute(query, (query_embedding, application, entity_ids))
+            return cur.fetchall()
+
     def delete_single_embedding(self, dataset_id: str) -> int:
         """Delete a single embedding from the database."""
         query = f"DELETE FROM {self.schema}.dataset_embeddings WHERE dataset_id = %s"

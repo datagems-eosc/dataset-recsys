@@ -62,7 +62,7 @@ def test_rank_expanded_candidates_uses_seed_and_redis_similarity_scores():
         seeds=seeds,
         k=3,
         recommendation_client=recommendation_client,
-        embedding_weight=1.0,
+        material_similarity_weight=1.0,
         neighbors_per_seed=3,
     )
 

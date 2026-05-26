@@ -9,12 +9,13 @@ Input file:
 data/mathe/evaluation_questions.json
 ```
 
-The comparison command runs the three internal strategies:
+The comparison command runs the four internal strategies:
 
 ```text
 metadata + OCR expansion
 popular-seed baseline
 question-embedding lookup
+hybrid metadata + OCR + question-embedding reranking
 ```
 
 ## Prerequisites
@@ -70,6 +71,9 @@ question_id
 question
 material_id
 title
-metadata_score
 rank
+metadata_score
+material_to_material_similarity
+question_to_material_similarity
+total_score
 ```

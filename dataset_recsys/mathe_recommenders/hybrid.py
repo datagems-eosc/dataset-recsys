@@ -121,6 +121,7 @@ def recommend_hybrid_candidates(
     question_candidate_limit: int = MATHE_HYBRID_QUESTION_CANDIDATES,
     neighbors_per_seed: int = MATHE_NEIGHBORS_PER_SEED,
     embedding_model: str = DEFAULT_MATHE_EMBEDDING_MODEL,
+    question_embedding: list[float] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Recommend MathE PDF materials by merging the current metadata/OCR candidate
@@ -135,7 +136,7 @@ def recommend_hybrid_candidates(
         return []
 
     embedding_client = embedding_client or EmbeddingClient()
-    question_embedding = encode_question(question, embedding_model)
+    question_embedding = question_embedding or encode_question(question, embedding_model)
     metadata_seeds = recommend_pdf_seeds_for_question(
         question_id=question_id,
         k=k,

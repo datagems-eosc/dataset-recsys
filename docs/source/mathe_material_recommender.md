@@ -319,7 +319,7 @@ dataset_recsys/mathe_recommenders/hybrid.py
 | Question similarity | `dataset_recsys/mathe_recommenders/question_embedding.py` | `score_question_similarity_for_material_ids` | Scores eligible materials against the question embedding. |
 | Vector scoring by IDs | `dataset_recsys/storage/embedding_client.py` | `find_similar_by_ids` | Scores only the material IDs already in the eligible pool. |
 | ID resolution | `dataset_recsys/mathe_recommenders/metadata_ocr.py` | `resolve_db_material_ids` | Converts internal Redis PDF IDs back to MathE material IDs. |
-| Comparison CLI | `dataset_recsys/mathe_recommenders/compare_cli.py` | `main` | Runs selected recommender approaches for validation and CSV/JSON export. |
+| Comparison CLI | `dataset_recsys/utils/mathe_recsys_compare_cli.py` | `main` | Runs selected recommender approaches for validation and CSV/JSON export. |
 
 ## Configuration
 
@@ -354,5 +354,5 @@ dataset_recsys/mathe_recommenders/hybrid.py
 They can be compared through:
 
 ```text
-dataset_recsys/mathe_recommenders/compare_cli.py
+dataset_recsys/utils/mathe_recsys_compare_cli.py
 ```

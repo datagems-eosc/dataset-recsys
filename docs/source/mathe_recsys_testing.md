@@ -1,4 +1,4 @@
-# MathE Recommender API Testing
+# MathE RecSys API Testing
 
 Testing the deployed or local MathE API endpoint for a single question ID.
 

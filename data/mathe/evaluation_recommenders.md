@@ -9,13 +9,15 @@ Input file:
 data/mathe/evaluation_questions.json
 ```
 
-The comparison command runs the four internal strategies:
+The comparison command can run all internal strategies, or only a selected
+subset.
 
 ```text
 metadata + OCR expansion
 popular-seed baseline
 question-embedding lookup
-hybrid metadata + OCR + question-embedding reranking
+open-pool hybrid metadata + OCR + question-embedding reranking
+curricular-pool ranker, restricted to same topic/subtopic materials
 ```
 
 ## Prerequisites
@@ -32,7 +34,7 @@ Start with only a few questions because the question-embedding strategy loads
 the embedding model and can be slow on CPU:
 
 ```bash
-poetry run python -m dataset_recsys.mathe_recommenders.compare_cli \
+poetry run python -m dataset_recsys.utils.mathe_recsys_compare_cli \
   --questions-file data/mathe/evaluation_questions.json \
   --limit 3 \
   -n 10 \
@@ -40,23 +42,46 @@ poetry run python -m dataset_recsys.mathe_recommenders.compare_cli \
   --redis-port 6380
 ```
 
+To compare only selected approaches, repeat `--approach`:
+
+```bash
+poetry run python -m dataset_recsys.utils.mathe_recsys_compare_cli \
+  --questions-file data/mathe/evaluation_questions.json \
+  --approach hybrid \
+  --approach curricular_pool \
+  --limit 3 \
+  -n 10 \
+  --redis-host localhost \
+  --redis-port 6380
+```
+
+To validate recommendations for all questions under a topic/subtopic pool, use
+the same command-line entry point:
+
+```bash
+poetry run python -m dataset_recsys.utils.mathe_recsys_compare_cli \
+  --topic-subtopic "Integration" "Triple Integration" \
+  --approach curricular_pool \
+  -n 20
+```
+
 This writes:
 
 ```text
-outputs/mathe_recommender_comparison.json
-outputs/mathe_recommender_comparison.csv
+outputs/mathe_recsys_comparison.json
+outputs/mathe_recsys_comparison.csv
 ```
 
 The CSV is the easiest file to inspect because it has one row per:
 
 ```text
-question + strategy + recommended material
+question + recommended material
 ```
 
 ## Full Evaluation
 
 ```bash
-poetry run python -m dataset_recsys.mathe_recommenders.compare_cli \
+poetry run python -m dataset_recsys.utils.mathe_recsys_compare_cli \
   --questions-file data/mathe/evaluation_questions.json \
   -n 10 \
   --redis-host localhost \
@@ -66,14 +91,13 @@ poetry run python -m dataset_recsys.mathe_recommenders.compare_cli \
 ## CSV Columns
 
 ```text
-strategy
 question_id
-question
+question_text
+question_topic
+question_subtopic
 material_id
-title
+material_title
+material_topic
+material_subtopic
 rank
-metadata_score
-material_to_material_similarity
-question_to_material_similarity
-total_score
 ```

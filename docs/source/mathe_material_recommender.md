@@ -1,141 +1,138 @@
 # MathE Material Recommender
 
-Here we describe the MathE educational material recommender. The service
-receives a MathE quiz/question ID and returns learning materials that are
-aligned with the question metadata.
+This document describes the recommendation approach currently deployed for MathE materials.
 
-## Purpose
+The service receives:
 
-The purpose of this recommender is to help students better understand and answer quiz questions by recommending relevant educational materials (currently pdfs only), particularly when they answer a question incorrectly.
+- the MathE question ID
+- the question text, usually in LaTeX format
+- the number of recommendations to return
 
-For each question, the available signals are:
+It returns MathE material IDs, ranked from most to least relevant.
+
+## Current Scope
+
+The recommender currently works on PDF materials only.
+
+Materials stored as DOCX, PPTX, videos, and links are not part of the current recommender index.
+
+The current production system also does enforce a hard rule that a recommended material
+must have exactly the same topic and subtopic as the question, as asked by MathE team.
+
+## Signals Used
+
+For each question, the recommender uses:
 
 - topic
 - subtopic
 - keywords
+- the question itself
 
-For each PDF material, the available signals are:
+For each material, the recommender uses:
 
 - topic
 - subtopic
 - keywords
-- OCR-extracted textual content
+- OCR-extracted text
 
-## Request-Time Architecture
+There are two scores a material gets:
+
+```text
+keyword_jaccard
+question_to_material_similarity
+```
+
+`keyword_jaccard` measures keyword overlap between the question and material.
+
+`question_to_material_similarity` measures similarity between the embedded
+question text and the stored PDF OCR embedding.
+
+## Production Flow
 
 ```mermaid
-%%{init: {'flowchart': {'nodeSpacing': 22, 'rankSpacing': 22, 'curve': 'linear'}, 'themeVariables': {'fontSize': '12px', 'lineColor': '#9E9E9E', 'edgeLabelBackground':'#ffffff', 'primaryBorderColor':'#BDBDBD', 'clusterBorder':'#E0E0E0', 'lineWidth':'0.9px'}}}%%
 flowchart TB
-    A[MathE Question ID] --> B[Read Question Metadata]
-    B --> C[Retrieve PDF Seed Candidates]
-    C --> D[Score Seeds with Metadata]
-    D --> E{Enough Seed Materials?}
-    E -- Yes --> F[Return Top-k Seeds based on Metadata]
-    E -- No --> G[Fetch OCR Neighbors from Redis]
-    G --> H[Merge Seeds and Neighbors]
-    H --> I[Rank with Final Score]
-    I --> J[Return Top-k PDF Materials]
-
-    classDef request fill:#E8F5E9,stroke:#43A047,stroke-width:2px,color:#1B5E20;
-    classDef metadata fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px,color:#0D47A1;
-    classDef compute fill:#FFF3E0,stroke:#FB8C00,stroke-width:2px,color:#E65100;
-    classDef storage fill:#F3E5F5,stroke:#8E24AA,stroke-width:2px,color:#4A148C;
-    classDef result fill:#FFFDE7,stroke:#FBC02D,stroke-width:2px,color:#5D4037;
-
-    class A request;
-    class B,C metadata;
-    class D,E,H,I compute;
-    class G storage;
-    class F,J result;
+    A["API request: question_id, question text, k"] --> B["Read question metadata"]
+    B --> C["Fetch same-topic/same-subtopic PDF pool"]
+    C --> D{"Any eligible PDFs?"}
+    D -- "No" --> E["Return no recommendations"]
+    D -- "Yes" --> F["Compute keyword overlap for each PDF"]
+    F --> G["Embed question text"]
+    G --> H["Score pool with question-to-material similarity"]
+    H --> I["Compute final score"]
+    I --> J["Rank and keep top-k"]
+    J --> K["Resolve Redis PDF IDs to MathE material IDs"]
+    K --> L["Return material IDs"]
 ```
 
-## Recommendation Logic
+## Request-Time Logic, Step By Step
+
+### Step 1 - API Receives The Request
+
+The production API endpoint is in:
 
 ```text
-Input:
-  question_id
-  K = number of requested recommendations
-
-Step 1 - Retrieve question metadata
-  question_id
-  -> topic_id
-  -> subtopic_id
-  -> keywords
-
-Step 2 - Retrieve PDF seed candidates
-  Find PDF materials that match at least one:
-    - shared keyword
-    - same subtopic
-    - same topic
-
-Step 3 - Score seeds using metadata
-  For each candidate PDF:
-
-  keyword_jaccard =
-    |question_keywords intersection material_keywords|
-    /
-    |question_keywords union material_keywords|
-
-  same_subtopic =
-    1 if question_subtopic is in material_subtopics else 0
-
-  same_topic =
-    1 if question_topic is in material_topics else 0
-
-  metadata_score =
-    (keyword_jaccard + same_subtopic + same_topic) / 3
-
-Step 4 - If enough seeds exist
-  If number_of_seeds >= K:
-      return top-K PDFs ranked by metadata_score
-
-Step 5 - If not enough seeds exist
-  If number_of_seeds < K:
-      keep all seed PDFs
-      use them as anchors
-      retrieve top-N OCR-neighbor PDFs for each seed PDF
-
-Step 6 - Merge candidates
-  final candidate pool =
-      seed PDFs
-    + OCR-neighbor PDFs
-
-  remove duplicates
-
-Step 7 - Compute embedding score
-  For each candidate PDF:
-
-  embedding_score =
-      max similarity score with any seed PDF
-
-  Fetch metadata for OCR-neighbor PDFs and compute metadata_score for them
-  using the same keyword, subtopic, and topic signals used for seed PDFs.
-
-Step 8 - Final score
-  For each candidate:
-
-  final_score =
-      lambda * embedding_score
-    + (1 - lambda) * metadata_score
-
-Step 9 - Return recommendations
-  Return top-K PDFs ranked by final_score DESC
+dataset_recsys/api/routes/mathe.py
 ```
 
-## Metadata Score
-
-The metadata score combines three educational alignment signals:
+The route calls:
 
 ```text
-metadata_score =
-  (
-      keyword_jaccard
-    + same_subtopic
-    + same_topic
-  ) / 3
+recommend_from_curricular_pool(...)
 ```
 
-`keyword_jaccard` measures keyword overlap between the question and material:
+from:
+
+```text
+dataset_recsys/mathe_recommenders/curricular_pool_ranker.py
+```
+
+This is the production recommender path.
+
+### Step 2 - Load Question Metadata
+
+The recommender first loads the MathE metadata for the question:
+
+```text
+topic
+subtopic
+keywords
+```
+
+This is done through:
+
+```text
+MatheMirrorClient.get_question_metadata(...)
+```
+
+in:
+
+```text
+dataset_recsys/storage/mathe_mirror_client.py
+```
+
+If the question does not exist in the mirror database, the recommender returns
+no recommendations.
+
+### Step 3 - Build The Eligible Material Pool
+
+The production recommender then fetches all PDF materials assigned to the same
+topic and subtopic as the question.
+
+This is done through:
+
+```text
+MatheMirrorClient.get_pdf_materials_for_question_topic_subtopic(...)
+```
+
+in:
+
+```text
+dataset_recsys/storage/mathe_mirror_client.py
+```
+
+### Step 4 - Compute Keyword Overlap
+
+For every material in the eligible pool, the recommender computes:
 
 ```text
 keyword_jaccard =
@@ -144,126 +141,218 @@ keyword_jaccard =
   |question_keywords union material_keywords|
 ```
 
-If both keyword sets are empty, `keyword_jaccard` is `0.0`.
+If both keyword sets are empty, the score is `0.0`.
 
-The division by `3` keeps `metadata_score` in the `[0, 1]` range, matching the
-scale of `embedding_score`.
-
-## OCR Expansion
-
-OCR-neighbor expansion is only used when metadata scoring returns fewer than
-the requested number of recommendations.
-
-Redis stores material-to-material OCR-neighbor rankings and similarity scores:
+The helper is:
 
 ```text
-recs:mathe:<seed_material_redis_id>
-  -> Redis ZSET of <neighbor_material_redis_id> scored by OCR cosine similarity
+compute_keyword_jaccard(...)
 ```
 
-The Redis material identifier is derived from the PostgreSQL material ID:
+in:
 
 ```text
-platform_materials.id = 221 -> Redis entity ID = 221.pdf
+dataset_recsys/mathe_recommenders/seed_scoring.py
 ```
 
-The API response still returns the PostgreSQL `platform_materials.id`.
-The original `platform_materials.file_name` is display metadata only and is not
-used as the Redis lookup key.
+Inside this production ranker, `metadata_score` is set equal to
+`keyword_jaccard`, because topic and subtopic have already been used to define
+the pool.
 
-If OCR failed for a seed material, Redis has no recommendation key for that
-seed. The seed can still be returned because it matched the question metadata,
-but it will not contribute OCR-neighbor expansion.
+### Step 5 - Embed The Question Text
 
-### Future File-Name Alignment
+The question text sent by MathE is embedded at request time.
 
-If the sync pipeline is changed so that stored PDFs and Redis keys use
-`platform_materials.file_name` instead of `<platform_materials.id>.pdf`, update
-the MathE mirror client in one place:
-
-- return `m.file_name AS material_redis_id` instead of `m.id::text || '.pdf'`
-- resolve Redis IDs back to DB rows with `m.file_name = ANY(%s)` instead of
-  parsing IDs and filtering by `m.id = ANY(%s)`
-- keep API responses unchanged: return PostgreSQL `platform_materials.id`
-
-## Embedding Score
-
-Redis stores MathE OCR-neighbor recommendations in sorted sets. The sorted-set
-score is the OCR embedding cosine similarity computed during the MathE sync
-pipeline.
-
-At request time, the recommender reads Redis with scores and uses the stored
-similarity directly:
+This is done by:
 
 ```text
-embedding_score = Redis ZSET score
+encode_question(...)
 ```
 
-If the same PDF appears as a neighbor of multiple seed PDFs, the recommender
-keeps the maximum stored similarity score:
+in:
 
 ```text
-embedding_score = max(similarity from any seed PDF)
+dataset_recsys/mathe_recommenders/question_embedding.py
 ```
 
-This is used because a PDF only needs to be highly similar to one strong seed to
-be useful. Averaging similarities could unfairly penalize a PDF that is relevant
-to one seed but unrelated to others.
+The same embedding model is used for MathE material OCR embeddings.
 
-## Configuration
+### Step 6 - Score Eligible Materials Against The Question
 
-The final interpolation weight is controlled by:
+The recommender scores only the materials already present in the eligible pool.
+
+This is done with:
 
 ```text
-MATHE_EMBEDDING_WEIGHT
+score_question_similarity_for_material_ids(...)
 ```
 
-This value is lambda in:
+in:
+
+```text
+dataset_recsys/mathe_recommenders/question_embedding.py
+```
+
+Internally, this calls:
+
+```text
+EmbeddingClient.find_similar_by_ids(...)
+```
+
+from:
+
+```text
+dataset_recsys/storage/embedding_client.py
+```
+
+This means the vector query asks:
+
+```text
+For these specific eligible material IDs, how similar is each one to the question?
+```
+
+It does not perform an open nearest-neighbor search over all materials.
+
+If an eligible material has no stored embedding, it keeps:
+
+```text
+question_to_material_similarity = 0.0
+```
+
+### Step 7 - Compute Final Score
+
+The final score is computed in:
+
+```text
+_rank_candidates(...)
+```
+
+inside:
+
+```text
+dataset_recsys/mathe_recommenders/curricular_pool_ranker.py
+```
+
+The score is:
 
 ```text
 final_score =
-    lambda * embedding_score
-  + (1 - lambda) * metadata_score
+    lambda * keyword_jaccard
+  + (1 - lambda) * question_to_material_similarity
 ```
 
-Default:
+The default is:
 
 ```text
-MATHE_EMBEDDING_WEIGHT=0.5
+lambda = 0.6
 ```
 
-The number of Redis OCR neighbors retrieved per seed is controlled by:
+So by default:
 
 ```text
-MATHE_NEIGHBORS_PER_SEED
+final_score =
+    0.6 * keyword_jaccard
+  + 0.4 * question_to_material_similarity
 ```
 
-Default:
+The reason for this weighting is that, after the hard topic/subtopic filter,
+keyword overlap is the remaining explicit curriculum signal. The question
+embedding then refines the order inside the same curricular pool.
+
+### Step 8 - Return MathE Material IDs
+
+Candidates are keyed internally by `material_redis_id`, for example:
 
 ```text
-MATHE_NEIGHBORS_PER_SEED=20
+30.pdf
+```
+
+The API response returns the MathE database material ID, for example:
+
+```text
+30
+```
+
+This resolution is done by:
+
+```text
+resolve_db_material_ids(...)
+```
+
+in:
+
+```text
+dataset_recsys/mathe_recommenders/metadata_ocr.py
+```
+
+## What Changed From The Previous Hybrid Version
+
+The previous hybrid recommender used three sources:
+
+```text
+metadata seed PDFs
+OCR-neighbor PDFs
+question-nearest PDFs
+```
+
+That approach was useful for open discovery, but it could recommend materials
+outside the exact question topic/subtopic.
+
+The older hybrid implementation is still kept for comparison and validation:
+
+```text
+dataset_recsys/mathe_recommenders/hybrid.py
 ```
 
 ## Implementation Map
 
-The MathE material recommender is implemented across the API, storage, and
-scoring layers:
+| Step | File | Function | Role |
+| --- | --- | --- | --- |
+| API entry point | `dataset_recsys/api/routes/mathe.py` | route handler | Receives the MathE request and calls the production recommender. |
+| Production recommender | `dataset_recsys/mathe_recommenders/curricular_pool_ranker.py` | `recommend_from_curricular_pool` | Returns top-k material IDs from the same topic/subtopic PDF pool. |
+| Candidate ranking | `dataset_recsys/mathe_recommenders/curricular_pool_ranker.py` | `rank_curricular_pool_candidates` | Builds the eligible pool, scores it, and ranks candidates. |
+| Final scoring | `dataset_recsys/mathe_recommenders/curricular_pool_ranker.py` | `_rank_candidates` | Computes `final_score` and sorts candidates. |
+| Question metadata | `dataset_recsys/storage/mathe_mirror_client.py` | `get_question_metadata` | Reads question topic, subtopic, and keywords. |
+| Eligible pool | `dataset_recsys/storage/mathe_mirror_client.py` | `get_pdf_materials_for_question_topic_subtopic` | Fetches only PDFs in the same topic/subtopic as the question. |
+| Keyword score | `dataset_recsys/mathe_recommenders/seed_scoring.py` | `compute_keyword_jaccard` | Computes question/material keyword overlap. |
+| Question embedding | `dataset_recsys/mathe_recommenders/question_embedding.py` | `encode_question` | Embeds the MathE question text. |
+| Question similarity | `dataset_recsys/mathe_recommenders/question_embedding.py` | `score_question_similarity_for_material_ids` | Scores eligible materials against the question embedding. |
+| Vector scoring by IDs | `dataset_recsys/storage/embedding_client.py` | `find_similar_by_ids` | Scores only the material IDs already in the eligible pool. |
+| ID resolution | `dataset_recsys/mathe_recommenders/metadata_ocr.py` | `resolve_db_material_ids` | Converts internal Redis PDF IDs back to MathE material IDs. |
+| Comparison CLI | `dataset_recsys/mathe_recommenders/compare_cli.py` | `main` | Runs selected recommender approaches for validation and CSV/JSON export. |
 
-- `dataset_recsys/api/routes/mathe.py`
-- `dataset_recsys/mathe_recommenders/metadata_ocr.py`
-  - production rec method
-  - `recommend_pdf_seeds_for_question`
-- `dataset_recsys/mathe_recommenders/popular_seed.py`
-  - method based on the most popular material under the same topic with the given question
-- `dataset_recsys/mathe_recommenders/question_embedding.py`
-  - experimental method that embeds provided question text and queries MathE pgvector embeddings
-- `dataset_recsys/mathe_recommenders/comparison.py`
-- `dataset_recsys/mathe_recommenders/compare_cli.py`
-  - internal CLI for comparing strategies without exposing them in the API
-  - supports batch comparison from a JSON question file
-- `dataset_recsys/storage/mathe_mirror_client.py`
-  - data retrieval only
-- `dataset_recsys/mathe_recommenders/seed_scoring.py`
-- `dataset_recsys/storage/recommendation_client.py`
-- `dataset_recsys/storage/embedding_client.py`
-  - stores/queries MathE material embeddings
+## Configuration
+
+The production curricular pool ranker is controlled by:
+
+```text
+MATHE_CURRICULAR_KEYWORD_WEIGHT
+MATHE_EMBEDDING_MODEL
+```
+
+Current defaults:
+
+```text
+MATHE_CURRICULAR_KEYWORD_WEIGHT=0.6
+MATHE_EMBEDDING_MODEL=BAAI/bge-m3
+```
+
+The question similarity weight is always:
+
+```text
+1 - MATHE_CURRICULAR_KEYWORD_WEIGHT
+```
+
+The older recommenders are still available for comparison:
+
+```text
+dataset_recsys/mathe_recommenders/metadata_ocr.py
+dataset_recsys/mathe_recommenders/question_embedding.py
+dataset_recsys/mathe_recommenders/hybrid.py
+```
+
+They can be compared through:
+
+```text
+dataset_recsys/mathe_recommenders/compare_cli.py
+```

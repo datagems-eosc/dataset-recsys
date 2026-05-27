@@ -67,3 +67,16 @@ def test_get_questions_by_topic_subtopics_returns_empty_for_no_pairs():
 
     assert client.get_questions_by_topic_subtopics([]) == []
     assert client.conn.cursor_instance.executed_query is None
+
+
+def test_get_pdf_materials_for_question_topic_subtopic_uses_hard_pool():
+    client = MatheMirrorClient.__new__(MatheMirrorClient)
+    client.conn = FakeConnection()
+
+    client.get_pdf_materials_for_question_topic_subtopic(82)
+
+    cursor = client.conn.cursor_instance
+    assert "q.topic = pool_mts.platformtopicid" in cursor.executed_query
+    assert "q.subtopic = pool_mts.platformsubtopicid" in cursor.executed_query
+    assert "m.file_ext = 'pdf'" in cursor.executed_query
+    assert cursor.executed_params == (82,)

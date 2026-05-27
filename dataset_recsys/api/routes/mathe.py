@@ -11,10 +11,10 @@ from dataset_recsys.api.analytical_patterns.models import (
     MatheRecsRequest,
     MatheRecsResponse,
 )
-from dataset_recsys.mathe_recommenders.metadata_ocr import (
-    recommend_from_metadata_seeds,
+from dataset_recsys.mathe_recommenders.curricular_pool_ranker import (
+    recommend_from_curricular_pool,
 )
-from dataset_recsys.storage.recommendation_client import RecommendationClient
+from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 from dataset_recsys.utils.mathe_syncer import MathE_Syncer
 from dataset_recsys.workflows.mathe_sync_pipeline import run_mathe_pipeline
@@ -30,8 +30,8 @@ logger = structlog.get_logger(__name__)
 accounting_logger = structlog.get_logger("accounting")
 
 router = APIRouter(prefix="/dataset-recsys/mathe", tags=["MathE Recommendation Service"])
-recs_client = RecommendationClient()
 mathe_client: MatheMirrorClient | None = None
+embedding_client: EmbeddingClient | None = None
 
 
 def get_mathe_client() -> MatheMirrorClient:
@@ -39,6 +39,13 @@ def get_mathe_client() -> MatheMirrorClient:
     if mathe_client is None:
         mathe_client = MatheMirrorClient()
     return mathe_client
+
+
+def get_embedding_client() -> EmbeddingClient:
+    global embedding_client
+    if embedding_client is None:
+        embedding_client = EmbeddingClient()
+    return embedding_client
 
 
 def _parse_utc_timestamp(value: str | None) -> datetime | None:
@@ -130,11 +137,12 @@ async def get_recommendations(
                 detail="Insufficient permissions to access MathE recommendations.",
             )
 
-        recommended_material_ids = recommend_from_metadata_seeds(
+        recommended_material_ids = recommend_from_curricular_pool(
             question_id=question_id_int,
+            question=question,
             k=request.n,
             mathe_mirror_client=get_mathe_client(),
-            recommendation_client=recs_client,
+            embedding_client=get_embedding_client(),
         )
 
         if not recommended_material_ids:

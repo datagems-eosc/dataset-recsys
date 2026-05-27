@@ -220,6 +220,42 @@ class MatheMirrorClient:
             cur.execute(query, (question_id,))
             return cur.fetchall()
 
+    def get_pdf_materials_for_question_topic_subtopic(
+        self,
+        question_id: int,
+    ) -> list[Dict[str, Any]]:
+        """Retrieve PDF materials in the same topic/subtopic as a question."""
+        query = """
+        SELECT
+            m.id AS material_id,
+            m.id::text || '.pdf' AS material_redis_id,
+            ARRAY_REMOVE(ARRAY_AGG(DISTINCT mts.platformtopicid), NULL) AS topic_ids,
+            ARRAY_REMOVE(ARRAY_AGG(DISTINCT mts.platformsubtopicid), NULL) AS subtopic_ids,
+            ARRAY_REMOVE(ARRAY_AGG(DISTINCT k.name), NULL) AS keywords
+        FROM platform__sna__questions q
+        JOIN material_top_sub pool_mts
+            ON q.topic = pool_mts.platformtopicid
+            AND q.subtopic = pool_mts.platformsubtopicid
+        JOIN platform_materials m
+            ON pool_mts.platformmaterialid = m.id
+            AND m.file_ext = 'pdf'
+        LEFT JOIN material_top_sub mts
+            ON m.id = mts.platformmaterialid
+        LEFT JOIN platform_material_keyword mk
+            ON m.id = mk.platformmaterialid
+        LEFT JOIN platform__keywords k
+            ON mk.platformkeywordid = k.id
+        WHERE q.id = %s
+        GROUP BY
+            m.id
+        ORDER BY
+            m.id;
+        """
+
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query, (question_id,))
+            return cur.fetchall()
+
     def get_pdf_material_details(
         self,
         material_redis_ids: list[str],

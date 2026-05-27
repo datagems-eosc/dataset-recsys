@@ -174,6 +174,56 @@ def test_sync_endpoint_schedules_mathe_pipeline(monkeypatch):
     assert background_tasks.tasks
     assert background_tasks.tasks[0].func is mathe.run_mathe_pipeline
 
+
+def test_recommend_endpoint_uses_curricular_pool_ranker(monkeypatch):
+    calls = {}
+    fake_mathe_client = object()
+    fake_embedding_client = object()
+
+    async def fake_authorized_entity_ids(token):
+        calls["token"] = token
+        return [mathe.MATHE_DATASET_ID]
+
+    def fake_recommend_from_curricular_pool(**kwargs):
+        calls["recommender"] = kwargs
+        return ["818", "900"]
+
+    monkeypatch.setattr(
+        mathe.security,
+        "get_authorized_entity_ids",
+        fake_authorized_entity_ids,
+    )
+    monkeypatch.setattr(mathe, "get_mathe_client", lambda: fake_mathe_client)
+    monkeypatch.setattr(mathe, "get_embedding_client", lambda: fake_embedding_client)
+    monkeypatch.setattr(
+        mathe,
+        "recommend_from_curricular_pool",
+        fake_recommend_from_curricular_pool,
+    )
+
+    response = asyncio.run(
+        mathe.get_recommendations(
+            request=mathe.MatheRecsRequest(
+                question_id="272",
+                question="Differentiate $y = (2x^3 - 5x)^5$.",
+                n=2,
+            ),
+            claims={"sub": "user-1"},
+            token="token-1",
+        )
+    )
+
+    assert calls["token"] == "token-1"
+    assert calls["recommender"] == {
+        "question_id": 272,
+        "question": "Differentiate $y = (2x^3 - 5x)^5$.",
+        "k": 2,
+        "mathe_mirror_client": fake_mathe_client,
+        "embedding_client": fake_embedding_client,
+    }
+    assert response.question_id == "272"
+    assert [rec.material_id for rec in response.recommendations] == ["818", "900"]
+
 # This test verifies that the /status endpoint of the MathE API correctly returns the synchronization metadata,
 # including the status of the sync, timestamps, and counts of materials in different OCR states.
 def test_status_endpoint_returns_sync_metadata_and_failed_material_ids(monkeypatch):

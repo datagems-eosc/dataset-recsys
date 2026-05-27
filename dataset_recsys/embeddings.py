@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from functools import lru_cache
+from pathlib import Path
+
 import numpy as np
 import torch
 from chonky import ParagraphSplitter
@@ -22,10 +25,22 @@ EMBEDDING_MODEL_CONFIG = {
 }
 
 
-def get_default_max_length(model_name: str) -> int:
+def _model_path(model_name: str) -> str:
+    path = Path(model_name).expanduser()
+    return str(path) if path.exists() else model_name
+
+
+def _embedding_model_config(model_name: str) -> dict:
     config = EMBEDDING_MODEL_CONFIG.get(model_name)
-    if config is None:
-        raise ValueError(f"Unsupported embedding model: {model_name}")
+    if config is not None:
+        return config
+    if Path(model_name).expanduser().exists():
+        return EMBEDDING_MODEL_CONFIG["BAAI/bge-m3"]
+    raise ValueError(f"Unsupported embedding model: {model_name}")
+
+
+def get_default_max_length(model_name: str) -> int:
+    config = _embedding_model_config(model_name)
     return config["max_length"]
 
 
@@ -75,7 +90,7 @@ def _encode_sentence_transformer_texts(
     texts: list[str],
     model_name: str,
 ) -> np.ndarray:
-    model = SentenceTransformer(model_name, device=DEVICE)
+    model = _load_sentence_transformer_model(model_name)
     max_length = get_default_max_length(model_name)
     if hasattr(model, "max_seq_length"):
         model.max_seq_length = max_length
@@ -111,13 +126,21 @@ def _encode_sentence_transformer_texts(
 
     return np.stack([embedding for embedding in embeddings if embedding is not None])
 
+
+@lru_cache(maxsize=2)
+def _load_sentence_transformer_model(model_name: str) -> SentenceTransformer:
+    model = SentenceTransformer(_model_path(model_name), device=DEVICE)
+    max_length = get_default_max_length(model_name)
+    if hasattr(model, "max_seq_length"):
+        model.max_seq_length = max_length
+    return model
+
+
 def encode_texts(
     texts: list[str],
     model_name: str,
 ) -> np.ndarray:
-    config = EMBEDDING_MODEL_CONFIG.get(model_name)
-    if config is None:
-        raise ValueError(f"Unsupported embedding model: {model_name}")
+    config = _embedding_model_config(model_name)
     if config.get("backend") == "sentence_transformers":
         return _encode_sentence_transformer_texts(texts, model_name=model_name)
 

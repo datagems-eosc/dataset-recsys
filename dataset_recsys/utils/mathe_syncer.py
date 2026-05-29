@@ -1,5 +1,5 @@
 import signal
-
+import subprocess
 import boto3
 import json
 import logging
@@ -31,6 +31,9 @@ def _has_completed_ocr(entry: Dict[str, Any]) -> bool:
 class MathE_Syncer:
     def __init__(self, base_dir: Path) -> None:
         self._base_dir = base_dir
+        self._pdf_dir = self._base_dir / "pdfs"
+        self._docx_dir = self._base_dir / "docxs"
+        self._ppt_dir = self._base_dir / "ppts"
         self.json_file = self._base_dir / "data.json"
         self.status_file = self._base_dir / "sync_status.json"
         self.data: Optional[List[Dict]] = None
@@ -49,8 +52,26 @@ class MathE_Syncer:
         print("Received SIGTERM, finishing current file...")
         self.keep_running = False
 
+    def _libreoffice_convert(self, file_path: Path, output_dir: Path) -> bool:
+        """
+        Internal helper to execute the LibreOffice headless conversion command.
+        """
+        unique_profile = f"file:///tmp/libo_profile_{file_path.stem}"
+
+        cmd = [
+            'libreoffice',
+            '--headless',
+            '-env:UserInstallation=' + unique_profile, 
+            '--convert-to', 'pdf',
+            '--outdir', str(output_dir),
+            str(file_path)
+        ]
+        
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return result.returncode == 0
+
     def _init_data(self) -> None:
-        """Loads data.json and performs discovery for new PDFs."""
+        """Loads data.json and performs discovery across designated raw inputs."""
         if self.json_file.exists():
             with open(self.json_file, "r", encoding="utf-8") as f:
                 self.data = json.load(f)
@@ -64,21 +85,81 @@ class MathE_Syncer:
             print(f"MathE base directory does not exist: {self._base_dir}")
             return
 
-        # Scan base_dir directly for numeric PDFs
-        for f in self._base_dir.iterdir():
-            if f.is_file() and f.suffix.lower() == ".pdf" and f.stem.isnumeric():
-                rel_id = f"./{f.name}"
-                if rel_id not in existing_ids:
-                    print(f"Discovered new PDF: {rel_id}")
-                    self.data.append({
-                        "id": rel_id,
-                        "claude_ocr_text": None,
-                        "status": "pending"
-                    })
-                    new_found = True
+        tmp_build_dir = Path("/tmp/libo_out")
+        tmp_build_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Preprocess Word documents -> Store location context as local /tmp
+        if self._docx_dir.exists():
+            for f in self._docx_dir.iterdir():
+                if f.is_file() and f.suffix.lower() == ".docx" and f.stem.isnumeric():
+                    original_id = f.name  # e.g., "3.docx"
+                    
+                    if original_id not in existing_ids:
+                        local_pdf_target = tmp_build_dir / f"{f.stem}_docx.pdf"
+                        
+                        if not local_pdf_target.exists():
+                            print(f"Converting DOCX to local memory sandbox: {f.name}")
+                            if self._libreoffice_convert(f, tmp_build_dir):
+                                standard_out = tmp_build_dir / f"{f.stem}.pdf"
+                                try:
+                                    standard_out.rename(local_pdf_target)
+                                except Exception as e:
+                                    print(f"❌ Failed to rename local PDF for {f.name}: {e}")
+                                    continue
+
+                        print(f"Queueing converted DOCX target: {original_id}")
+                        self.data.append({
+                            "id": original_id,
+                            "internal_pdf_path": str(local_pdf_target),
+                            "claude_ocr_text": None,
+                            "status": "pending"
+                        })
+                        new_found = True
+
+        # 2. Preprocess PowerPoint presentations -> Store location context as local /tmp
+        if self._ppt_dir.exists():
+            for f in self._ppt_dir.iterdir():
+                if f.is_file() and f.suffix.lower() == ".pptx" and f.stem.isnumeric():
+                    original_id = f.name  # e.g., "3.pptx"
+                    
+                    if original_id not in existing_ids:
+                        local_pdf_target = tmp_build_dir / f"{f.stem}_pptx.pdf"
+                        
+                        if not local_pdf_target.exists():
+                            print(f"Converting PPTX to local memory sandbox: {f.name}")
+                            if self._libreoffice_convert(f, tmp_build_dir):
+                                standard_out = tmp_build_dir / f"{f.stem}.pdf"
+                                try:
+                                    standard_out.rename(local_pdf_target)
+                                except Exception as e:
+                                    print(f"❌ Failed to rename local PDF for {f.name}: {e}")
+                                    continue
+
+                        print(f"Queueing converted PPTX target: {original_id}")
+                        self.data.append({
+                            "id": original_id,
+                            "internal_pdf_path": str(local_pdf_target),
+                            "claude_ocr_text": None,
+                            "status": "pending"
+                        })
+                        new_found = True
+
+        # 3. Discover native pre-existing material PDFs directly from server directory
+        if self._pdf_dir.exists():
+            for f in self._pdf_dir.iterdir():
+                if f.is_file() and f.suffix.lower() == ".pdf" and f.stem.isnumeric():
+                    original_id = f.name  # e.g., "3.pdf"
+                    if original_id not in existing_ids:
+                        print(f"Discovered native production target: {original_id}")
+                        self.data.append({
+                            "id": original_id,
+                            "internal_pdf_path": str(f),  # Reads directly from source pdf dir
+                            "claude_ocr_text": None,
+                            "status": "pending"
+                        })
+                        new_found = True
         
         if new_found:
-            print("New PDFs found and added to data.json. Saving state.")
             self._save_state()
 
     def _save_state(self) -> None:
@@ -110,13 +191,19 @@ class MathE_Syncer:
 
         if not self.data:
             return pd.DataFrame(
-                columns=["id", "claude_ocr_text", "status", "material_id", "pdf_path"]
+                columns=["id", "source_type", "claude_ocr_text", "status", "material_id", "pdf_path"]
             )
             
         df = pd.DataFrame(self.data)
-        # ID is already in format './70.pdf'
-        df["material_id"] = df["id"].apply(lambda p: Path(p).name)
-        df["pdf_path"] = df["id"].apply(lambda p: str(self._base_dir / p))
+        df["material_id"] = df["id"]
+        
+        # Extract source_type directly from the clean file extension (suffix)
+        #    '.docx' -> 'docx', '.pptx' -> 'pptx', '.pdf' -> 'pdf'
+        df["source_type"] = df["id"].apply(lambda p: Path(p).suffix.lstrip('.').lower())
+        
+        # Use your tracking 'internal_pdf_path' instead of assuming its location relative to id
+        df["pdf_path"] = df["internal_pdf_path"]
+        
         return df.replace("", pd.NA)
 
     def get_raw(self) -> List[Dict]:
@@ -126,11 +213,21 @@ class MathE_Syncer:
         return list(self.data)
 
     def count_available_pdfs(self) -> int:
-        """Counts numeric .pdf files in the base directory."""
-        if not self._base_dir.exists():
-            return 0
-        return len([f for f in self._base_dir.iterdir() 
-                    if f.is_file() and f.suffix.lower() == ".pdf" and f.stem.isnumeric()])
+        """
+        Counts tracked files that have a valid converted or native PDF living on disk.
+        """
+        if self.data is None:
+            self._init_data()
+            
+        # Iterate over our known tracking catalog paths to verify actual existence 
+        # (This accommodates both the local container /tmp and server pdf_dir files securely)
+        valid_count = 0
+        for entry in self.data:
+            path_str = entry.get("internal_pdf_path")
+            if path_str and Path(path_str).exists():
+                valid_count += 1
+                
+        return valid_count
 
     def get_info(self) -> Dict[str, str]:
         """Returns high-level info."""
@@ -194,7 +291,7 @@ class MathE_Syncer:
             )
             print(f"Current status: {entry.get('status')}, OCR text length: {len(str(entry.get('claude_ocr_text') or ''))}")
                 
-            full_path = self._base_dir / entry["id"]
+            full_path = Path(entry["internal_pdf_path"])
             try:
                 entry["claude_ocr_text"] = self._perform_claude_call(full_path)
                 entry["status"] = "completed"

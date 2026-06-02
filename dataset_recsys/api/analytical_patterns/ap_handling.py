@@ -1,5 +1,6 @@
 """Handling Analytical Patterns."""
 
+from datetime import datetime
 from typing import Dict, Union
 
 import copy
@@ -110,6 +111,17 @@ def create_recommendation_response_ap(
     recommender operator through ranked `output` edges.
     """
     analytical_pattern = copy.deepcopy(analytical_pattern)
+
+    ap_node = get_node_from_label(analytical_pattern, "Analytical_Pattern")
+    if ap_node:
+        if "properties" not in ap_node:
+            ap_node["properties"] = {}
+        
+        # Generate ISO format timestamp with 'Z' suffix indicating UTC
+        # e.g., '2026-06-29T10:47:17.829Z'
+        current_time_iso = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+        ap_node["properties"]["endTime"] = current_time_iso
+
     # Locate operator
     operator_node = get_node_from_label(analytical_pattern, "DatasetRecommender_Operator")
     if not operator_node:

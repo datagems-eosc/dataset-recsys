@@ -1,0 +1,119 @@
+{
+  "ap": {
+    "nodes": [
+        {
+        "id": "0d7c4d9c-2c18-4c6d-9b7b-48b5fdf7c9a7",
+        "labels": [
+            "Analytical_Pattern"
+        ],
+        "properties": {
+            "name": "Dataset-to-Dataset Recommendations AP",
+            "description": "Retrieve top-N recommendations for a given dataset.",
+            "process": "recommend",
+            "publishedDate": "2026-01-21",
+            "startTime": "10:00:00"
+        }
+        },
+        {
+        "id": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
+        "labels": [
+            "DatasetRecommender_Operator",
+            "Operator"
+        ],
+        "properties": {
+            "name": "GetRecommendations Operator",
+            "description": "Dataset-to-Dataset recommender operator. Accepts a seed dataset as input and returns a ranked list of recommended dataset IDs as output.",
+            "command": "get_recommendations",
+            "inputs": [
+            {
+                "name": "seed",
+                "type": "sc:Dataset",
+                "required": true
+            },
+            {
+                "name": "n",
+                "type": "number",
+                "required": false,
+                "default": 2
+            }
+            ],
+            "outputs": [
+            {
+                "name": "recommendations",
+                "type": "array",
+                "required": true
+            }
+            ]
+        }
+        },
+        {
+        "id": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
+        "labels": [
+            "sc:Dataset"
+        ],
+        "properties": {
+            "name": "Seed Dataset",
+            "description": "The dataset used as the basis for the recommendation query."
+        }
+        },
+        {
+            "id": "e7f8a9b0-c1d2-4e3f-8a5b-6c7d8e9f0a1b",
+            "labels": [
+                "ResultType",
+                "array"
+            ],
+            "properties": {
+                "name": "recommendations",
+                "schema": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "ID of a recommended sc:Dataset"
+                }
+                }
+            }
+        }
+    ],
+    "edges": [
+        {
+            "from": "0d7c4d9c-2c18-4c6d-9b7b-48b5fdf7c9a7",
+            "to": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
+            "labels": [
+                "consist_of"
+            ]
+        },
+        {
+            "from": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
+            "to": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
+            "labels": [
+                "input"
+            ]
+        },
+        {
+            "from": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
+            "to": "e7f8a9b0-c1d2-4e3f-8a5b-6c7d8e9f0a1b",
+            "labels": [
+                "output"
+            ],
+            "properties": {
+                "mapping": {
+                    "to['recommendations']": "from['outputs']['recommendations']"
+                }
+            }
+        }
+    ]
+    },
+    "metadata": {
+        "execution_type": "REQUEST",
+        "timestamp": "2026-06-02T13:08:00Z",
+        "parameters": {
+            "operator_id": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
+            "command": "get_recommendations",
+            "inputs": {
+                "seed": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
+                "n": 3
+            }
+        }
+    }
+}

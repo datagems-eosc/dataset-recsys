@@ -111,7 +111,7 @@
             "operator_id": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
             "command": "get_recommendations",
             "inputs": {
-                "seed": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
+                "seed": "07382b91-5bc5-42f9-8391-33adc2460c19",
                 "n": 3
             }
         }

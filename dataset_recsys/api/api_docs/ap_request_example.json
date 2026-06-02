@@ -2,7 +2,8 @@
     "nodes": [
         {
             "id": "user-session-123",
-            "labels": ["User"]
+            "labels": ["User"],
+            "properties": {}
         },
         {
             "id": "task-rec-001",
@@ -17,26 +18,28 @@
             "labels": ["Analytical_Pattern"],
             "properties": {
                 "name": "Dataset-to-Dataset Recommendations AP",
-                "description": "Pattern for discovering related datasets.",
+                "description": "Retrieve top-N recommendations for a given dataset.",
                 "process": "recommend",
                 "publishedDate": "2026-01-21",
-                "startTime": "10:00:00"
+                "startTime": "2026-06-29T10:43:17.829Z"
             }
         },
         {
             "id": "operator-recommender",
-            "labels": ["DatasetRecommender_Operator"],
+            "labels": ["DatasetRecommender_Operator", "Operator"],
             "properties": {
                 "name": "GetRecommendations Operator",
+                "description": "Dataset-to-Dataset recommender operator.",
                 "command": "get_recommendations",
-                "n": 10
+                "n": 2,
+                "startTime": "2026-06-29T10:43:17.829Z"                
             }
         },
         {
             "id": "07382b91-5bc5-42f9-8391-33adc2460c19",
             "labels": ["sc:Dataset"],
             "properties": {
-            "description": "The seed dataset used as the basis for recommendations."
+                "description": "The seed dataset used as the basis for recommendations."
             }
         }
     ],

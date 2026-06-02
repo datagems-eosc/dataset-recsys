@@ -1,5 +1,6 @@
 """Handling Analytical Patterns."""
 
+from datetime import datetime
 from typing import Dict, Union
 
 import copy
@@ -7,6 +8,7 @@ import copy
 from fastapi import HTTPException, status
 
 from dataset_recsys.api.analytical_patterns.models import RecsRequest, RecsResponse
+import uuid
 
 OPTIONAL_SEARCH_ARGS = ["n"]
 
@@ -110,6 +112,17 @@ def create_recommendation_response_ap(
     recommender operator through ranked `output` edges.
     """
     analytical_pattern = copy.deepcopy(analytical_pattern)
+
+    ap_node = get_node_from_label(analytical_pattern, "Analytical_Pattern")
+    if ap_node:
+        if "properties" not in ap_node:
+            ap_node["properties"] = {}
+        
+        # Generate ISO format timestamp with 'Z' suffix indicating UTC
+        # e.g., '2026-06-29T10:47:17.829Z'
+        current_time_iso = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+        ap_node["properties"]["endTime"] = current_time_iso
+
     # Locate operator
     operator_node = get_node_from_label(analytical_pattern, "DatasetRecommender_Operator")
     if not operator_node:
@@ -158,3 +171,68 @@ def create_recommendation_response_ap(
         })
 
     return analytical_pattern
+
+### Template based handling of request and response metadata for APs that follow a fixed structure and only require parameter extraction and response injection without graph transformations.
+def parse_template_request_metadata(request_body: dict) -> RecsRequest:
+    """
+    Extracts runtime parameters from the metadata structure of a template AP request.
+    Raises 422 if metadata or execution fields are malformed.
+    """
+    metadata = request_body.get("metadata", {})
+    execution_type = metadata.get("execution_type", "REQUEST")
+    
+    if execution_type != "REQUEST":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid execution_type '{execution_type}' for a template request. Expected 'REQUEST'."
+        )
+        
+    parameters = metadata.get("parameters", {})
+    inputs = parameters.get("inputs", {})
+    
+    seed = inputs.get("seed")
+    n_value = inputs.get("n", 2)  # Default fallback mirroring template defaults
+    
+    if not seed:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Malformed Metadata: 'inputs.seed' is missing from request parameters."
+        )
+        
+    return RecsRequest(
+        entity_id=str(seed),
+        n=int(n_value)
+    )
+
+
+def create_template_response_metadata(request_body: dict, search_response: RecsResponse) -> dict:
+    """
+    Copies the original fixed template structure and overrides the metadata
+    block to reflect a successful execution response.
+    """
+    # Create a deep copy of the request payload to preserve the fixed "ap" template graph
+    import copy
+    response_payload = copy.deepcopy(request_body)
+    
+    metadata = response_payload.get("metadata", {})
+    parameters = metadata.get("parameters", {})
+    
+    # 1. Elevate execution type and generate a tracking execution UUID
+    metadata["execution_type"] = "RESPONSE"
+    metadata["uuid"] = str(uuid.uuid4())
+    metadata["status"] = "SUCCESS"
+    metadata["timestamp"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    # 2. Extract recommended entity strings from the RecsResponse object
+    rec_ids = [rec.entity_id for rec in search_response.recommendations]
+    
+    # 3. Populate outputs inside parameters
+    parameters["outputs"] = {
+        "recommendations": rec_ids
+    }
+    
+    # Re-assign clean runtime references back to payload structural root
+    metadata["parameters"] = parameters
+    response_payload["metadata"] = metadata
+    
+    return response_payload

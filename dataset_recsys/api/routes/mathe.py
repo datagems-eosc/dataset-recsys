@@ -21,10 +21,9 @@ from dataset_recsys.workflows.mathe_sync_pipeline import run_mathe_pipeline
 from dataset_recsys.api.security import security
 
 MATHE_PATH = Path(os.getenv("MATHE_PATH", "/mnt/s3/default"))
-MATHE_PDF_PATH = MATHE_PATH / "pdfs"
 MATHE_DATASET_ID = "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f"
 SYNC_HEARTBEAT_STALE_AFTER = timedelta(minutes=30)
-syncer = MathE_Syncer(base_dir=MATHE_PDF_PATH)
+syncer = MathE_Syncer(base_dir=MATHE_PATH)
 
 logger = structlog.get_logger(__name__)
 accounting_logger = structlog.get_logger("accounting")

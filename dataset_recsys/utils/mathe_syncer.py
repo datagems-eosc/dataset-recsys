@@ -110,7 +110,8 @@ class MathE_Syncer:
         else:
             self.data = []
 
-        existing_ids = {entry["id"] for entry in self.data}
+        state_map = {entry["id"]: entry for entry in self.data if isinstance(entry, dict) and "id" in entry}
+        existing_ids = set(state_map.keys())
         new_found = False
 
         if not self._base_dir.exists():
@@ -153,11 +154,12 @@ class MathE_Syncer:
                             "status": status
                         }
                         self.data.append(entry)
-                        existing_ids[video_id] = entry
+                        state_map[video_id] = entry
+                        existing_ids.add(video_id)
                         new_found = True
                     else:
                         # Self-healing backup check for tracking cache mapping
-                        entry = existing_ids[video_id]
+                        entry = state_map[video_id]
                         if entry.get("status") == "pending" and backup_text_file.exists():
                             with open(backup_text_file, "r", encoding="utf-8") as f:
                                 entry["claude_ocr_text"] = f.read()
@@ -175,16 +177,21 @@ class MathE_Syncer:
             for f in self._docx_dir.iterdir():
                 if f.is_file() and f.suffix.lower() == ".docx" and f.stem.isnumeric():
                     original_id = f.name  # e.g., "3.docx"
+                    local_pdf_target = tmp_build_dir / f"{f.stem}_docx.pdf"                    
                     
-                    if original_id not in existing_ids:
-                        local_pdf_target = tmp_build_dir / f"{f.stem}_docx.pdf"
-                        
+                    # Recover sandboxed file if it missing from /tmp on server reload
+                    if original_id in existing_ids:
+                        entry = state_map[original_id]
+                        if entry.get("status") == "pending" and not Path(entry.get("internal_pdf_path", "")).exists():
+                            print(f"Regenerating vanished temporary sandboxed PDF for: {f.name}")
+                            if self._libreoffice_convert(f, tmp_build_dir):
+                                (tmp_build_dir / f"{f.stem}.pdf").rename(local_pdf_target)
+                    else:
                         if not local_pdf_target.exists():
                             print(f"Converting DOCX to local memory sandbox: {f.name}")
                             if self._libreoffice_convert(f, tmp_build_dir):
-                                standard_out = tmp_build_dir / f"{f.stem}.pdf"
                                 try:
-                                    standard_out.rename(local_pdf_target)
+                                    (tmp_build_dir / f"{f.stem}.pdf").rename(local_pdf_target)
                                 except Exception as e:
                                     print(f"❌ Failed to rename local PDF for {f.name}: {e}")
                                     continue
@@ -197,6 +204,7 @@ class MathE_Syncer:
                             "claude_ocr_text": None,
                             "status": "pending"
                         })
+                        existing_ids.add(original_id)
                         new_found = True
 
         # 2. Preprocess PowerPoint presentations -> Store location context as local /tmp
@@ -204,16 +212,21 @@ class MathE_Syncer:
             for f in self._ppt_dir.iterdir():
                 if f.is_file() and f.suffix.lower() == ".pptx" and f.stem.isnumeric():
                     original_id = f.name  # e.g., "3.pptx"
+                    local_pdf_target = tmp_build_dir / f"{f.stem}_pptx.pdf"
                     
-                    if original_id not in existing_ids:
-                        local_pdf_target = tmp_build_dir / f"{f.stem}_pptx.pdf"
-                        
+                    # Recover sandboxed file if it missing from /tmp on server reload
+                    if original_id in existing_ids:
+                        entry = state_map[original_id]
+                        if entry.get("status") == "pending" and not Path(entry.get("internal_pdf_path", "")).exists():
+                            print(f"Regenerating vanished temporary sandboxed PDF for: {f.name}")
+                            if self._libreoffice_convert(f, tmp_build_dir):
+                                (tmp_build_dir / f"{f.stem}.pdf").rename(local_pdf_target)
+                    else:
                         if not local_pdf_target.exists():
                             print(f"Converting PPTX to local memory sandbox: {f.name}")
                             if self._libreoffice_convert(f, tmp_build_dir):
-                                standard_out = tmp_build_dir / f"{f.stem}.pdf"
                                 try:
-                                    standard_out.rename(local_pdf_target)
+                                    (tmp_build_dir / f"{f.stem}.pdf").rename(local_pdf_target)
                                 except Exception as e:
                                     print(f"❌ Failed to rename local PDF for {f.name}: {e}")
                                     continue
@@ -226,6 +239,7 @@ class MathE_Syncer:
                             "claude_ocr_text": None,
                             "status": "pending"
                         })
+                        existing_ids.add(original_id)
                         new_found = True
 
         # 3. Discover native pre-existing material PDFs directly from server directory
@@ -242,6 +256,7 @@ class MathE_Syncer:
                             "claude_ocr_text": None,
                             "status": "pending"
                         })
+                        existing_ids.add(original_id)
                         new_found = True
         
         if new_found:

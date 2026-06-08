@@ -5,6 +5,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from typing import Any
 
 from dataset_recsys.storage.recommendation_client import RecommendationClient
@@ -25,7 +26,14 @@ DEFAULT_MATHE_EMBEDDING_MODEL = os.getenv(
 
 def _normalize_material_id(material_id: Any) -> str:
     """Normalize MathE ids from data.json to the API-facing PDF filename."""
-    return Path(str(material_id).strip()).name
+    clean_id = Path(str(material_id).strip()).name
+
+    # Check if the string matches a raw 11-char YouTube ID hash structure
+    # If it has no file extension and fits the signature, append .txt explicitly
+    if len(clean_id) == 11 and re.match(r'^[a-zA-Z0-9_-]{11}$', clean_id):
+        return f"{clean_id}.txt"
+
+    return clean_id
 
 
 def _load_mathe_data(json_file: Path) -> list[dict[str, Any]]:

@@ -4,9 +4,13 @@ import boto3
 import json
 import logging
 import os
+import re
 import pandas as pd
 from pathlib import Path
 from typing import Any, List, Dict, Optional
+import yt_dlp
+from faster_whisper import WhisperModel
+import psycopg2
 
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
@@ -22,10 +26,11 @@ def _progress_bar(current: int, total: int, width: int = 20) -> str:
     return f"[{'#' * filled}{'-' * (width - filled)}] {current}/{total} {percent}%"
 
 
-def _has_completed_ocr(entry: Dict[str, Any]) -> bool:
-    ocr_text = str(entry.get("claude_ocr_text") or "")
+def _has_completed_processing(entry: Dict[str, Any]) -> bool:
+    """Verifies if an entry already has successfully parsed text content."""
+    text = str(entry.get("claude_ocr_text") or "")
     return entry.get("status") == "completed" or (
-        bool(ocr_text) and not ocr_text.startswith("OCR Failed")
+        bool(text) and not (text.startswith("OCR Failed") or text.startswith("Transcription Failed"))
     )
 
 class MathE_Syncer:
@@ -34,8 +39,11 @@ class MathE_Syncer:
         self._pdf_dir = self._base_dir / "pdfs"
         self._docx_dir = self._base_dir / "docxs"
         self._ppt_dir = self._base_dir / "ppts"
+        self._transcript_dir = self._base_dir / "transcripts"
+        self._transcript_dir.mkdir(parents=True, exist_ok=True)
         self.json_file = self._base_dir / "data.json"
         self.status_file = self._base_dir / "sync_status.json"
+        self.cookie_file = self._base_dir / "cookies.txt"
         self.data: Optional[List[Dict]] = None
         
         # Claude 4.5 Global Configuration
@@ -70,6 +78,30 @@ class MathE_Syncer:
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         return result.returncode == 0
 
+    def _get_db_connection(self):
+        return psycopg2.connect(
+            host=os.getenv("DATAGEMS_POSTGRES_HOST"),
+            port=int(os.getenv("DATAGEMS_POSTGRES_PORT", "5432")),
+            dbname=os.getenv("DB_DS_NAME"),
+            user=os.getenv("DB_DS_USER"),
+            password=os.getenv("DB_DS_PASSWORD"),
+            options=f"-c search_path={os.getenv('DATAGEMS_POSTGRES_SCHEMA', 'public')}"
+        )
+
+    def _is_youtube_asset(self, link_value: str) -> bool:
+        """Determines if the raw string input points to a video stream asset."""
+        if len(link_value) == 11 and re.match(r'^[a-zA-Z0-9_-]{11}$', link_value):
+            return True
+        return "youtube.com" in link_value or "youtu.be" in link_value
+
+    def _extract_video_id(self, link_value: str) -> str:
+        if len(link_value) == 11 and re.match(r'^[a-zA-Z0-9_-]{11}$', link_value):
+            return link_value
+        id_match = re.search(r'(?:v=|\/v\/|youtu\.be\/|\/embed\/)([a-zA-Z0-9_-]{11})', link_value)
+        if id_match:
+            return id_match.group(1)
+        raise ValueError(f"Could not parse valid YouTube identifier: {link_value}")
+
     def _init_data(self) -> None:
         """Loads data.json and performs discovery across designated raw inputs."""
         if self.json_file.exists():
@@ -85,6 +117,56 @@ class MathE_Syncer:
             print(f"MathE base directory does not exist: {self._base_dir}")
             return
 
+        # --- ROUTE 1: Discover Video Streams from PostgreSQL ---
+        print("Syncing video assets from PostgreSQL platform registry...")
+        try:
+            with self._get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT link FROM platform_materials WHERE type < 3;")
+                    rows = cursor.fetchall()
+                    db_links = [row[0] for row in rows if row[0]]
+        except Exception as e:
+            print(f"Warning: PostgreSQL lookup failed. Relying on local data cache. Exception: {e}")
+            db_links = []
+
+        for link in db_links:
+            if self._is_youtube_asset(link):
+                try:
+                    video_id = self._extract_video_id(link)
+                    
+                    # If a transcript file already exists in the folder, sync state instantly
+                    backup_text_file = self._transcript_dir / f"{video_id}.txt"
+                    
+                    if video_id not in existing_ids:
+                        status = "completed" if backup_text_file.exists() else "pending"
+                        ocr_text = None
+                        
+                        if backup_text_file.exists():
+                            with open(backup_text_file, "r", encoding="utf-8") as f:
+                                ocr_text = f.read()
+
+                        entry = {
+                            "id": video_id,
+                            "type": "audio",
+                            "source_value": link,
+                            "claude_ocr_text": ocr_text,
+                            "status": status
+                        }
+                        self.data.append(entry)
+                        existing_ids[video_id] = entry
+                        new_found = True
+                    else:
+                        # Self-healing backup check for tracking cache mapping
+                        entry = existing_ids[video_id]
+                        if entry.get("status") == "pending" and backup_text_file.exists():
+                            with open(backup_text_file, "r", encoding="utf-8") as f:
+                                entry["claude_ocr_text"] = f.read()
+                            entry["status"] = "completed"
+                            new_found = True
+                except ValueError:
+                    continue
+
+        # --- ROUTE 2: Discover Structural Office Documents via Local Directories ---
         tmp_build_dir = Path("/tmp/libo_out")
         tmp_build_dir.mkdir(parents=True, exist_ok=True)
 
@@ -110,6 +192,7 @@ class MathE_Syncer:
                         print(f"Queueing converted DOCX target: {original_id}")
                         self.data.append({
                             "id": original_id,
+                            "type": "document",
                             "internal_pdf_path": str(local_pdf_target),
                             "claude_ocr_text": None,
                             "status": "pending"
@@ -138,6 +221,7 @@ class MathE_Syncer:
                         print(f"Queueing converted PPTX target: {original_id}")
                         self.data.append({
                             "id": original_id,
+                            "type": "document",
                             "internal_pdf_path": str(local_pdf_target),
                             "claude_ocr_text": None,
                             "status": "pending"
@@ -153,6 +237,7 @@ class MathE_Syncer:
                         print(f"Discovered native production target: {original_id}")
                         self.data.append({
                             "id": original_id,
+                            "type": "document",
                             "internal_pdf_path": str(f),  # Reads directly from source pdf dir
                             "claude_ocr_text": None,
                             "status": "pending"
@@ -202,7 +287,7 @@ class MathE_Syncer:
         df["source_type"] = df["id"].apply(lambda p: Path(p).suffix.lstrip('.').lower())
         
         # Use your tracking 'internal_pdf_path' instead of assuming its location relative to id
-        df["pdf_path"] = df["internal_pdf_path"]
+        df["pdf_path"] = df.get("internal_pdf_path", pd.NA)
         
         return df.replace("", pd.NA)
 
@@ -248,7 +333,7 @@ class MathE_Syncer:
             self._init_data()
             print(f"Discovered {len(self.data)} total entries, with {self.count_available_pdfs()} available PDFs.")
             # limit = 1 # For testing, process only 1 file at a time. Remove or adjust this for full batch processing.
-            self.run_batch_ocr(limit=limit)
+            self.run_hybrid_batch_processing(limit=limit)
             print("Lifecycle complete.")
         except Exception as e:
             print(f"Error during sync/process lifecycle: {e}")
@@ -257,17 +342,26 @@ class MathE_Syncer:
 
     # --- OCR Logic ---
 
-    def run_batch_ocr(self, limit: Optional[int] = None):
+    def run_hybrid_batch_processing(self, limit: Optional[int] = None):
         if self.data is None:
             self._init_data()
         
         pending_entries = [
             entry
             for entry in self.data
-            if not _has_completed_ocr(entry) and entry.get("status") != "failed"
+            if not _has_completed_processing(entry) and entry.get("status") != "failed"
         ]
         if limit is not None:
             pending_entries = pending_entries[:limit]
+
+        if not pending_entries:
+            print("No pending work detected across audio formats or documents.")
+            return
+
+        whisper_model = None
+        if any(e.get("type") == "audio" for e in pending_entries):
+            print("Initializing local Whisper extraction runtime engines...")
+            whisper_model = WhisperModel("base", device="cpu", compute_type="float32")
 
         skipped = len(self.data) - len(pending_entries)
         logger.info(
@@ -290,15 +384,11 @@ class MathE_Syncer:
                 f"processing {entry['id']}"
             )
             print(f"Current status: {entry.get('status')}, OCR text length: {len(str(entry.get('claude_ocr_text') or ''))}")
-                
-            full_path = Path(entry["internal_pdf_path"])
-            try:
-                entry["claude_ocr_text"] = self._perform_claude_call(full_path)
-                entry["status"] = "completed"
-            except Exception as e:
-                print(f"Error processing {entry['id']}: {e}")
-                entry["claude_ocr_text"] = f"OCR Failed: {str(e)}"
-                entry["status"] = "failed"
+
+            if entry.get("type") == "audio":
+                self._process_audio_entry(entry, whisper_model)
+            else:
+                self._process_document_entry(entry)
             
             print(f"Finished processing {entry['id']}. Status: {entry['status']}, OCR text length: {len(str(entry.get('claude_ocr_text') or ''))}")
             logger.info(
@@ -315,7 +405,86 @@ class MathE_Syncer:
 
         if not self.data or all(e['status'] in ['completed', 'failed'] for e in self.data):
             self._send_notification("OCR process finished for all files.")
-        
+
+    def _process_audio_entry(self, entry: Dict, whisper_model: WhisperModel):
+        video_id = entry["id"]
+
+        backup_text_file = self._transcript_dir / f"{video_id}.txt"
+        if backup_text_file.exists():
+            print(f"-> Found local backup inside transcripts/ folder for video {video_id}. Restoring state...")
+            with open(backup_text_file, "r", encoding="utf-8") as f:
+                entry["claude_ocr_text"] = f.read()
+            entry["status"] = "completed"
+            return
+
+        local_audio_path = None
+        try:
+            youtube_url = f"https://www.youtube.com/watch?v={video_id}"
+            output_file = self._base_dir / f"{video_id}.m4a"
+            
+            ydl_opts = {
+                'format': 'bestaudio[ext=m4a]/bestaudio/best', 
+                'outtmpl': str(self._base_dir / f"{video_id}.%(ext)s"),
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'm4a',
+                }],
+                'quiet': True,
+            }
+            if self.cookie_file.exists():
+                ydl_opts['cookiefile'] = str(self.cookie_file)
+                
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([youtube_url])
+            local_audio_path = output_file
+            
+            # Extract Text with VAD filter checks
+            segments, _ = whisper_model.transcribe(
+                str(local_audio_path), beam_size=5, vad_filter=True, 
+                vad_parameters=dict(min_speech_duration_ms=250)
+            )
+            transcript_text = " ".join([segment.text for segment in segments])
+            entry["claude_ocr_text"] = transcript_text
+            entry["status"] = "completed"
+            with open(backup_text_file, "w", encoding="utf-8") as f:
+                f.write(transcript_text)
+            print(f"Successfully transcribed audio segment {video_id}")
+        except Exception as e:
+            print(f"Failed transcription pipeline for {video_id}: {e}")
+            entry["claude_ocr_text"] = f"Transcription Failed: {str(e)}"
+            entry["status"] = "failed"
+        finally:
+            if local_audio_path and local_audio_path.exists():
+                os.remove(local_audio_path)
+
+    def _process_document_entry(self, entry: Dict):
+        doc_path = Path(entry["internal_pdf_path"])
+        try:
+            if not doc_path.exists():
+                raise FileNotFoundError(f"Underlying converted PDF file artifact missing from path: {doc_path}")
+                
+            with open(doc_path, "rb") as f:
+                pdf_bytes = f.read()
+
+            response = self.bedrock.converse(
+                modelId=self.model_id,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"document": {"name": doc_path.stem, "format": "pdf", "source": {"bytes": pdf_bytes}}},
+                        {"text": "Extract all text from this math document. Use LaTeX for equations. Follow the native language of the document. Do not add any commentary or explanations, just return the raw extracted text."}
+                    ]
+                }],
+                inferenceConfig={"temperature": 0.0}
+            )
+            entry["claude_ocr_text"] = response['output']['message']['content'][0]['text']
+            entry["status"] = "completed"
+            print(f"Successfully executed Claude OCR for document: {entry['id']}")
+        except Exception as e:
+            print(f"Failed Bedrock Claude OCR processing for {entry['id']}: {e}")
+            entry["claude_ocr_text"] = f"OCR Failed: {str(e)}"
+            entry["status"] = "failed"
+ 
     def _send_notification(self, msg: str):
         # Placeholder for notification logic (e.g., email, Slack)
         print(f"NOTIFICATION: {msg}")

@@ -38,6 +38,8 @@ torch = [
     { version = ">=2.6.0", markers = "platform_system == 'Darwin'" },
 ]
 sentence-transformers = "3.0.1"
+yt-dlp = "^2026.3.17"
+faster-whisper = "^1.2.1"
 
 [tool.poetry.group.ir]
 optional = true

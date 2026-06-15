@@ -12,12 +12,24 @@ It returns MathE material IDs, ranked from most to least relevant.
 
 ## Current Scope
 
-The recommender currently works on PDF materials only.
+The deployed MathE question-to-material API currently returns document teaching
+materials only. Supported document formats are PDF, DOCX, and PPTX.
 
-Materials stored as DOCX, PPTX, videos, and links are not part of the current recommender index.
+The MathE syncer has been extended to discover and process additional material
+formats before the embedding/recommendation refresh:
 
-The current production system also does enforce a hard rule that a recommended material
-must have exactly the same topic and subtopic as the question, as asked by MathE team.
+- native PDFs from the mounted MathE material folder
+- DOCX files converted to PDF with LibreOffice
+- PPTX files converted to PDF with LibreOffice
+- YouTube video materials discovered from the MathE platform registry and
+  transcribed through an audio pipeline
+
+Video materials can also be
+processed by the syncer, but they are not returned by the production question
+recommendation endpoint yet.
+
+The current production system also enforces a hard rule that a recommended
+material must have exactly the same topic and subtopic as the question.
 
 ## Signals Used
 
@@ -45,22 +57,22 @@ question_to_material_similarity
 `keyword_jaccard` measures keyword overlap between the question and material.
 
 `question_to_material_similarity` measures similarity between the embedded
-question text and the stored PDF OCR embedding.
+question text and the stored material text embedding. 
 
 ## Production Flow
 
 ```mermaid
 flowchart TB
     A["API request: question_id, question text, k"] --> B["Read question metadata"]
-    B --> C["Fetch same-topic/same-subtopic PDF pool"]
-    C --> D{"Any eligible PDFs?"}
+    B --> C["Fetch same-topic/same-subtopic document pool"]
+    C --> D{"Any eligible documents?"}
     D -- "No" --> E["Return no recommendations"]
-    D -- "Yes" --> F["Compute keyword overlap for each PDF"]
+    D -- "Yes" --> F["Compute keyword overlap for each document"]
     F --> G["Embed question text"]
     G --> H["Score pool with question-to-material similarity"]
     H --> I["Compute final score"]
     I --> J["Rank and keep top-k"]
-    J --> K["Resolve Redis PDF IDs to MathE material IDs"]
+    J --> K["Resolve Redis document IDs to MathE material IDs"]
     K --> L["Return material IDs"]
 ```
 
@@ -115,13 +127,13 @@ no recommendations.
 
 ### Step 3 - Build The Eligible Material Pool
 
-The production recommender then fetches all PDF materials assigned to the same
-topic and subtopic as the question.
+The production recommender then fetches all supported document teaching
+materials assigned to the same topic and subtopic as the question.
 
 This is done through:
 
 ```text
-MatheMirrorClient.get_pdf_materials_for_question_topic_subtopic(...)
+MatheMirrorClient.get_document_materials_for_question_topic_subtopic(...)
 ```
 
 in:
@@ -265,6 +277,8 @@ Candidates are keyed internally by `material_redis_id`, for example:
 
 ```text
 30.pdf
+31.docx
+32.pptx
 ```
 
 The API response returns the MathE database material ID, for example:
@@ -309,16 +323,16 @@ dataset_recsys/mathe_recommenders/hybrid.py
 | Step | File | Function | Role |
 | --- | --- | --- | --- |
 | API entry point | `dataset_recsys/api/routes/mathe.py` | route handler | Receives the MathE request and calls the production recommender. |
-| Production recommender | `dataset_recsys/mathe_recommenders/curricular_pool_ranker.py` | `recommend_from_curricular_pool` | Returns top-k material IDs from the same topic/subtopic PDF pool. |
+| Production recommender | `dataset_recsys/mathe_recommenders/curricular_pool_ranker.py` | `recommend_from_curricular_pool` | Returns top-k material IDs from the same topic/subtopic document pool. |
 | Candidate ranking | `dataset_recsys/mathe_recommenders/curricular_pool_ranker.py` | `rank_curricular_pool_candidates` | Builds the eligible pool, scores it, and ranks candidates. |
 | Final scoring | `dataset_recsys/mathe_recommenders/curricular_pool_ranker.py` | `_rank_candidates` | Computes `final_score` and sorts candidates. |
 | Question metadata | `dataset_recsys/storage/mathe_mirror_client.py` | `get_question_metadata` | Reads question topic, subtopic, and keywords. |
-| Eligible pool | `dataset_recsys/storage/mathe_mirror_client.py` | `get_pdf_materials_for_question_topic_subtopic` | Fetches only PDFs in the same topic/subtopic as the question. |
+| Eligible pool | `dataset_recsys/storage/mathe_mirror_client.py` | `get_document_materials_for_question_topic_subtopic` | Fetches supported teaching material documents in the same topic/subtopic as the question. |
 | Keyword score | `dataset_recsys/mathe_recommenders/seed_scoring.py` | `compute_keyword_jaccard` | Computes question/material keyword overlap. |
 | Question embedding | `dataset_recsys/mathe_recommenders/question_embedding.py` | `encode_question` | Embeds the MathE question text. |
 | Question similarity | `dataset_recsys/mathe_recommenders/question_embedding.py` | `score_question_similarity_for_material_ids` | Scores eligible materials against the question embedding. |
 | Vector scoring by IDs | `dataset_recsys/storage/embedding_client.py` | `find_similar_by_ids` | Scores only the material IDs already in the eligible pool. |
-| ID resolution | `dataset_recsys/mathe_recommenders/metadata_ocr.py` | `resolve_db_material_ids` | Converts internal Redis PDF IDs back to MathE material IDs. |
+| ID resolution | `dataset_recsys/mathe_recommenders/metadata_ocr.py` | `resolve_db_material_ids` | Converts internal Redis document IDs back to MathE material IDs. |
 | Comparison CLI | `dataset_recsys/utils/mathe_recsys_compare_cli.py` | `main` | Runs selected recommender approaches for validation and CSV/JSON export. |
 
 ## Configuration

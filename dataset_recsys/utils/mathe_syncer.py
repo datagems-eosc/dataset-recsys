@@ -38,7 +38,7 @@ class MathE_Syncer:
         self._base_dir = base_dir
         self._pdf_dir = self._base_dir / "pdfs"
         self._docx_dir = self._base_dir / "docxs"
-        self._ppt_dir = self._base_dir / "ppts"
+        self._ppt_dir = self._base_dir / "pptxs/"
         self._transcript_dir = self._base_dir / "transcripts"
         self._transcript_dir.mkdir(parents=True, exist_ok=True)
         self.json_file = self._base_dir / "data.json"
@@ -453,7 +453,15 @@ class MathE_Syncer:
                 ydl_opts['cookiefile'] = str(self.cookie_file)
                 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([youtube_url])
+                # Use extract_info with download=True to fetch metadata along with the audio file
+                info_dict = ydl.extract_info(youtube_url, download=True)
+                
+                # Safely parse fields with defaults if they are missing
+                title = info_dict.get("title", "Unknown Title")
+                description = info_dict.get("description", "No Description Provided")
+                tags_list = info_dict.get("tags", [])
+                keywords = ", ".join(tags_list) if tags_list else "No keywords found."
+
             local_audio_path = output_file
             
             # Extract Text with VAD filter checks
@@ -462,10 +470,17 @@ class MathE_Syncer:
                 vad_parameters=dict(min_speech_duration_ms=250)
             )
             transcript_text = " ".join([segment.text for segment in segments])
-            entry["claude_ocr_text"] = transcript_text
+            formatted_output = (
+                f"VIDEO TITLE: {title}\n"
+                f"VIDEO KEYWORDS: {keywords}\n"
+                f"VIDEO DESCRIPTION:\n{description}\n"
+                f"{'='*40}\n"
+                f"TRANSCRIPT:\n{transcript_text}"
+            )
+            entry["claude_ocr_text"] = formatted_output
             entry["status"] = "completed"
             with open(backup_text_file, "w", encoding="utf-8") as f:
-                f.write(transcript_text)
+                f.write(formatted_output)
             print(f"Successfully transcribed audio segment {video_id}")
         except Exception as e:
             print(f"Failed transcription pipeline for {video_id}: {e}")

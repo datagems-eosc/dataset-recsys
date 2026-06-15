@@ -123,7 +123,10 @@ class MathE_Syncer:
         try:
             with self._get_db_connection() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute("SELECT link FROM platform_materials WHERE type < 3;")
+                    # MathE material_type: 1 = Video Lesson, 2 = Video Review.
+                    cursor.execute(
+                        "SELECT link FROM platform_materials WHERE type IN (1, 2);"
+                    )
                     rows = cursor.fetchall()
                     db_links = [row[0] for row in rows if row[0]]
         except Exception as e:

@@ -16,7 +16,7 @@ def test_rank_curricular_pool_candidates_scores_only_the_same_pool():
         "subtopic_id": 20,
         "keywords": ["product rule"],
     }
-    mathe_client.get_pdf_materials_for_question_topic_subtopic = lambda question_id: [
+    mathe_client.get_document_materials_for_question_topic_subtopic = lambda question_id: [
         {
             "material_id": 100,
             "material_redis_id": "100.pdf",
@@ -26,14 +26,14 @@ def test_rank_curricular_pool_candidates_scores_only_the_same_pool():
         },
         {
             "material_id": 101,
-            "material_redis_id": "101.pdf",
+            "material_redis_id": "101.docx",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": [],
         },
     ]
     embedding_client = FakeEmbeddingClient(
-        [("100.pdf", 0.2), ("101.pdf", 0.9), ("900.pdf", 1.0)]
+        [("100.pdf", 0.2), ("101.docx", 0.9), ("900.pdf", 1.0)]
     )
 
     candidates = rank_curricular_pool_candidates(
@@ -47,7 +47,7 @@ def test_rank_curricular_pool_candidates_scores_only_the_same_pool():
     )
 
     assert [candidate["material_redis_id"] for candidate in candidates] == [
-        "101.pdf",
+        "101.docx",
         "100.pdf",
     ]
     assert candidates[0]["final_score"] == approx(0.54)
@@ -57,7 +57,7 @@ def test_rank_curricular_pool_candidates_scores_only_the_same_pool():
             "method": "find_similar_by_ids",
             "application": "mathe",
             "query_embedding": [0.1, 0.2],
-            "entity_ids": ["100.pdf", "101.pdf"],
+            "entity_ids": ["100.pdf", "101.docx"],
             "table": embedding_client.TABLE_MATHE,
         }
     ]
@@ -71,7 +71,7 @@ def test_rank_curricular_pool_candidates_keeps_missing_embeddings_at_zero():
         "subtopic_id": 20,
         "keywords": ["chain rule"],
     }
-    mathe_client.get_pdf_materials_for_question_topic_subtopic = lambda question_id: [
+    mathe_client.get_document_materials_for_question_topic_subtopic = lambda question_id: [
         {
             "material_id": 100,
             "material_redis_id": "100.pdf",
@@ -81,13 +81,13 @@ def test_rank_curricular_pool_candidates_keeps_missing_embeddings_at_zero():
         },
         {
             "material_id": 101,
-            "material_redis_id": "101.pdf",
+            "material_redis_id": "101.pptx",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": ["product rule"],
         },
     ]
-    embedding_client = FakeEmbeddingClient([("101.pdf", 0.8)])
+    embedding_client = FakeEmbeddingClient([("101.pptx", 0.8)])
 
     candidates = rank_curricular_pool_candidates(
         question_id=42,
@@ -103,7 +103,7 @@ def test_rank_curricular_pool_candidates_keeps_missing_embeddings_at_zero():
         for candidate in candidates
     }
     assert scores["100.pdf"] == 0.0
-    assert scores["101.pdf"] == 0.8
+    assert scores["101.pptx"] == 0.8
 
 
 def test_recommend_from_curricular_pool_returns_db_material_ids():
@@ -114,10 +114,10 @@ def test_recommend_from_curricular_pool_returns_db_material_ids():
         "subtopic_id": 20,
         "keywords": [],
     }
-    mathe_client.get_pdf_materials_for_question_topic_subtopic = lambda question_id: [
+    mathe_client.get_document_materials_for_question_topic_subtopic = lambda question_id: [
         {
             "material_id": 100,
-            "material_redis_id": "100.pdf",
+            "material_redis_id": "100.docx",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": [],
@@ -129,7 +129,7 @@ def test_recommend_from_curricular_pool_returns_db_material_ids():
         question="Differentiate x.",
         k=1,
         mathe_mirror_client=mathe_client,
-        embedding_client=FakeEmbeddingClient([("100.pdf", 0.9)]),
+        embedding_client=FakeEmbeddingClient([("100.docx", 0.9)]),
         question_embedding=[0.1, 0.2],
     )
 

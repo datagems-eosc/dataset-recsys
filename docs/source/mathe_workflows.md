@@ -51,8 +51,9 @@ when embeddings and Redis recommendations are rebuilt.
 
 At the moment, this broader sync/indexing capability is ahead of the production
 MathE question API. The `/dataset-recsys/mathe/recommend` endpoint still builds
-its request-time candidate pool from PDF materials in the same topic/subtopic as
-the question.
+its request-time candidate pool from document teaching materials in the same
+topic/subtopic as the question. Video materials are not exposed by that endpoint
+yet.
 
 ## Material Inputs
 

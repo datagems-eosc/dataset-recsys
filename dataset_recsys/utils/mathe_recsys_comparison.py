@@ -333,7 +333,7 @@ def compare_question_recommenders(
         }
     if "curricular_pool" in strategy_payloads:
         strategies_output["curricular_pool"] = {
-            "description": "Current production flow: hard same-topic/same-subtopic PDF pool, ranked with keyword overlap and question-to-material similarity.",
+            "description": "Current production flow: hard same-topic/same-subtopic document pool, ranked with keyword overlap and question-to-material similarity.",
             "recommendations": _enrich_recommendations(
                 strategy_payloads["curricular_pool"]["ids"],
                 details_by_id,

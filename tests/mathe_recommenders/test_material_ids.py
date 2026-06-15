@@ -7,5 +7,10 @@ from dataset_recsys.storage.mathe_mirror_client import (
 def test_mathe_material_redis_id_maps_to_db_material_id():
     assert material_id_to_redis_id(221) == "221.pdf"
     assert material_id_to_redis_id("221.pdf") == "221.pdf"
+    assert material_id_to_redis_id(221, "docx") == "221.docx"
+    assert material_id_to_redis_id("221.pptx") == "221.pptx"
     assert redis_id_to_material_id("221.pdf") == 221
+    assert redis_id_to_material_id("221.docx") == 221
+    assert redis_id_to_material_id("221.pptx") == 221
+    assert redis_id_to_material_id("221.txt") is None
     assert redis_id_to_material_id("ChainRule.pdf") is None

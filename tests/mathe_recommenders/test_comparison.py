@@ -31,7 +31,7 @@ def test_compare_question_recommenders_includes_question_embedding_scores(
             "keywords": ["derivatives"],
         }
     ]
-    mathe_client.get_pdf_materials_for_question_topic_subtopic = lambda question_id: [
+    mathe_client.get_document_materials_for_question_topic_subtopic = lambda question_id: [
         {
             "material_id": 220,
             "material_redis_id": "220.pdf",
@@ -167,7 +167,7 @@ def test_compare_question_recommenders_runs_selected_strategies_only(monkeypatch
         "subtopic": "Derivatives",
         "keywords": [],
     }
-    mathe_client.get_pdf_materials_for_question_topic_subtopic = lambda question_id: [
+    mathe_client.get_document_materials_for_question_topic_subtopic = lambda question_id: [
         {
             "material_id": 220,
             "material_redis_id": "220.pdf",

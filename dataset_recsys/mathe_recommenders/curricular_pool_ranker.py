@@ -57,7 +57,7 @@ def rank_curricular_pool_candidates(
     question_embedding: list[float] | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Rank PDF materials restricted to the question's same topic/subtopic pool.
+    Rank document teaching materials restricted to the question's same topic/subtopic pool.
 
     The pool is a hard curricular filter. Materials outside the same
     topic/subtopic are never added. Ranking uses only keyword overlap and
@@ -71,7 +71,7 @@ def rank_curricular_pool_candidates(
     if not question_metadata:
         return []
 
-    pool = mathe_mirror_client.get_pdf_materials_for_question_topic_subtopic(
+    pool = mathe_mirror_client.get_document_materials_for_question_topic_subtopic(
         question_id
     )
     if not pool:
@@ -123,7 +123,7 @@ def recommend_from_curricular_pool(
     embedding_client: EmbeddingClient | None = None,
     question_embedding: list[float] | None = None,
 ) -> list[str]:
-    """Return top-k PDF material IDs from the same topic/subtopic pool."""
+    """Return top-k document material IDs from the same topic/subtopic pool."""
     candidates = rank_curricular_pool_candidates(
         question_id=question_id,
         question=question,

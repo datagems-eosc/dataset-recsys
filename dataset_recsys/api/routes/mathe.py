@@ -75,9 +75,9 @@ def _resolve_sync_status(sync_status: dict) -> str:
 @router.post(
     "/recommend",
     response_model=MatheRecsResponse,
-    summary="Get material recommendations for a math question",
+    summary="Get document material recommendations for a math question",
     description="""
-Given a MathE question ID, return a list of recommended PDF materials. 
+Given a MathE question ID, return a list of recommended document teaching materials.
     """,
 )
 async def get_recommendations(
@@ -145,10 +145,10 @@ async def get_recommendations(
         )
 
         if not recommended_material_ids:
-            log.warning(f"No PDF recommendations found for question_id {question_id}")
+            log.warning(f"No document recommendations found for question_id {question_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No PDF recommendations found for question_id {question_id}",
+                detail=f"No document recommendations found for question_id {question_id}",
             )
 
         filtered_recs = [

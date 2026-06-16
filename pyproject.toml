@@ -40,6 +40,7 @@ torch = [
 sentence-transformers = "3.0.1"
 yt-dlp = "^2026.3.17"
 faster-whisper = "^1.2.1"
+openpyxl = "^3.1.5"
 
 [tool.poetry.group.ir]
 optional = true

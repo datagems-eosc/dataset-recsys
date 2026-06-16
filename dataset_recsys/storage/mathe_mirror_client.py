@@ -189,6 +189,74 @@ class MatheMirrorClient:
             cur.execute(query, params)
             return list(cur.fetchall())
 
+    def get_evaluation_benchmark_questions(self) -> list[Dict[str, Any]]:
+        """
+        Retrieve one benchmark question per topic/subtopic pool.
+
+        Questions are selected from historical assessment activity. Within each
+        topic/subtopic pool, the selected question is the one attempted by the
+        largest number of distinct students; ties are broken by wrong-answer
+        rate and then total attempts.
+        """
+        query = """
+        WITH question_stats AS (
+            SELECT
+                q.id AS question_id,
+                q.question,
+                q.topic AS _topic_id,
+                q.subtopic AS _subtopic_id,
+                t.name AS topic_name,
+                s.name AS subtopic_name,
+                ARRAY_REMOVE(ARRAY_AGG(DISTINCT k.name), NULL) AS keywords,
+                COUNT(*) AS total_attempts,
+                COUNT(DISTINCT a.student_id) AS distinct_students,
+                1.0 - AVG(CASE WHEN a.answer = 1 THEN 1.0 ELSE 0.0 END) AS wrong_rate
+            FROM assessment a
+            JOIN platform__sna__questions q
+                ON q.id = a.question_id
+            LEFT JOIN platform__topic t
+                ON q.topic = t.id
+            LEFT JOIN platform__subtopic s
+                ON q.subtopic = s.id
+            LEFT JOIN platform_keyword_snaquestion qk
+                ON q.id = qk.platformsnaquestionid
+            LEFT JOIN platform__keywords k
+                ON qk.platformkeywordid = k.id
+            GROUP BY
+                q.id,
+                q.question,
+                q.topic,
+                q.subtopic,
+                t.name,
+                s.name
+        ),
+        ranked AS (
+            SELECT
+                *,
+                ROW_NUMBER() OVER (
+                    PARTITION BY _topic_id, _subtopic_id
+                    ORDER BY distinct_students DESC, wrong_rate DESC, total_attempts DESC
+                ) AS rn
+            FROM question_stats
+        )
+        SELECT
+            question_id,
+            question,
+            topic_name,
+            subtopic_name,
+            keywords,
+            total_attempts,
+            distinct_students,
+            wrong_rate
+        FROM ranked
+        WHERE rn = 1
+        ORDER BY distinct_students DESC, wrong_rate DESC;
+        """
+
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query)
+            return list(cur.fetchall())
+
     def get_pdf_seed_candidates(
         self,
         question_id: int,
@@ -248,7 +316,10 @@ class MatheMirrorClient:
         FROM platform__sna__questions q
         JOIN material_top_sub pool_mts
             ON q.topic = pool_mts.platformtopicid
-            AND q.subtopic = pool_mts.platformsubtopicid
+            AND (
+                q.subtopic = pool_mts.platformsubtopicid
+                OR (q.subtopic IS NULL AND pool_mts.platformsubtopicid IS NULL)
+            )
         JOIN platform_materials m
             ON pool_mts.platformmaterialid = m.id
             AND m.file_ext = 'pdf'
@@ -284,7 +355,10 @@ class MatheMirrorClient:
         FROM platform__sna__questions q
         JOIN material_top_sub pool_mts
             ON q.topic = pool_mts.platformtopicid
-            AND q.subtopic = pool_mts.platformsubtopicid
+            AND (
+                q.subtopic = pool_mts.platformsubtopicid
+                OR (q.subtopic IS NULL AND pool_mts.platformsubtopicid IS NULL)
+            )
         JOIN platform_materials m
             ON pool_mts.platformmaterialid = m.id
             AND m.type = 3
@@ -305,6 +379,40 @@ class MatheMirrorClient:
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, (question_id,))
             return cur.fetchall()
+
+    def get_most_popular_document_material_for_question_topic_subtopic(
+        self,
+        question_id: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Retrieve the most-clicked eligible document material for a question pool."""
+        query = """
+        SELECT
+            m.id AS material_id,
+            m.id::text || '.' || LOWER(m.file_ext) AS material_redis_id,
+            m.title,
+            LOWER(m.file_ext) AS file_ext,
+            m.clicks
+        FROM platform__sna__questions q
+        JOIN material_top_sub pool_mts
+            ON q.topic = pool_mts.platformtopicid
+            AND (
+                q.subtopic = pool_mts.platformsubtopicid
+                OR (q.subtopic IS NULL AND pool_mts.platformsubtopicid IS NULL)
+            )
+        JOIN platform_materials m
+            ON pool_mts.platformmaterialid = m.id
+            AND m.type = 3
+            AND LOWER(m.file_ext) IN ('pdf', 'docx', 'pptx')
+        WHERE q.id = %s
+        ORDER BY
+            m.clicks DESC,
+            m.id
+        LIMIT 1;
+        """
+
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query, (question_id,))
+            return cur.fetchone()
 
     def get_pdf_material_details(
         self,

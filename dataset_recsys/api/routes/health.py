@@ -7,7 +7,7 @@ from dataset_recsys.storage.recommendation_client import RecommendationClient
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/dataset-recsys", tags=["Service Health"])
 recs_client = RecommendationClient()
-
+embedding_client = EmbeddingClient()
 
 @router.get(
     "/health",
@@ -18,8 +18,6 @@ recs_client = RecommendationClient()
 async def health_check():
     try:
         is_redis_up = recs_client.check_connection()
-
-        embedding_client = EmbeddingClient()
         is_vector_db_up = embedding_client.check_connection()
 
         if not is_redis_up or not is_vector_db_up:
@@ -63,7 +61,8 @@ async def root():
 )
 async def get_schema():
     try:
-        embedding_client = EmbeddingClient()
+        if embedding_client is None:
+            raise HTTPException(status_code=503, detail="Embedding client not initialized")
         schema = embedding_client.get_schema_overview()
         return {"status": "ok", "schema": schema}
     except Exception as e:

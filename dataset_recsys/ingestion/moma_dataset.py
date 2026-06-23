@@ -2,7 +2,7 @@ from fastapi import HTTPException
 import requests
 from dataset_recsys.ingestion.fetch_gems_datasets import DatasetProfile
 
-MOMA_URL = "https://datagems-dev.scayle.es/dmm/api/v1/dataset/search"
+MOMA_URL = "https://datagems.scayle.es/dmm/api/v1/dataset/search"
 
 class MomaDataset:
     def __init__(self, user_token: str):

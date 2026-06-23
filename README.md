@@ -49,7 +49,7 @@ df = MathE().get()
 
 Clone both repositories:
 - [This repo - Recsys API](https://github.com/datagems-eosc/dataset-recsys/tree/main)
-- [Deployment repo - Recsys Backend](https://github.com/datagems-eosc/dataset-recsys-deployment-dev)
+- [Deployment repo - Recsys Backend](https://github.com/datagems-eosc/dataset-recsys-deployment-prod)
 
 After making your changes, commit and tag:
 ```bash
@@ -68,7 +68,7 @@ Monitor the image build progress in the [GitHub Actions tab](https://github.com/
 
 Navigate to the deployment repo:
 ```bash
-cd dataset-recsys-discovery-deployment-dev/
+cd dataset-recsys-discovery-deployment-prod/
 ```
 
 Ensure you are in the correct branch:

@@ -2,7 +2,7 @@
 Fetch all datasets from DataGEMS DMM API and extract the sc:Dataset nodes
 into a flat list (optionally with projection).
 
-This script calls: GET https://datagems-dev.scayle.es/dmm/api/v1/dataset/search
+This script calls: GET https://datagems.scayle.es/dmm/api/v1/dataset/search
   with optional `properties=...` projection params.
 """
 
@@ -18,7 +18,7 @@ import requests
 import os
 from dotenv import load_dotenv
 
-BASE_URL = "https://datagems-dev.scayle.es/dmm/api/v1"
+BASE_URL = "https://datagems.scayle.es/dmm/api/v1"
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OUTPUT_DIR = REPO_ROOT / "data" / "gems_datasets_metadata" / "moma"

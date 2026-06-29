@@ -6,6 +6,7 @@ from typing import Dict, Union
 import copy
 
 from fastapi import HTTPException, status
+from networkx import edges
 
 from dataset_recsys.api.analytical_patterns.models import RecsRequest, RecsResponse
 import uuid
@@ -83,18 +84,15 @@ def parse_recommendation_request_ap(analytical_pattern: Dict) -> RecsRequest:
     n_value = props.get("n", 10)
 
     input_edge = next(
-        (e for e in edges if e["from"] == operator_id and "input" in e["labels"]),
+        (e for e in edges if e["to"] == operator_id and "input" in e["labels"]),
         None,
     )
     if not input_edge:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Malformed AP Graph: No input dataset linked to the Recommender Operator. Expected edge direction: Operator --input--> seed dataset.",
+            detail="Malformed AP Graph: No input dataset linked to the Recommender Operator. Expected edge direction: seed dataset --input--> Operator.",
         )
-
-    # The 'to' field of the input edge is the UUID of the sc:Dataset node that serves as the seed for recommendations.
-    # This follows the AP/MoMa convention: Operator --input--> input entity.
-    entity_id = input_edge["to"]
+    entity_id = input_edge["from"]
 
     return RecsRequest(
         entity_id=entity_id,
@@ -134,12 +132,6 @@ def create_recommendation_response_ap(
     
     op_id = operator_node["id"]
 
-    # Normalize input edge direction to follow the AP/MoMa convention:
-    # Operator --input--> seed entity.
-    for edge in analytical_pattern["edges"]:
-        if "input" in edge["labels"] and edge["to"] == op_id:
-            edge["from"], edge["to"] = edge["to"], edge["from"]
-
     # Cleanup old output nodes
     old_output_nodes = [
         e["to"]
@@ -148,6 +140,9 @@ def create_recommendation_response_ap(
     ]
     for node_id in old_output_nodes:
         analytical_pattern = remove_node(analytical_pattern, node_id)
+        
+    current_time_iso = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+    operator_node["properties"]["endTime"] = current_time_iso
     
     # Inject recommendations
     for rank, rec in enumerate(search_response.recommendations, start=1):

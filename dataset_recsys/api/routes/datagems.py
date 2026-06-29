@@ -263,83 +263,83 @@ async def get_recommendations_ap(
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 
-@router.post(
-    "/recommend/ap/template",
-    summary="Get recommendations via Template-Based Analytical Pattern",
-    description="""
-Processes a Template-based Analytical Pattern (AP) request. 
-Reads core processing variables out of runtime metadata parameters, executes recommendations, 
-and updates the response metadata block without mutating the structural template graph.
-    """,
-    responses={
-        200: {
-            "description": "Successful metadata execution response rendering",
-            "content": {
-                "application/json": {
-                    "examples": {
-                        "Template Response": {
-                            "summary": "Example showing filled metadata outputs",
-                            "value": {
-                                "ap": {},  # Represents unchanged template graph
-                                "metadata": {
-                                    "execution_type": "RESPONSE",
-                                    "status": "SUCCESS",
-                                    "timestamp": "2026-06-02T13:08:02Z",
-                                    "parameters": {
-                                        "inputs": {"seed": "uuid-string", "n": 3},
-                                        "outputs": {"recommendations": ["uuid1", "uuid2"]}
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-        },
-        403: {
-            "description": "Authorization Failure",
-            "content": {"application/json": {}},
-        },
-        422: {
-            "description": "Malformed Input Metadata Parameters",
-            "content": {"application/json": {}},
-        },
-        500: {
-            "description": "Internal Server Error",
-            "content": {"application/json": {}},
-        },
-    },
-)
-async def get_recommendations_ap_template(
-    payload: dict = Body(
-        ...,
-        description="The Template Analytical Pattern request matching structural metadata schema.",
-    ),
-    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
-    token: str = Depends(security.oauth2_scheme),
-):
-    try:
-        # Extract operational payload parameters out of request metadata
-        search_request = parse_template_request_metadata(payload)
+# @router.post(
+#     "/recommend/ap/template",
+#     summary="Get recommendations via Template-Based Analytical Pattern",
+#     description="""
+# Processes a Template-based Analytical Pattern (AP) request. 
+# Reads core processing variables out of runtime metadata parameters, executes recommendations, 
+# and updates the response metadata block without mutating the structural template graph.
+#     """,
+#     responses={
+#         200: {
+#             "description": "Successful metadata execution response rendering",
+#             "content": {
+#                 "application/json": {
+#                     "examples": {
+#                         "Template Response": {
+#                             "summary": "Example showing filled metadata outputs",
+#                             "value": {
+#                                 "ap": {},  # Represents unchanged template graph
+#                                 "metadata": {
+#                                     "execution_type": "RESPONSE",
+#                                     "status": "SUCCESS",
+#                                     "timestamp": "2026-06-02T13:08:02Z",
+#                                     "parameters": {
+#                                         "inputs": {"seed": "uuid-string", "n": 3},
+#                                         "outputs": {"recommendations": ["uuid1", "uuid2"]}
+#                                     }
+#                                 }
+#                             }
+#                         }
+#                     }
+#                 }
+#             },
+#         },
+#         403: {
+#             "description": "Authorization Failure",
+#             "content": {"application/json": {}},
+#         },
+#         422: {
+#             "description": "Malformed Input Metadata Parameters",
+#             "content": {"application/json": {}},
+#         },
+#         500: {
+#             "description": "Internal Server Error",
+#             "content": {"application/json": {}},
+#         },
+#     },
+# )
+# async def get_recommendations_ap_template(
+#     payload: dict = Body(
+#         ...,
+#         description="The Template Analytical Pattern request matching structural metadata schema.",
+#     ),
+#     claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
+#     token: str = Depends(security.oauth2_scheme),
+# ):
+#     try:
+#         # Extract operational payload parameters out of request metadata
+#         search_request = parse_template_request_metadata(payload)
         
-        # Invoke backend recommendation processing layer directly
-        search_response = await get_recommendations(
-            entity_id=search_request.entity_id,
-            n=search_request.n,
-            claims=claims,
-            token=token,
-        )
+#         # Invoke backend recommendation processing layer directly
+#         search_response = await get_recommendations(
+#             entity_id=search_request.entity_id,
+#             n=search_request.n,
+#             claims=claims,
+#             token=token,
+#         )
         
-        # Build the dynamic response wrapping payload
-        updated_template_ap = create_template_response_metadata(payload, search_response)
+#         # Build the dynamic response wrapping payload
+#         updated_template_ap = create_template_response_metadata(payload, search_response)
         
-        return updated_template_ap
+#         return updated_template_ap
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error processing template-based AP request: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, 
-            detail=f"An unexpected error occurred during template processing: {e}"
-        )
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error processing template-based AP request: {e}", exc_info=True)
+#         raise HTTPException(
+#             status_code=500, 
+#             detail=f"An unexpected error occurred during template processing: {e}"
+#         )

@@ -23,12 +23,14 @@ async def test_recommendation_ap_flow(sample_ap_request):
     """
     async with httpx.AsyncClient(base_url=BASE_URL) as client:
         # Call the endpoint
-        response = await client.post("/dataset-recsys/recommend/ap", json=sample_ap_request)
+        response = await client.post("/test/recommend/ap", json=sample_ap_request)
         
         # Check HTTP status
         assert response.status_code == 200, f"Request failed: {response.text}"
         
         updated_ap = response.json()
+        print("\nUpdated Analytical Pattern Response:")
+        print(json.dumps(updated_ap, indent=2))
         nodes = updated_ap["nodes"]
         edges = updated_ap["edges"]
 

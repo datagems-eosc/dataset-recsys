@@ -65,9 +65,10 @@ def parse_recommendation_request_ap(analytical_pattern: Dict) -> RecsRequest:
     """
     # Access the nested ap key from the JSON body
     # ap = analytical_pattern.get("ap", {})
+    ap_graph = analytical_pattern.get("ap", analytical_pattern)
     
-    nodes = analytical_pattern.get("nodes", [])
-    edges = analytical_pattern.get("edges", [])
+    nodes = ap_graph.get("nodes", [])
+    edges = ap_graph.get("edges", [])
 
     operator_node = next(
         (n for n in nodes if "DatasetRecommender_Operator" in n["labels"]),
@@ -109,9 +110,10 @@ def create_recommendation_response_ap(
     Recommended datasets are added as `sc:Dataset` nodes and linked to the
     recommender operator through ranked `output` edges.
     """
-    analytical_pattern = copy.deepcopy(analytical_pattern)
+    is_wrapped = "ap" in analytical_pattern
+    ap_graph = copy.deepcopy(analytical_pattern.get("ap", analytical_pattern))
 
-    ap_node = get_node_from_label(analytical_pattern, "Analytical_Pattern")
+    ap_node = get_node_from_label(ap_graph, "Analytical_Pattern")
     if ap_node:
         if "properties" not in ap_node:
             ap_node["properties"] = {}
@@ -122,7 +124,7 @@ def create_recommendation_response_ap(
         ap_node["properties"]["endTime"] = current_time_iso
 
     # Locate operator
-    operator_node = get_node_from_label(analytical_pattern, "DatasetRecommender_Operator")
+    operator_node = get_node_from_label(ap_graph, "DatasetRecommender_Operator")
     if not operator_node:
         # If it was there during parsing but gone now, something went very wrong during processing
         raise HTTPException(
@@ -135,11 +137,11 @@ def create_recommendation_response_ap(
     # Cleanup old output nodes
     old_output_nodes = [
         e["to"]
-        for e in analytical_pattern["edges"]
+        for e in ap_graph["edges"]
         if e["from"] == op_id and "output" in e["labels"]
     ]
     for node_id in old_output_nodes:
-        analytical_pattern = remove_node(analytical_pattern, node_id)
+        ap_graph = remove_node(ap_graph, node_id)
         
     current_time_iso = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
     operator_node["properties"]["endTime"] = current_time_iso
@@ -155,17 +157,17 @@ def create_recommendation_response_ap(
             }
         }
 
-        analytical_pattern["nodes"].append(new_node)
+        ap_graph["nodes"].append(new_node)
 
         # Add output edge
-        analytical_pattern["edges"].append({
+        ap_graph["edges"].append({
             "from": op_id,
             "to": node_id,
             "labels": ["output"],
             "properties": {"rank": rank}
         })
 
-    return analytical_pattern
+    return {"ap": ap_graph} if is_wrapped else ap_graph
 
 ### Template based handling of request and response metadata for APs that follow a fixed structure and only require parameter extraction and response injection without graph transformations.
 def parse_template_request_metadata(request_body: dict) -> RecsRequest:

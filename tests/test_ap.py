@@ -31,8 +31,9 @@ async def test_recommendation_ap_flow(sample_ap_request):
         updated_ap = response.json()
         print("\nUpdated Analytical Pattern Response:")
         print(json.dumps(updated_ap, indent=2))
-        nodes = updated_ap["nodes"]
-        edges = updated_ap["edges"]
+        is_wrapped = "ap" in updated_ap
+        nodes = updated_ap["nodes"] if not is_wrapped else updated_ap["ap"]["nodes"]
+        edges = updated_ap["edges"] if not is_wrapped else updated_ap["ap"]["edges"]
 
         # Verify recommended dataset nodes
         # We expect recommendation sc:Dataset nodes

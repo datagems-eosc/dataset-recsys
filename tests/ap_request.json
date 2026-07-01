@@ -1,78 +1,80 @@
 {
-  "nodes": [
-    {
-      "id": "c5a1c4b1-65a0-4a07-9d2f-9f7b6a0c1c1e",
-      "labels": ["User"],
-      "properties": {}
-    },
-    {
-      "id": "a2a7d7a7-47e2-4b0e-9e3a-9b2e9c1a5b20",
-      "labels": ["Task"],
-      "properties": {
-        "name": "Get recommendations",
-        "description": "Retrieve the top-N recommendations for a given dataset."
-      }
-    },
-    {
-      "id": "0d7c4d9c-2c18-4c6d-9b7b-48b5fdf7c9a7",
-      "labels": ["Analytical_Pattern"],
-      "properties": {
-        "name": "Dataset-to-Dataset Recommendations AP",
-        "description": "Retrieve top-N recommendations for a given dataset.",
-        "process": "recommend",
-        "publishedDate": "2026-01-21",
-        "startTime": "2026-06-29T10:43:17.829Z"
-      }
-    },
-    {
-      "id": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
-      "labels": ["DatasetRecommender_Operator", "Operator"],
-      "properties": {
-        "name": "GetRecommendations Operator",
-        "description": "Dataset-to-Dataset recommender operator.",
-        "command": "get_recommendations",
-        "n": 2,
-        "startTime": "2026-06-29T10:43:17.829Z"           
-      }
-    },
-    {
-      "id": "07382b91-5bc5-42f9-8391-33adc2460c19",
-      "labels": ["sc:Dataset"],
-      "properties": {
-        "description": "The seed dataset used as the basis for recommendations."
-      }
-    }, 
+  "ap": {
+    "nodes": [
       {
-          "id": "56dfb50e-ae65-4a37-ad48-c150cc17303e", 
-          "labels": ["sc:Dataset"], 
-          "properties": {}      
+        "id": "c5a1c4b1-65a0-4a07-9d2f-9f7b6a0c1c1e",
+        "labels": ["User"], 
+        "properties": {}
+      },
+      {
+        "id": "a2a7d7a7-47e2-4b0e-9e3a-9b2e9c1a5b20",
+        "labels": ["Task"],
+        "properties": {
+          "name": "Get recommendations",
+          "description": "Retrieve the top-N recommendations for a given dataset."
+        }
+      },
+      {
+        "id": "0d7c4d9c-2c18-4c6d-9b7b-48b5fdf7c9a7",
+        "labels": ["Analytical_Pattern"],
+        "properties": {
+          "name": "Dataset-to-Dataset Recommendations AP",
+          "description": "Retrieve top-N recommendations for a given dataset.",
+          "process": "recommend",
+          "publishedDate": "2026-01-21",
+          "startTime": "2026-06-29T10:43:17.829Z"
+        }
+      },
+      {
+        "id": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
+        "labels": ["DatasetRecommender_Operator", "Operator"],
+        "properties": {
+          "name": "GetRecommendations Operator",
+          "description": "Dataset-to-Dataset recommender operator.",
+          "command": "get_recommendations",
+          "n": 2, 
+          "startTime": "2026-06-29T10:43:17.829Z"
+        }
+      },
+      {
+        "id": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
+        "labels": ["sc:Dataset"],
+        "properties": {
+          "description": "The seed dataset used as the basis for recommendations."
+        }
+      }, 
+      {
+        "id": "56dfb50e-ae65-4a37-ad48-c150cc17303e", 
+        "labels": ["sc:Dataset"], 
+        "properties": {}      
       }
-  ],
-  "edges": [
-    {
-      "from": "c5a1c4b1-65a0-4a07-9d2f-9f7b6a0c1c1e",
-      "to": "a2a7d7a7-47e2-4b0e-9e3a-9b2e9c1a5b20",
-      "labels": ["request"]
-    },
-    {
-      "from": "a2a7d7a7-47e2-4b0e-9e3a-9b2e9c1a5b20",
-      "to": "0d7c4d9c-2c18-4c6d-9b7b-48b5fdf7c9a7",
-      "labels": ["is_accomplished"]
-    },
-    {
-      "from": "0d7c4d9c-2c18-4c6d-9b7b-48b5fdf7c9a7",
-      "to": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
-      "labels": ["consist_of"]
-    },
-    {
-      "from": "07382b91-5bc5-42f9-8391-33adc2460c19",
-      "to": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
-      "labels": ["input"]
-    },
-    {
-      "from": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
-      "to": "56dfb50e-ae65-4a37-ad48-c150cc17303e",
-      "labels": ["output"]
-    }
-  ]
+    ],
+    "edges": [
+      {
+        "from": "c5a1c4b1-65a0-4a07-9d2f-9f7b6a0c1c1e",
+        "to": "a2a7d7a7-47e2-4b0e-9e3a-9b2e9c1a5b20",
+        "labels": ["request"]
+      },
+      {
+        "from": "a2a7d7a7-47e2-4b0e-9e3a-9b2e9c1a5b20",
+        "to": "0d7c4d9c-2c18-4c6d-9b7b-48b5fdf7c9a7",
+        "labels": ["is_accomplished_by"]
+      },
+      {
+        "from": "0d7c4d9c-2c18-4c6d-9b7b-48b5fdf7c9a7",
+        "to": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
+        "labels": ["consist_of"]
+      },
+      {
+        "from": "9b25bc46-8bd3-4f7f-94b4-52dbc38c130f",
+        "to": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
+        "labels": ["input"]
+      }, 
+      {
+        "from": "4b3a8f2e-5d7a-4a0b-9fb1-3c4c0f3a8f10",
+        "to": "56dfb50e-ae65-4a37-ad48-c150cc17303e",
+        "labels": ["output"]
+      }
+    ]
+  }
 }

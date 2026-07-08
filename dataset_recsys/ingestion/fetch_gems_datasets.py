@@ -2,7 +2,7 @@
 Fetch all datasets from DataGEMS DMM API and extract the sc:Dataset nodes
 into a flat list (optionally with projection).
 
-This script calls: GET https://datagems.scayle.es/dmm/api/v1/dataset/search
+This script calls: GET https://app.datagems.eu/dmm/api/v1/dataset/search
   with optional `properties=...` projection params.
 """
 

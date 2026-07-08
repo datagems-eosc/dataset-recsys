@@ -10,11 +10,11 @@ class Settings(BaseSettings):
 
     # OIDC Authentication
     OIDC_ISSUER_URL: str = os.getenv(
-        "OIDC_ISSUER_URL", "https://datagems.scayle.es/oauth/realms/prod"
+        "OIDC_ISSUER_URL", "https://app.datagems.eu/oauth/realms/prod"
     )
     OIDC_AUDIENCE: str = os.getenv("OIDC_AUDIENCE", "dataset-recsys-api")
     GATEWAY_API_URL: str = os.getenv(
-        "GATEWAY_API_URL", "https://datagems.scayle.es/gw"
+        "GATEWAY_API_URL", "https://app.datagems.eu/gw"
     )
 
     @property

@@ -1,3 +1,3 @@
 Welcome to the documentation for the Dataset Recommendation Service.
 
-[OAD(https://datagems.scayle.es/dataset-recsys/openapi.json)]
+[OAD(https://app.datagems.eu/dataset-recsys/openapi.json)]

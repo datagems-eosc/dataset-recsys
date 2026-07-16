@@ -23,7 +23,8 @@ def write_request_log_to_redis(recs_client, user_id: str | None, action: str, en
             "duration_ms": duration_ms,
             "timestamp": now
         }
-        r = recs_client.client  
+        # Updated to use self.r from RecommendationClient
+        r = recs_client.r  
         r.zadd(REDIS_LOGS_KEY, {json.dumps(log_payload): now})
     except Exception as e:
         logger.error(f"Failed to write log to Redis: {e}")
@@ -31,7 +32,8 @@ def write_request_log_to_redis(recs_client, user_id: str | None, action: str, en
 def purge_expired_redis_logs(recs_client):
     """Deletes Redis logs older than 6 months."""
     try:
-        r = recs_client.client
+        # Updated to use self.r from RecommendationClient
+        r = recs_client.r
         six_months_ago = time.time() - SIX_MONTHS_SECONDS
         deleted_count = r.zremrangebyscore(REDIS_LOGS_KEY, 0, six_months_ago)
         if deleted_count > 0:

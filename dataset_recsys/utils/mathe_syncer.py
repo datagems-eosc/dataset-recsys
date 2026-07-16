@@ -48,7 +48,6 @@ class MathE_Syncer:
 
         self.status_file = self._base_dir / "sync_status.json"
         self.cookie_file = self._base_dir / "cookies.txt"
-        self.data: Optional[List[Dict]] = None
         
         # Claude 4.5 Global Configuration
         self.model_id = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
@@ -178,7 +177,7 @@ class MathE_Syncer:
                             existing_ids.add(video_id)
                         else:
                             # Self-healing backup check for tracking cache mapping
-                            entry = state_map[video_id]
+                            entry = state_map.get(video_id)
                             if entry and entry.get("status") == "pending" and backup_text_file.exists():
                                 with open(backup_text_file, "r", encoding="utf-8") as f:
                                     ocr_text = f.read()
@@ -204,7 +203,7 @@ class MathE_Syncer:
                         
                         # Recover sandboxed file if it missing from /tmp on server reload
                         if original_id in existing_ids:
-                            entry = state_map[original_id]
+                            entry = state_map.get(original_id)
                             if entry and entry.get("status") == "pending" and not Path(entry.get("internal_pdf_path", "")).exists():
                                 print(f"Regenerating vanished temporary sandboxed PDF for: {f.name}")
                                 if self._libreoffice_convert(f, tmp_build_dir):
@@ -235,7 +234,7 @@ class MathE_Syncer:
                         
                         # Recover sandboxed file if it missing from /tmp on server reload
                         if original_id in existing_ids:
-                            entry = state_map[original_id]
+                            entry = state_map.get(original_id)
                             if entry and entry.get("status") == "pending" and not Path(entry.get("internal_pdf_path", "")).exists():
                                 print(f"Regenerating vanished temporary sandboxed PDF for: {f.name}")
                                 if self._libreoffice_convert(f, tmp_build_dir):
@@ -341,7 +340,10 @@ class MathE_Syncer:
         try:
             print("Starting sync/process lifecycle...")
             self._init_data()
-            print(f"Discovered {len(self.data)} total entries, with {self.count_available_pdfs()} available PDFs.")
+            # --- TO THIS SAFE BLOCK ---
+            with self._get_sqlite_conn() as conn:
+                total_db_entries = conn.execute("SELECT COUNT(*) FROM sync_entries").fetchone()[0]
+            print(f"Discovered {total_db_entries} total entries, with {self.count_available_pdfs()} available PDFs.")
             # limit = 1 # For testing, process only 1 file at a time. Remove or adjust this for full batch processing.
             self.run_hybrid_batch_processing(limit=limit)
             print("Lifecycle complete.")

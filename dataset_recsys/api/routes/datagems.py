@@ -37,6 +37,12 @@ ap_examples_data = load_json_file(AP_DOCS_VALID_EXAMPLES_PATH)
 ap_errors_data = load_json_file(AP_DOCS_ERROR_EXAMPLES_PATH)
 ap_request_example = load_json_file(AP_REQUEST_EXAMPLE_PATH)
 
+from dataset_recsys.utils.redis_logger import start_daily_purge_scheduler, write_request_log_to_redis
+@router.on_event("startup")
+async def startup_event():
+    # Spawns the background thread loop once as the pod initializes
+    start_daily_purge_scheduler(recs_client)
+
 @router.post(
     "/recommend",
     response_model=RecsResponse,
@@ -112,6 +118,16 @@ async def get_recommendations(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Entity ID is required.",
         )
+        
+        write_request_log_to_redis(
+            recs_client,
+            user_id=user_subject,
+            action="get_recommendations",
+            entity_id=request.entity_id,
+            requested_n=request.n,
+            status_code=422,
+            duration_ms=(time.time() - start_time) * 1000,
+        )
 
     lookup_id = request.entity_id
     try:
@@ -171,6 +187,17 @@ async def get_recommendations(
         log.info(
             f"Returning {len(filtered_recs)} recs for {lookup_id} in {query_time:.3f}s"
         )
+        
+        # Write the request log to Redis
+        write_request_log_to_redis(
+            recs_client,
+            user_id=user_subject,
+            action="get_recommendations",
+            entity_id=lookup_id,
+            requested_n=request.n,
+            status_code=200,
+            duration_ms=query_time * 1000,
+        )
 
         return RecsResponse(
             entity_id=request.entity_id,
@@ -180,6 +207,15 @@ async def get_recommendations(
         raise
     except Exception as e:
         log.error("Unexpected error", error=str(e), exc_info=True)
+        write_request_log_to_redis(
+            recs_client,
+            user_id=user_subject,
+            action="get_recommendations",
+            entity_id=lookup_id,
+            requested_n=request.n,
+            status_code=500,
+            duration_ms=(time.time() - start_time) * 1000,
+        )
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 

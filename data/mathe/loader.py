@@ -1,6 +1,7 @@
 from typing import List, Dict, Optional
 from pathlib import Path
 import json
+import sqlite3
 
 import pandas as pd
 from huggingface_hub import snapshot_download
@@ -30,21 +31,15 @@ class MathE:
             print("Assets stored under:", local_dir)
             self._base_dir = Path(local_dir) / "mathe"
 
-        ocr_path = self._base_dir / "data.json"
-        with open(ocr_path, "r", encoding="utf-8") as f:
-            self.data = json.load(f)
+        self.db_path = self._base_dir / "syncer.db"
+        if not self.db_path.exists():
+            raise FileNotFoundError(f"SQLite database not found at {self.db_path}. Run the syncer first.")
 
-        # Keep only entries whose PDF filename is numeric (e.g. '962.pdf')
-        self.data = [
-            entry
-            for entry in self.data
-            if (
-                (name := Path(entry["id"]).name).lower().endswith(".pdf")
-                and name[:-4].isnumeric()
-            )
-        ]
-
-        print(len(self.data), "numeric materials found")
+    def _get_sqlite_conn(self):
+        """Helper to create a read-only or standard connection to the SQLite database."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     def get_info(self) -> Dict[str, str]:
         """
@@ -60,7 +55,7 @@ class MathE:
                 "intended to support content-based educational recommendations."
             ),
             "source": "DARELab/cross-dataset-assets (Hugging Face dataset, 'mathe' folder)",
-            "formats": ["pdf", "json"],
+            "formats": ["pdf", "sqlite"],
             "dataset_folder": str(self._base_dir) if self._base_dir is not None else "NOT_YET_LOADED",
         }
 
@@ -75,18 +70,63 @@ class MathE:
                 - material_id: file name (e.g., '56.pdf')
                 - pdf_path:    absolute local path to the PDF
         """
-        if self.data is None:
+        if self.db_path is None:
             self._init_data()
-        df = pd.DataFrame(self.data)
+
+        # Query entries where type is a document, status is completed, and ID is a numeric pdf filename
+        query = """
+            SELECT id, claude_ocr_text AS contents, internal_pdf_path AS pdf_path
+            FROM sync_entries 
+            WHERE type = 'document' 
+              AND status = 'completed'
+        """
+
+        with self._get_sqlite_conn() as conn:
+            df = pd.read_sql_query(query, conn)
+
+        if df.empty:
+            return pd.DataFrame(columns=["id", "contents", "material_id", "pdf_path"])
+            
+        def is_valid_numeric_pdf(id_val: str) -> bool:
+            p = Path(id_val)
+            return p.suffix.lower() == ".pdf" and p.stem.isnumeric()
+
+        df = df[df["id"].apply(is_valid_numeric_pdf)].copy()
+        
+        # Populate clean fields
         df["material_id"] = df["id"].apply(lambda p: Path(p).name)
-        df["pdf_path"] = df["id"].apply(lambda p: str(self._base_dir / p))
-        df = df.replace("", pd.NA)
-        return df
+        
+        # Overwrite relative path logic to ensure absolute paths resolve locally if needed
+        # (Fall back to self._base_dir / id if internal_pdf_path isn't absolute)
+        def get_absolute_path(row):
+            local_p = Path(row["pdf_path"]) if row["pdf_path"] else Path(row["id"])
+            if local_p.is_absolute():
+                return str(local_p)
+            return str(self._base_dir / local_p)
+
+        df["pdf_path"] = df.apply(get_absolute_path, axis=1)
+        
+        print(len(df), "numeric materials found")
+        return df.replace("", pd.NA)
 
     def get_raw(self) -> List[Dict]:
         """
-        Returns the raw JSON list as loaded from data.json.
+        Returns the raw SQLite records as loaded from the database.
         """
-        if self.data is None:
+        if self.db_path is None:
             self._init_data()
-        return list(self.data)
+            
+        with self._get_sqlite_conn() as conn:
+            rows = conn.execute("SELECT * FROM sync_entries").fetchall()
+            
+        raw_list = [dict(row) for row in rows]
+        
+        # Keep only entries whose PDF filename is numeric
+        return [
+            entry
+            for entry in raw_list
+            if (
+                (name := Path(entry["id"]).name).lower().endswith(".pdf")
+                and name[:-4].isnumeric()
+            )
+        ]

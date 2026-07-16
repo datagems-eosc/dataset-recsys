@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import pandas as pd
 from pathlib import Path
 from typing import Any, List, Dict, Optional
@@ -41,7 +42,10 @@ class MathE_Syncer:
         self._ppt_dir = self._base_dir / "pptxs/"
         self._transcript_dir = self._base_dir / "transcripts"
         self._transcript_dir.mkdir(parents=True, exist_ok=True)
-        self.json_file = self._base_dir / "data.json"
+
+        self.db_path = self._base_dir / "syncer.db"
+        self._init_db()        
+
         self.status_file = self._base_dir / "sync_status.json"
         self.cookie_file = self._base_dir / "cookies.txt"
         self.data: Optional[List[Dict]] = None
@@ -55,6 +59,27 @@ class MathE_Syncer:
         self.is_running = False  # Add this line        
         self.keep_running = True
         signal.signal(signal.SIGTERM, self._handle_exit)                
+
+    def _get_sqlite_conn(self):
+        """Returns a connection context manager yielding dict-like rows."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row  # Allows accessing columns by name
+        return conn
+
+    def _init_db(self):
+        """Creates the sync tracking table if it doesn't already exist."""
+        with self._get_sqlite_conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sync_entries (
+                    id TEXT PRIMARY KEY,
+                    type TEXT NOT NULL,
+                    source_value TEXT,
+                    internal_pdf_path TEXT,
+                    claude_ocr_text TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending'
+                )
+            """)
+            conn.commit()
 
     def _handle_exit(self, signum, frame):
         print("Received SIGTERM, finishing current file...")
@@ -103,20 +128,16 @@ class MathE_Syncer:
         raise ValueError(f"Could not parse valid YouTube identifier: {link_value}")
 
     def _init_data(self) -> None:
-        """Loads data.json and performs discovery across designated raw inputs."""
-        if self.json_file.exists():
-            with open(self.json_file, "r", encoding="utf-8") as f:
-                self.data = json.load(f)
-        else:
-            self.data = []
-
-        state_map = {entry["id"]: entry for entry in self.data if isinstance(entry, dict) and "id" in entry}
-        existing_ids = set(state_map.keys())
-        new_found = False
-
+        """Loads and processes discovery directly into the SQLite Engine."""
         if not self._base_dir.exists():
             print(f"MathE base directory does not exist: {self._base_dir}")
             return
+
+        # Query existing state indexes directly from local DB
+        with self._get_sqlite_conn() as conn:
+            rows = conn.execute("SELECT id, status, internal_pdf_path FROM sync_entries").fetchall()
+            state_map = {row["id"]: {"status": row["status"], "internal_pdf_path": row["internal_pdf_path"]} for row in rows}
+            existing_ids = set(state_map.keys())
 
         # --- ROUTE 1: Discover Video Streams from PostgreSQL ---
         print("Syncing video assets from PostgreSQL platform registry...")
@@ -133,141 +154,122 @@ class MathE_Syncer:
             print(f"Warning: PostgreSQL lookup failed. Relying on local data cache. Exception: {e}")
             db_links = []
 
-        for link in db_links:
-            if self._is_youtube_asset(link):
-                try:
-                    video_id = self._extract_video_id(link)
-                    
-                    # If a transcript file already exists in the folder, sync state instantly
-                    backup_text_file = self._transcript_dir / f"{video_id}.txt"
-                    
-                    if video_id not in existing_ids:
-                        status = "completed" if backup_text_file.exists() else "pending"
-                        ocr_text = None
+        with self._get_sqlite_conn() as conn:
+            for link in db_links:
+                if self._is_youtube_asset(link):
+                    try:
+                        video_id = self._extract_video_id(link)
                         
-                        if backup_text_file.exists():
-                            with open(backup_text_file, "r", encoding="utf-8") as f:
-                                ocr_text = f.read()
+                        # If a transcript file already exists in the folder, sync state instantly
+                        backup_text_file = self._transcript_dir / f"{video_id}.txt"
+                        
+                        if video_id not in existing_ids:
+                            status = "completed" if backup_text_file.exists() else "pending"
+                            ocr_text = None
+                            
+                            if backup_text_file.exists():
+                                with open(backup_text_file, "r", encoding="utf-8") as f:
+                                    ocr_text = f.read()
 
-                        entry = {
-                            "id": video_id,
-                            "type": "audio",
-                            "source_value": link,
-                            "claude_ocr_text": ocr_text,
-                            "status": status
-                        }
-                        self.data.append(entry)
-                        state_map[video_id] = entry
-                        existing_ids.add(video_id)
-                        new_found = True
-                    else:
-                        # Self-healing backup check for tracking cache mapping
-                        entry = state_map[video_id]
-                        if entry.get("status") == "pending" and backup_text_file.exists():
-                            with open(backup_text_file, "r", encoding="utf-8") as f:
-                                entry["claude_ocr_text"] = f.read()
-                            entry["status"] = "completed"
-                            new_found = True
-                except ValueError:
-                    continue
+                            conn.execute(
+                                "INSERT INTO sync_entries (id, type, source_value, claude_ocr_text, status) VALUES (?, ?, ?, ?, ?)",
+                                (video_id, "audio", link, ocr_text, status)
+                            )
+                            existing_ids.add(video_id)
+                        else:
+                            # Self-healing backup check for tracking cache mapping
+                            entry = state_map[video_id]
+                            if entry.get("status") == "pending" and backup_text_file.exists():
+                                with open(backup_text_file, "r", encoding="utf-8") as f:
+                                    ocr_text = f.read()
+                                conn.execute(
+                                    "UPDATE sync_entries SET status = 'completed', claude_ocr_text = ? WHERE id = ?",
+                                    (ocr_text, video_id)
+                                )
+                    except ValueError:
+                        continue
+            conn.commit()
 
         # --- ROUTE 2: Discover Structural Office Documents via Local Directories ---
         tmp_build_dir = Path("/tmp/libo_out")
         tmp_build_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Preprocess Word documents -> Store location context as local /tmp
-        if self._docx_dir.exists():
-            for f in self._docx_dir.iterdir():
-                if f.is_file() and f.suffix.lower() == ".docx" and f.stem.isnumeric():
-                    original_id = f.name  # e.g., "3.docx"
-                    local_pdf_target = tmp_build_dir / f"{f.stem}_docx.pdf"                    
-                    
-                    # Recover sandboxed file if it missing from /tmp on server reload
-                    if original_id in existing_ids:
-                        entry = state_map[original_id]
-                        if entry.get("status") == "pending" and not Path(entry.get("internal_pdf_path", "")).exists():
-                            print(f"Regenerating vanished temporary sandboxed PDF for: {f.name}")
-                            if self._libreoffice_convert(f, tmp_build_dir):
-                                (tmp_build_dir / f"{f.stem}.pdf").rename(local_pdf_target)
-                    else:
-                        if not local_pdf_target.exists():
-                            print(f"Converting DOCX to local memory sandbox: {f.name}")
-                            if self._libreoffice_convert(f, tmp_build_dir):
-                                try:
+        with self._get_sqlite_conn() as conn:
+            # 1. Preprocess Word documents -> Store location context as local /tmp
+            if self._docx_dir.exists():
+                for f in self._docx_dir.iterdir():
+                    if f.is_file() and f.suffix.lower() == ".docx" and f.stem.isnumeric():
+                        original_id = f.name  # e.g., "3.docx"
+                        local_pdf_target = tmp_build_dir / f"{f.stem}_docx.pdf"                    
+                        
+                        # Recover sandboxed file if it missing from /tmp on server reload
+                        if original_id in existing_ids:
+                            entry = state_map[original_id]
+                            if entry.get("status") == "pending" and not Path(entry.get("internal_pdf_path", "")).exists():
+                                print(f"Regenerating vanished temporary sandboxed PDF for: {f.name}")
+                                if self._libreoffice_convert(f, tmp_build_dir):
                                     (tmp_build_dir / f"{f.stem}.pdf").rename(local_pdf_target)
-                                except Exception as e:
-                                    print(f"❌ Failed to rename local PDF for {f.name}: {e}")
-                                    continue
+                        else:
+                            if not local_pdf_target.exists():
+                                print(f"Converting DOCX to local memory sandbox: {f.name}")
+                                if self._libreoffice_convert(f, tmp_build_dir):
+                                    try:
+                                        (tmp_build_dir / f"{f.stem}.pdf").rename(local_pdf_target)
+                                    except Exception as e:
+                                        print(f"❌ Failed to rename local PDF for {f.name}: {e}")
+                                        continue
 
-                        print(f"Queueing converted DOCX target: {original_id}")
-                        self.data.append({
-                            "id": original_id,
-                            "type": "document",
-                            "internal_pdf_path": str(local_pdf_target),
-                            "claude_ocr_text": None,
-                            "status": "pending"
-                        })
-                        existing_ids.add(original_id)
-                        new_found = True
+                            print(f"Queueing converted DOCX target: {original_id}")
+                            conn.execute(
+                                "INSERT INTO sync_entries (id, type, internal_pdf_path, status) VALUES (?, ?, ?, ?)",
+                                (original_id, "document", str(local_pdf_target), "pending")
+                            )
+                            existing_ids.add(original_id)
 
-        # 2. Preprocess PowerPoint presentations -> Store location context as local /tmp
-        if self._ppt_dir.exists():
-            for f in self._ppt_dir.iterdir():
-                if f.is_file() and f.suffix.lower() == ".pptx" and f.stem.isnumeric():
-                    original_id = f.name  # e.g., "3.pptx"
-                    local_pdf_target = tmp_build_dir / f"{f.stem}_pptx.pdf"
-                    
-                    # Recover sandboxed file if it missing from /tmp on server reload
-                    if original_id in existing_ids:
-                        entry = state_map[original_id]
-                        if entry.get("status") == "pending" and not Path(entry.get("internal_pdf_path", "")).exists():
-                            print(f"Regenerating vanished temporary sandboxed PDF for: {f.name}")
-                            if self._libreoffice_convert(f, tmp_build_dir):
-                                (tmp_build_dir / f"{f.stem}.pdf").rename(local_pdf_target)
-                    else:
-                        if not local_pdf_target.exists():
-                            print(f"Converting PPTX to local memory sandbox: {f.name}")
-                            if self._libreoffice_convert(f, tmp_build_dir):
-                                try:
+            # 2. Preprocess PowerPoint presentations -> Store location context as local /tmp
+            if self._ppt_dir.exists():
+                for f in self._ppt_dir.iterdir():
+                    if f.is_file() and f.suffix.lower() == ".pptx" and f.stem.isnumeric():
+                        original_id = f.name  # e.g., "3.pptx"
+                        local_pdf_target = tmp_build_dir / f"{f.stem}_pptx.pdf"
+                        
+                        # Recover sandboxed file if it missing from /tmp on server reload
+                        if original_id in existing_ids:
+                            entry = state_map[original_id]
+                            if entry.get("status") == "pending" and not Path(entry.get("internal_pdf_path", "")).exists():
+                                print(f"Regenerating vanished temporary sandboxed PDF for: {f.name}")
+                                if self._libreoffice_convert(f, tmp_build_dir):
                                     (tmp_build_dir / f"{f.stem}.pdf").rename(local_pdf_target)
-                                except Exception as e:
-                                    print(f"❌ Failed to rename local PDF for {f.name}: {e}")
-                                    continue
+                        else:
+                            if not local_pdf_target.exists():
+                                print(f"Converting PPTX to local memory sandbox: {f.name}")
+                                if self._libreoffice_convert(f, tmp_build_dir):
+                                    try:
+                                        (tmp_build_dir / f"{f.stem}.pdf").rename(local_pdf_target)
+                                    except Exception as e:
+                                        print(f"❌ Failed to rename local PDF for {f.name}: {e}")
+                                        continue
 
-                        print(f"Queueing converted PPTX target: {original_id}")
-                        self.data.append({
-                            "id": original_id,
-                            "type": "document",
-                            "internal_pdf_path": str(local_pdf_target),
-                            "claude_ocr_text": None,
-                            "status": "pending"
-                        })
-                        existing_ids.add(original_id)
-                        new_found = True
+                            print(f"Queueing converted PPTX target: {original_id}")
+                            conn.execute(
+                                "INSERT INTO sync_entries (id, type, internal_pdf_path, status) VALUES (?, ?, ?, ?)",
+                                (original_id, "document", str(local_pdf_target), "pending")
+                            )
+                            existing_ids.add(original_id)
 
-        # 3. Discover native pre-existing material PDFs directly from server directory
-        if self._pdf_dir.exists():
-            for f in self._pdf_dir.iterdir():
-                if f.is_file() and f.suffix.lower() == ".pdf" and f.stem.isnumeric():
-                    original_id = f.name  # e.g., "3.pdf"
-                    if original_id not in existing_ids:
-                        print(f"Discovered native production target: {original_id}")
-                        self.data.append({
-                            "id": original_id,
-                            "type": "document",
-                            "internal_pdf_path": str(f),  # Reads directly from source pdf dir
-                            "claude_ocr_text": None,
-                            "status": "pending"
-                        })
-                        existing_ids.add(original_id)
-                        new_found = True
-        
-        if new_found:
-            self._save_state()
-
-    def _save_state(self) -> None:
-        with open(self.json_file, "w", encoding="utf-8") as f:
-            json.dump(self.data, f, indent=4)
+            # 3. Discover native pre-existing material PDFs directly from server directory
+            if self._pdf_dir.exists():
+                for f in self._pdf_dir.iterdir():
+                    if f.is_file() and f.suffix.lower() == ".pdf" and f.stem.isnumeric():
+                        original_id = f.name  # e.g., "3.pdf"
+                        if original_id not in existing_ids:
+                            print(f"Discovered native production target: {original_id}")
+                            conn.execute(
+                                "INSERT INTO sync_entries (id, type, internal_pdf_path, status) VALUES (?, ?, ?, ?)",
+                                (original_id, "document", str(f), "pending")
+                            )
+                            existing_ids.add(original_id)
+            conn.commit()
 
     def get_sync_status(self) -> Dict[str, Any]:
         if not self.status_file.exists():
@@ -288,45 +290,35 @@ class MathE_Syncer:
     # --- Data Access Methods ---
 
     def get(self) -> pd.DataFrame:
-        """Returns the main table as a DataFrame."""
-        if self.data is None:
-            self._init_data()
+        """Returns the main table directly from SQLite as a DataFrame."""
+        with self._get_sqlite_conn() as conn:
+            df = pd.read_sql_query("SELECT * FROM sync_entries", conn)
 
-        if not self.data:
+        if df.empty:
             return pd.DataFrame(
                 columns=["id", "source_type", "claude_ocr_text", "status", "material_id", "pdf_path"]
             )
             
-        df = pd.DataFrame(self.data)
         df["material_id"] = df["id"]
-        
-        # Extract source_type directly from the clean file extension (suffix)
-        #    '.docx' -> 'docx', '.pptx' -> 'pptx', '.pdf' -> 'pdf'
         df["source_type"] = df["id"].apply(lambda p: Path(p).suffix.lstrip('.').lower())
-        
-        # Use your tracking 'internal_pdf_path' instead of assuming its location relative to id
-        df["pdf_path"] = df.get("internal_pdf_path", pd.NA)
+        df["pdf_path"] = df["internal_pdf_path"]
         
         return df.replace("", pd.NA)
 
     def get_raw(self) -> List[Dict]:
-        """Returns the raw JSON list."""
-        if self.data is None:
-            self._init_data()
-        return list(self.data)
+        """Returns the raw database records as a list of dictionaries."""
+        with self._get_sqlite_conn() as conn:
+            rows = conn.execute("SELECT * FROM sync_entries").fetchall()
+            return [dict(row) for row in rows]
 
     def count_available_pdfs(self) -> int:
-        """
-        Counts tracked files that have a valid converted or native PDF living on disk.
-        """
-        if self.data is None:
-            self._init_data()
+        """Counts files that have a valid converted or native PDF living on disk."""
+        with self._get_sqlite_conn() as conn:
+            rows = conn.execute("SELECT internal_pdf_path FROM sync_entries WHERE internal_pdf_path IS NOT NULL").fetchall()
             
-        # Iterate over our known tracking catalog paths to verify actual existence 
-        # (This accommodates both the local container /tmp and server pdf_dir files securely)
         valid_count = 0
-        for entry in self.data:
-            path_str = entry.get("internal_pdf_path")
+        for row in rows:
+            path_str = row["internal_pdf_path"]
             if path_str and Path(path_str).exists():
                 valid_count += 1
                 
@@ -361,16 +353,11 @@ class MathE_Syncer:
     # --- OCR Logic ---
 
     def run_hybrid_batch_processing(self, limit: Optional[int] = None):
-        if self.data is None:
-            self._init_data()
-        
-        pending_entries = [
-            entry
-            for entry in self.data
-            if not _has_completed_processing(entry) and entry.get("status") != "failed"
-        ]
-        if limit is not None:
-            pending_entries = pending_entries[:limit]
+        with self._get_sqlite_conn() as conn:
+            query = "SELECT * FROM sync_entries WHERE status != 'completed' AND status != 'failed'"
+            if limit is not None:
+                query += f" LIMIT {limit}"
+            pending_entries = [dict(row) for row in conn.execute(query).fetchall()]
 
         if not pending_entries:
             print("No pending work detected across audio formats or documents.")
@@ -381,7 +368,10 @@ class MathE_Syncer:
             print("Initializing local Whisper extraction runtime engines...")
             whisper_model = WhisperModel("base", device="cpu", compute_type="float32")
 
-        skipped = len(self.data) - len(pending_entries)
+        with self._get_sqlite_conn() as conn:
+            total_entries = conn.execute("SELECT COUNT(*) FROM sync_entries").fetchone()[0]
+        skipped = total_entries - len(pending_entries)
+
         logger.info(
             "Starting MathE OCR batch: %s pending, %s already completed/failed",
             len(pending_entries),
@@ -407,6 +397,13 @@ class MathE_Syncer:
                 self._process_audio_entry(entry, whisper_model)
             else:
                 self._process_document_entry(entry)
+
+            with self._get_sqlite_conn() as conn:
+                conn.execute(
+                    "UPDATE sync_entries SET status = ?, claude_ocr_text = ? WHERE id = ?",
+                    (entry["status"], entry["claude_ocr_text"], entry["id"])
+                )
+                conn.commit()
             
             print(f"Finished processing {entry['id']}. Status: {entry['status']}, OCR text length: {len(str(entry.get('claude_ocr_text') or ''))}")
             logger.info(
@@ -415,13 +412,11 @@ class MathE_Syncer:
                 Path(entry["id"]).name,
                 entry["status"],
             )
-            self._save_state()
             processed += 1
 
-        if not pending_entries:
-            logger.info("MathE OCR progress %s; no new OCR work needed", _progress_bar(0, 0))
-
-        if not self.data or all(e['status'] in ['completed', 'failed'] for e in self.data):
+        with self._get_sqlite_conn() as conn:
+            unfinished = conn.execute("SELECT COUNT(*) FROM sync_entries WHERE status NOT IN ('completed', 'failed')").fetchone()[0]
+        if unfinished == 0:
             self._send_notification("OCR process finished for all files.")
 
     def _process_audio_entry(self, entry: Dict, whisper_model: WhisperModel):

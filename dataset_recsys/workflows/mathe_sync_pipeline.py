@@ -25,7 +25,7 @@ DEFAULT_MATHE_EMBEDDING_MODEL = os.getenv(
 
 
 def _normalize_material_id(material_id: Any) -> str:
-    """Normalize MathE ids from data.json to the API-facing PDF filename."""
+    """Normalize MathE ids to the API-facing PDF filename."""
     clean_id = Path(str(material_id).strip()).name
 
     # Check if the string matches a raw 11-char YouTube ID hash structure
@@ -35,47 +35,32 @@ def _normalize_material_id(material_id: Any) -> str:
 
     return clean_id
 
-
-def _load_mathe_data(json_file: Path) -> list[dict[str, Any]]:
-    if not json_file.exists():
-        logger.warning("MathE OCR data file is missing: %s", json_file)
-        return []
-
-    try:
-        with open(json_file, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-    except json.JSONDecodeError:
-        logger.exception("MathE OCR data file is not valid JSON: %s", json_file)
-        return []
-
-    if not payload:
-        logger.warning("MathE OCR data file is empty: %s", json_file)
-        return []
-    if not isinstance(payload, list):
-        logger.error(
-            "MathE OCR data file has unsupported structure: %s (%s)",
-            json_file,
-            type(payload).__name__,
-        )
-        return []
-
-    return payload
-
-
-def _completed_materials(entries: list[dict[str, Any]]) -> list[dict[str, str]]:
+def _get_completed_materials_from_db(syncer: MathE_Syncer) -> list[dict[str, str]]:
+    """Queries completed OCR and transcript materials directly from the SQLite database."""
+    query = """
+        SELECT id, claude_ocr_text
+        FROM sync_entries
+        WHERE status = 'completed' AND claude_ocr_text IS NOT NULL AND claude_ocr_text != ''
+    """
     materials: list[dict[str, str]] = []
 
-    for entry in entries:
-        material_id = _normalize_material_id(entry.get("id", ""))
-        ocr_text = str(entry.get("claude_ocr_text") or "").strip()
+    try:
+        with syncer._get_sqlite_conn() as conn:
+            rows = conn.execute(query).fetchall()
+            
+        for row in rows:
+            material_id = _normalize_material_id(row["id"])
+            ocr_text = str(row["claude_ocr_text"]).strip()
 
-        if not material_id or entry.get("status") != "completed" or not ocr_text:
-            continue
+            if not material_id or not ocr_text:
+                continue
 
-        materials.append({"id": material_id, "text": ocr_text})
+            materials.append({"id": material_id, "text": ocr_text})
 
+    except Exception:
+        logger.exception("Failed to load completed materials from SQLite database.")
+        
     return materials
-
 
 def _build_recommendation_client():
     return RecommendationClient()
@@ -141,9 +126,9 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
         _save_sync_status(syncer, last_sync_heartbeat_at=_utc_now())
         logger.info("MathE sync and OCR complete, loading data for recommendation refresh")
 
-        entries = _load_mathe_data(syncer.json_file)
-        logger.info("Loaded %d entries from MathE OCR data file", len(entries))
-        materials = _completed_materials(entries)
+        materials = _get_completed_materials_from_db(syncer)
+        logger.info("Loaded %d completed materials from SQLite", len(materials))
+
         if not materials:
             logger.warning("No completed MathE materials with OCR text found")
             completed_at = _utc_now()

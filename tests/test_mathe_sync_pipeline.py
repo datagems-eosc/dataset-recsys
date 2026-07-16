@@ -1,5 +1,6 @@
 import json
 import sys
+import sqlite3
 import types
 import asyncio
 from pathlib import Path
@@ -28,6 +29,26 @@ class FakeSyncer:
     def save_sync_status(self, status):
         self.status = dict(status)
 
+    def _get_sqlite_conn(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def get(self) -> pd.DataFrame:
+        """Mirrors the production MathE_Syncer.get() method using SQLite."""
+        with self._get_sqlite_conn() as conn:
+            df = pd.read_sql_query("SELECT * FROM sync_entries", conn)
+
+        if df.empty:
+            return pd.DataFrame(
+                columns=["id", "source_type", "claude_ocr_text", "status", "material_id", "pdf_path"]
+            )
+            
+        df["material_id"] = df["id"]
+        df["source_type"] = df["id"].apply(lambda p: Path(p).suffix.lstrip('.').lower())
+        df["pdf_path"] = df["internal_pdf_path"]
+        
+        return df.replace("", pd.NA)
 
 class FakeRecommendationClient:
     stored = None
@@ -47,40 +68,39 @@ class FakeEmbeddingClient:
 
 
 def test_run_mathe_pipeline_builds_and_stores_recommendations(tmp_path, monkeypatch):
-    data_file = tmp_path / "data.json"
-    data_file.write_text(
-        json.dumps(
-            [
-                {
-                    "id": "./6.pdf",
-                    "claude_ocr_text": "linear algebra matrices",
-                    "status": "completed",
-                },
-                {
-                    "id": "./7.pdf",
-                    "claude_ocr_text": "calculus derivatives",
-                    "status": "completed",
-                },
-                {
-                    "id": "./8.pdf",
-                    "claude_ocr_text": "geometry triangles",
-                    "status": "completed",
-                },
-                {
-                    "id": "./9.pdf",
-                    "claude_ocr_text": "",
-                    "status": "completed",
-                },
-                {
-                    "id": "./10.pdf",
-                    "claude_ocr_text": "not ready",
-                    "status": "pending",
-                },
-            ]
-        ),
-        encoding="utf-8",
+    # 1. Establish path for SQLite database instead of JSON
+    db_path = tmp_path / "syncer.db"
+    
+    # 2. Build the database schema and populate it with mock rows
+    conn = sqlite3.connect(db_path)
+    conn.execute("""
+        CREATE TABLE sync_entries (
+            id TEXT PRIMARY KEY,
+            type TEXT NOT NULL,
+            source_value TEXT,
+            internal_pdf_path TEXT,
+            claude_ocr_text TEXT,
+            status TEXT NOT NULL
+        )
+    """)
+    
+    mock_rows = [
+        ("./6.pdf", "document", None, "./6.pdf", "linear algebra matrices", "completed"),
+        ("./7.pdf", "document", None, "./7.pdf", "calculus derivatives", "completed"),
+        ("./8.pdf", "document", None, "./8.pdf", "geometry triangles", "completed"),
+        ("./9.pdf", "document", None, "./9.pdf", "", "completed"),
+        ("./10.pdf", "document", None, "./10.pdf", "not ready", "pending")
+    ]
+    
+    conn.executemany(
+        "INSERT INTO sync_entries VALUES (?, ?, ?, ?, ?, ?)", 
+        mock_rows
     )
-    fake_syncer = FakeSyncer(data_file)
+    conn.commit()
+    conn.close()
+
+    # Initialize our SQLite-based FakeSyncer
+    fake_syncer = FakeSyncer(db_path)
 
     encoded_with = {}
 

@@ -19,7 +19,7 @@ flowchart TB
     F --> G
     E --> H[Download Audio with yt-dlp]
     H --> I[Transcribe with faster-whisper]
-    G --> J[Write Extracted Text to data.json]
+    G --> J[Write Extracted Text to syncer.db]
     I --> J
     I --> K[Cache Transcript TXT]
     J --> L[Generate Material Text Embeddings]
@@ -101,10 +101,10 @@ entity IDs of the form:
 The syncer writes its local processing catalog to:
 
 ```text
-<MATHE_PATH>/data.json
+<MATHE_PATH>/syncer.db
 ```
 
-This file is the syncer's checkpoint. It lets the next sync run know which
+This sqlite file is the syncer's checkpoint. It lets the next sync run know which
 materials have already been discovered, which ones still need processing, and
 which ones failed.
 
@@ -166,7 +166,7 @@ pdfs/
 docxs/
 ppts/
 transcripts/
-data.json
+syncer.db
 sync_status.json
 cookies.txt
 ```

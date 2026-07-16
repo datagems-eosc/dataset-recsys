@@ -179,7 +179,7 @@ class MathE_Syncer:
                         else:
                             # Self-healing backup check for tracking cache mapping
                             entry = state_map[video_id]
-                            if entry.get("status") == "pending" and backup_text_file.exists():
+                            if entry and entry.get("status") == "pending" and backup_text_file.exists():
                                 with open(backup_text_file, "r", encoding="utf-8") as f:
                                     ocr_text = f.read()
                                 conn.execute(
@@ -205,7 +205,7 @@ class MathE_Syncer:
                         # Recover sandboxed file if it missing from /tmp on server reload
                         if original_id in existing_ids:
                             entry = state_map[original_id]
-                            if entry.get("status") == "pending" and not Path(entry.get("internal_pdf_path", "")).exists():
+                            if entry and entry.get("status") == "pending" and not Path(entry.get("internal_pdf_path", "")).exists():
                                 print(f"Regenerating vanished temporary sandboxed PDF for: {f.name}")
                                 if self._libreoffice_convert(f, tmp_build_dir):
                                     (tmp_build_dir / f"{f.stem}.pdf").rename(local_pdf_target)
@@ -236,7 +236,7 @@ class MathE_Syncer:
                         # Recover sandboxed file if it missing from /tmp on server reload
                         if original_id in existing_ids:
                             entry = state_map[original_id]
-                            if entry.get("status") == "pending" and not Path(entry.get("internal_pdf_path", "")).exists():
+                            if entry and entry.get("status") == "pending" and not Path(entry.get("internal_pdf_path", "")).exists():
                                 print(f"Regenerating vanished temporary sandboxed PDF for: {f.name}")
                                 if self._libreoffice_convert(f, tmp_build_dir):
                                     (tmp_build_dir / f"{f.stem}.pdf").rename(local_pdf_target)

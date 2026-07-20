@@ -195,6 +195,29 @@ class RecommendationClient:
     # -------------------------
     # QUERYING
     # -------------------------
+
+    def get_entity_status(self, application: str, entity_id: str) -> str:
+        """
+        Evaluates the existence and completeness of an entity within the catalog.
+        
+        Returns:
+            "NOT_FOUND" if the ID is missing from the application index.
+            "NO_RECOMMENDATIONS" if the ID exists but has an empty ZSET.
+            "AVAILABLE" if the ID exists and contains recommendation variants.
+        """
+        if not entity_id:
+            return "NOT_FOUND"
+            
+        index_key = self._index_key(application)
+        if not self.r.sismember(index_key, entity_id):
+            return "NOT_FOUND"
+            
+        rec_key = self._recommendation_key(application, entity_id)
+        if self.r.zcard(rec_key) == 0:
+            return "NO_RECOMMENDATIONS"
+            
+        return "AVAILABLE"
+
     def get_recommendations(
         self,
         application: str,

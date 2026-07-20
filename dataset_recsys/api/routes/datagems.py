@@ -151,6 +151,24 @@ async def get_recommendations(
 
     lookup_id = request.entity_id
     try:
+        entity_status = recs_client.get_entity_status(application="ds2ds", entity_id=lookup_id)
+
+        if entity_status == "NOT_FOUND":
+            log.warning("Requested entity does not exist in backend catalog", entity_id=lookup_id)
+            write_request_log_to_redis(
+                recs_client,
+                user_id=user_subject,
+                action="get_recommendations",
+                entity_id=lookup_id,
+                requested_n=request.n,
+                status_code=404,
+                duration_ms=(time.time() - start_time) * 1000,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"The dataset ID '{lookup_id}' was not found in our system.",
+            )
+        
         authorized_list = await security.get_authorized_entity_ids(token)
         authorized_set = set(authorized_list)
         
@@ -167,29 +185,7 @@ async def get_recommendations(
                 detail="Insufficient permissions for the requested entity_id.",
             )
 
-        try:
-            raw_recs = recs_client.get_recommendations(
-                application="ds2ds",
-                entity_id=request.entity_id,
-                limit=None,
-            )
-        except KeyError as e:
-            log.warning("Requested entity does not exist in backend catalog", entity_id=lookup_id)
-            write_request_log_to_redis(
-                recs_client,
-                user_id=user_subject,
-                action="get_recommendations",
-                entity_id=lookup_id,
-                requested_n=request.n,
-                status_code=404,
-                duration_ms=(time.time() - start_time) * 1000,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"The dataset ID '{lookup_id}' was not found in our system.",
-            )
-
-        if not raw_recs:
+        if entity_status == "NO_RECOMMENDATIONS":
             log.info("Entity exists, but has no precomputed recommendations", entity_id=lookup_id)
             write_request_log_to_redis(
                 recs_client,
@@ -200,15 +196,17 @@ async def get_recommendations(
                 status_code=201,
                 duration_ms=(time.time() - start_time) * 1000,
             )
-            response_content = RecsResponse(
-                entity_id=request.entity_id,
-                recommendations=[],
-            ).dict()
             
             return JSONResponse(
                 status_code=status.HTTP_201_CREATED,
-                content=response_content
+                content=RecsResponse(entity_id=request.entity_id, recommendations=[]).dict()
             )
+
+        raw_recs = recs_client.get_recommendations(
+            application="ds2ds",
+            entity_id=request.entity_id,
+            limit=None,
+        )
 
         # Filter against authorized sets first
         authorized_recs = [item for item in raw_recs if item in authorized_set]

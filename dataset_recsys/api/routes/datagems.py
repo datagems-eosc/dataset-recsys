@@ -3,6 +3,7 @@ from datetime import datetime
 
 import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 
 from dataset_recsys.api.analytical_patterns.ap_handling import (
     create_recommendation_response_ap,
@@ -55,6 +56,17 @@ Retrieve the top-N recommendations for a given dataset.
             "description": "Successful retrieval of related datasets",
             "content": {"application/json": {"examples": examples_data}},
         },
+        201: {
+            "description": "Entity exists, but has no precomputed recommendations",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "entity_id": "string",
+                        "recommendations": []
+                    }
+                }
+            },
+        }        
         422: {
             "description": "Validation Error",
             "content": {
@@ -81,6 +93,14 @@ Retrieve the top-N recommendations for a given dataset.
                 }
             },
         },
+        404: {
+            "description": "Not Found - The requested entity ID does not exist in the backend catalog",
+            "content": {
+                "application/json": {
+                    "examples": {"Entity Not Found": errors_data.get("404_not_found")}
+                }
+            },
+        },        
         500: {
             "description": "Internal Server Error",
             "content": {
@@ -114,11 +134,6 @@ async def get_recommendations(
     request.entity_id = request.entity_id.strip()
     if not request.entity_id:
         log.warning("Missing entity_id.")
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Entity ID is required.",
-        )
-        
         write_request_log_to_redis(
             recs_client,
             user_id=user_subject,
@@ -128,6 +143,11 @@ async def get_recommendations(
             status_code=422,
             duration_ms=(time.time() - start_time) * 1000,
         )
+        
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Entity ID is required.",
+        )        
 
     lookup_id = request.entity_id
     try:
@@ -147,17 +167,48 @@ async def get_recommendations(
                 detail="Insufficient permissions for the requested entity_id.",
             )
 
-        raw_recs = recs_client.get_recommendations(
-            application="ds2ds",
-            entity_id=request.entity_id,
-            limit=None,  # Fetch all and filter/slice in-memory to ensure we can apply auth filtering before limiting
-        )
+        try:
+            raw_recs = recs_client.get_recommendations(
+                application="ds2ds",
+                entity_id=request.entity_id,
+                limit=None,
+            )
+        except KeyError as e:
+            log.warning("Requested entity does not exist in backend catalog", entity_id=lookup_id)
+            write_request_log_to_redis(
+                recs_client,
+                user_id=user_subject,
+                action="get_recommendations",
+                entity_id=lookup_id,
+                requested_n=request.n,
+                status_code=404,
+                duration_ms=(time.time() - start_time) * 1000,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"The dataset ID '{lookup_id}' was not found in our system.",
+            )
 
-        log.warning(
-            "Fetched raw recommendations from Redis", 
-            raw_count=len(raw_recs),
-            raw_sample=raw_recs[:5]  # Shows the top 5 raw IDs to see what Redis returned
-        )
+        if not raw_recs:
+            log.info("Entity exists, but has no precomputed recommendations", entity_id=lookup_id)
+            write_request_log_to_redis(
+                recs_client,
+                user_id=user_subject,
+                action="get_recommendations",
+                entity_id=lookup_id,
+                requested_n=request.n,
+                status_code=201,
+                duration_ms=(time.time() - start_time) * 1000,
+            )
+            response_content = RecsResponse(
+                entity_id=request.entity_id,
+                recommendations=[],
+            ).dict()
+            
+            return JSONResponse(
+                status_code=status.HTTP_201_CREATED,
+                content=response_content
+            )
 
         # Filter against authorized sets first
         authorized_recs = [item for item in raw_recs if item in authorized_set]

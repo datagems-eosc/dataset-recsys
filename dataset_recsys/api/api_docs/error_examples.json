@@ -30,6 +30,15 @@
       "message": "Insufficient permissions for the requested entity_id."
     }
   },
+  "404_not_found": {
+    "summary": "Entity Not Found",
+    "description": "The requested entity ID does not exist in the backend catalog.",
+    "value": {
+      "code": 404,
+      "error": "Not Found",
+      "message": "The requested entity ID does not exist in the backend catalog."
+    }
+  },
   "500": {
     "summary": "Internal Server Error",
     "description": "An unexpected server-side error occurred.",

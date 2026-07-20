@@ -209,10 +209,16 @@ class RecommendationClient:
             return []
         if limit is not None and limit <= 0:
             return []
+
+        index_key = self._index_key(application)
+        # Check if the entity exists in our tracking index at all
+        if not self.r.sismember(index_key, entity_id):
+            raise KeyError(f"Entity '{entity_id}' does not exist in backend.")
             
         key = self._recommendation_key(application, entity_id)
         # ZREVRANGE returns items from highest score to lowest
         stop = -1 if limit is None else max(limit - 1, 0)
+        # Will return an empty list [] if it exists but has no records in the ZSET
         return self.r.zrevrange(key, 0, stop)
 
     def get_recommendations_with_scores(

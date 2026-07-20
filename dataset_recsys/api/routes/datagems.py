@@ -66,7 +66,7 @@ Retrieve the top-N recommendations for a given dataset.
                     }
                 }
             },
-        }        
+        },        
         422: {
             "description": "Validation Error",
             "content": {

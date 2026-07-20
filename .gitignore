@@ -28,3 +28,4 @@ dataset_recsys/pipelines/temp.py
 .vscode/settings.json
 
 outputs/
+s3/*

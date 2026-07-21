@@ -125,10 +125,10 @@ async def get_recommendations(
             )
 
         # Fetch authorized items from security context
-        authorized_list = await security.get_authorized_entity_ids(token)
-        authorized_set = set(authorized_list)
-        
-        # Checj if the authorized set contains the mathe dataset ID
+        authorized_entities = await security.get_authorized_entity_ids(token)
+        authorized_set = set(authorized_entities.keys())
+
+        # Check if the authorized set contains the mathe dataset ID
         if MATHE_DATASET_ID not in authorized_set:
             log.warning(f"User {user_subject} not authorized for MathE dataset {MATHE_DATASET_ID}")
             raise HTTPException(

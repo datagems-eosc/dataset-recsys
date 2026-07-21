@@ -86,7 +86,7 @@ The service retrieves the dataset metadata, builds its embedding, stores it in t
 )
 async def add_dataset(
     entity_id: str = Query(..., description="The dataset identifier to add."),
-    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
+    claims: dict = Depends(security.require_role(["dg_admin", "dg_dataset-curator", "dg_system"])),
     token: str = Depends(security.oauth2_scheme),
 ):
     user_subject = claims.get("sub")
@@ -110,8 +110,6 @@ async def add_dataset(
             detail="Dataset ID is required.",
         )
     
-    # It is more efficient to reuse the global recs_client or define these outside 
-    # the request scope, but keeping local as per your original snippet logic.
     embedding_client = EmbeddingClient()
     
     try:
@@ -177,7 +175,7 @@ The service deletes the dataset embedding, removes its recommendation list, remo
 )
 async def remove_dataset(
     entity_id: str = Query(..., description="The unique identifier of the dataset to be removed."),
-    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
+    claims: dict = Depends(security.require_role(["dg_admin", "dg_dataset-curator", "dg_system"])),
 ):
     user_subject = claims.get("sub")
     log = logger.bind(item_id=entity_id, UserId=user_subject)
@@ -277,7 +275,7 @@ async def check_existence(
         description="A list of dataset IDs to verify.",
         example=["ds_123", "ds_456"]
     ),
-    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
+    claims: dict = Depends(security.require_role(["dg_admin", "dg_dataset-curator", "dg_system"])),
 ):
     user_subject = claims.get("sub")
     log = logger.bind(UserId=user_subject, DatasetCount=len(entity_ids))

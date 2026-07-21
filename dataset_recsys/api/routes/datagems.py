@@ -114,7 +114,7 @@ Retrieve the top-N recommendations for a given dataset.
 async def get_recommendations(
     entity_id: str = Query(..., description="The dataset identifier.", required=True),
     n: int = Query(10, gt=0, description="Number of similar items to return"),
-    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system", "dg_ds-browse"])),
+    claims: dict = Depends(security.require_role(["dg_admin", "dg_dataset-curator", "dg_system"])),
     token: str = Depends(security.oauth2_scheme),
 ):
     request = RecsRequest(entity_id=entity_id, n=n)
@@ -169,21 +169,39 @@ async def get_recommendations(
                 detail=f"The dataset ID '{lookup_id}' was not found in our system.",
             )
         
-        authorized_list = await security.get_authorized_entity_ids(token)
-        authorized_set = set(authorized_list)
+        authorized_entities = await security.get_authorized_entity_ids(token)
         
         log.warning(
             "Fetched authorized entity IDs for user",
-            authorized_count=len(authorized_set),
-            authorized_ids=list(authorized_set)  # Show a sample of authorized IDs for debugging
+            authorized_count=len(authorized_entities),
+            authorized_ids=list(authorized_entities.keys())  # Show a sample of authorized IDs for debugging
         )
 
-        if lookup_id not in authorized_set:
+        if lookup_id not in authorized_entities.keys():
             log.warning(f"User {user_subject} not authorized for source entity {lookup_id}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Insufficient permissions for the requested entity_id.",
             )
+
+        user_role = authorized_entities[lookup_id]
+        if lookup_id in authorized_entities.keys() and user_role != "dg_ds-browse":
+            log.warning(f"User {user_subject} has role '{user_role}' for entity {lookup_id}, which is not sufficient for recommendations.")
+            write_request_log_to_redis(
+                recs_client,
+                user_id=user_subject,
+                action="get_recommendations",
+                entity_id=lookup_id,
+                requested_n=request.n,
+                status_code=403,
+                duration_ms=(time.time() - start_time) * 1000,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"User role '{user_role}' is not sufficient for recommendations on entity_id '{lookup_id}'.",
+            )
+
+        log.info(f"User {user_subject} authorized for {lookup_id} with role: {user_role}")
 
         if entity_status == "NO_RECOMMENDATIONS":
             log.info("Entity exists, but has no precomputed recommendations", entity_id=lookup_id)
@@ -209,7 +227,7 @@ async def get_recommendations(
         )
 
         # Filter against authorized sets first
-        authorized_recs = [item for item in raw_recs if item in authorized_set]
+        authorized_recs = [item for item in raw_recs if item in authorized_entities.keys()]
 
         dropped_count = len(raw_recs) - len(authorized_recs)
         if dropped_count > 0:
@@ -328,7 +346,7 @@ async def get_recommendations_ap(
             }
         },
     ),
-    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
+    claims: dict = Depends(security.require_role(["dg_admin", "dg_dataset-curator", "dg_system"])),
     token: str = Depends(security.oauth2_scheme),
 ):
     try:
@@ -347,84 +365,3 @@ async def get_recommendations_ap(
         logger.error(f"Error processing recommendation AP request: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
-
-# @router.post(
-#     "/recommend/ap/template",
-#     summary="Get recommendations via Template-Based Analytical Pattern",
-#     description="""
-# Processes a Template-based Analytical Pattern (AP) request. 
-# Reads core processing variables out of runtime metadata parameters, executes recommendations, 
-# and updates the response metadata block without mutating the structural template graph.
-#     """,
-#     responses={
-#         200: {
-#             "description": "Successful metadata execution response rendering",
-#             "content": {
-#                 "application/json": {
-#                     "examples": {
-#                         "Template Response": {
-#                             "summary": "Example showing filled metadata outputs",
-#                             "value": {
-#                                 "ap": {},  # Represents unchanged template graph
-#                                 "metadata": {
-#                                     "execution_type": "RESPONSE",
-#                                     "status": "SUCCESS",
-#                                     "timestamp": "2026-06-02T13:08:02Z",
-#                                     "parameters": {
-#                                         "inputs": {"seed": "uuid-string", "n": 3},
-#                                         "outputs": {"recommendations": ["uuid1", "uuid2"]}
-#                                     }
-#                                 }
-#                             }
-#                         }
-#                     }
-#                 }
-#             },
-#         },
-#         403: {
-#             "description": "Authorization Failure",
-#             "content": {"application/json": {}},
-#         },
-#         422: {
-#             "description": "Malformed Input Metadata Parameters",
-#             "content": {"application/json": {}},
-#         },
-#         500: {
-#             "description": "Internal Server Error",
-#             "content": {"application/json": {}},
-#         },
-#     },
-# )
-# async def get_recommendations_ap_template(
-#     payload: dict = Body(
-#         ...,
-#         description="The Template Analytical Pattern request matching structural metadata schema.",
-#     ),
-#     claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
-#     token: str = Depends(security.oauth2_scheme),
-# ):
-#     try:
-#         # Extract operational payload parameters out of request metadata
-#         search_request = parse_template_request_metadata(payload)
-        
-#         # Invoke backend recommendation processing layer directly
-#         search_response = await get_recommendations(
-#             entity_id=search_request.entity_id,
-#             n=search_request.n,
-#             claims=claims,
-#             token=token,
-#         )
-        
-#         # Build the dynamic response wrapping payload
-#         updated_template_ap = create_template_response_metadata(payload, search_response)
-        
-#         return updated_template_ap
-
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         logger.error(f"Error processing template-based AP request: {e}", exc_info=True)
-#         raise HTTPException(
-#             status_code=500, 
-#             detail=f"An unexpected error occurred during template processing: {e}"
-#         )

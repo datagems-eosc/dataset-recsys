@@ -200,10 +200,11 @@ async def get_authorized_entity_ids(token: str) -> Set[str]:
 
             context_grants = response.json()
             entity_ids = {
-                grant["targetId"]
+                grant["targetId"]: grant["role"]
                 for grant in context_grants
                 if grant.get("targetType") == 0  # 0 indicates a entity
                 and "targetId" in grant
+                and "role" in grant
             }
 
             log.info(

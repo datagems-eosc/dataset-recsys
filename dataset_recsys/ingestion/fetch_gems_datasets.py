@@ -19,7 +19,7 @@ import os
 from dotenv import load_dotenv
 
 DMM_BASE_URL = os.getenv("DMM_BASE_URL", "https://example-dmm.com")  # Default to a placeholder if not set
-BASE_URL = DMM_BASE_URL + "/api/v1/"
+BASE_URL = DMM_BASE_URL + "/api/v1"
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OUTPUT_DIR = REPO_ROOT / "data" / "gems_datasets_metadata" / "moma"

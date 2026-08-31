@@ -6,7 +6,6 @@ from typing import Dict, Union
 import copy
 
 from fastapi import HTTPException, status
-from networkx import edges
 
 from dataset_recsys.api.analytical_patterns.models import RecsRequest, RecsResponse
 import uuid

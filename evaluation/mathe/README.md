@@ -164,3 +164,30 @@ Run the keyword proxy evaluation with:
 poetry run python evaluation/mathe/evaluate_keyword_proxy.py \
   --output evaluation/mathe/mathe_keyword_proxy_evaluation.xlsx
 ```
+
+### 1c. Expert Reference Document Relevance
+
+When the MathE team provides explicit document material IDs for benchmark
+questions, use those IDs as the reference set instead of keyword-overlap proxy
+relations. Blank `related_document_material_ids` cells, including rows marked
+`no_suitable_documents`, are treated as questions without expert document ground
+truth.
+
+Run the expert reference evaluation with:
+
+```bash
+poetry run python evaluation/mathe/evaluate_expert_reference.py \
+  --reference-workbook evaluation/mathe/mathe_reference_alltopics.xlsx \
+  --output evaluation/mathe/mathe_expert_reference_evaluation.xlsx
+```
+
+If the live MathE services are unavailable but an existing evaluation workbook
+already contains recommender top-k lists, compute the expert-reference metrics
+from those saved recommendations with:
+
+```bash
+poetry run python evaluation/mathe/evaluate_expert_reference.py \
+  --reference-workbook evaluation/mathe/mathe_reference_alltopics.xlsx \
+  --recommendations-workbook evaluation/mathe/mathe_keyword_proxy_evaluation.xlsx \
+  --output evaluation/mathe/mathe_expert_reference_evaluation.xlsx
+```

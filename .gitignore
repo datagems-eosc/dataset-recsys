@@ -29,3 +29,6 @@ dataset_recsys/pipelines/temp.py
 
 outputs/
 s3/*
+
+# Local provider submissions / evaluation references
+evaluation/mathe/mathe_provider_reference_submission/

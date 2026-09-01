@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 
 import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException, status, BackgroundTasks
@@ -13,6 +14,9 @@ from dataset_recsys.api.analytical_patterns.models import (
 )
 from dataset_recsys.mathe_recommenders.curricular_pool_ranker import (
     recommend_from_curricular_pool,
+)
+from dataset_recsys.mathe_recommenders.video_pool_ranker import (
+    recommend_videos_for_question,
 )
 from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
@@ -72,36 +76,34 @@ def _resolve_sync_status(sync_status: dict) -> str:
     return "running"
 
 
-@router.post(
-    "/recommend",
-    response_model=MatheRecsResponse,
-    summary="Get document material recommendations for a math question",
-    description="""
-Given a MathE question ID, return a list of recommended document teaching materials.
-    """,
-)
-async def get_recommendations(
-    request: MatheRecsRequest = Body(...),
-    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
-    token: str = Depends(security.oauth2_scheme),
-):
+async def _get_content_recommendations(
+    request: MatheRecsRequest,
+    claims: dict,
+    token: str,
+    content_type: str,
+    recommender: Callable[..., list[str]],
+) -> MatheRecsResponse:
     start_time = time.time()
     user_subject = claims.get("sub")
-    question_id = request.question_id
+    question_id = request.question_id.strip()
+    question = request.question.strip()
+    log = logger.bind(
+        question_id=question_id,
+        content_type=content_type,
+        UserId=user_subject,
+    )
 
-    log = logger.bind(question_id=question_id, UserId=user_subject)
     accounting_logger.info(
         "Recommendation Request Received",
         Action="get_recommendations",
         Resource="question_to_material_recommender",
         Domain="mathe",
+        ContentType=content_type,
         QuestionId=question_id,
         UserId=user_subject,
         Timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     )
 
-    question_id = question_id.strip()
-    question = request.question.strip()
     if not question_id:
         log.warning("Missing question_id.")
         raise HTTPException(
@@ -124,53 +126,118 @@ async def get_recommendations(
                 detail="Question ID must be an integer.",
             )
 
-        # Fetch authorized items from security context
         authorized_entities = await security.get_authorized_entity_ids(token)
-        authorized_set = set(authorized_entities.keys())
-
-        # Check if the authorized set contains the mathe dataset ID
-        if MATHE_DATASET_ID not in authorized_set:
-            log.warning(f"User {user_subject} not authorized for MathE dataset {MATHE_DATASET_ID}")
+        if MATHE_DATASET_ID not in authorized_entities:
+            log.warning(
+                "User %s not authorized for MathE dataset %s",
+                user_subject,
+                MATHE_DATASET_ID,
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Insufficient permissions to access MathE recommendations.",
             )
 
-        recommended_material_ids = recommend_from_curricular_pool(
+        recommended_material_ids = recommender(
             question_id=question_id_int,
             question=question,
             k=request.n,
             mathe_mirror_client=get_mathe_client(),
             embedding_client=get_embedding_client(),
         )
-
         if not recommended_material_ids:
-            log.warning(f"No document recommendations found for question_id {question_id}")
+            log.warning(
+                "No %s recommendations found for question_id %s",
+                content_type,
+                question_id,
+            )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No document recommendations found for question_id {question_id}",
+                detail=(
+                    f"No {content_type} recommendations found for "
+                    f"question_id {question_id}"
+                ),
             )
 
-        filtered_recs = [
+        recommendations = [
             MatheRecommendation(material_id=material_id)
-            for material_id in recommended_material_ids
+            for material_id in recommended_material_ids[: request.n]
         ]
-
-        query_time = time.time() - start_time
         log.info(
-            f"Returning {len(filtered_recs[:request.n])} MathE material recs for question "
-            f"{question_id} in {query_time:.3f}s"
+            "Returning %d MathE %s recommendations in %.3fs",
+            len(recommendations),
+            content_type,
+            time.time() - start_time,
         )
-
         return MatheRecsResponse(
             question_id=question_id,
-            recommendations=filtered_recs[:request.n],
+            recommendations=recommendations,
         )
     except HTTPException:
         raise
-    except Exception as e:
-        log.error("Unexpected error in MathE recommendations", error=str(e), exc_info=True)
+    except Exception as error:
+        log.error(
+            "Unexpected error in MathE recommendations",
+            error=str(error),
+            exc_info=True,
+        )
         raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+# TODO: Remove this compatibility route after every API client has migrated to
+# /dataset-recsys/mathe/recommend/documents.
+@router.post(
+    "/recommend",
+    response_model=MatheRecsResponse,
+    summary="Get document material recommendations",
+    description="""
+Backward-compatible alias of `/dataset-recsys/mathe/recommend/documents`.
+    """,
+    deprecated=True,
+)
+@router.post(
+    "/recommend/documents",
+    response_model=MatheRecsResponse,
+    summary="Get document material recommendations for a math question",
+    description="""
+Given a MathE question ID, return a list of recommended document teaching materials.
+    """,
+)
+async def get_document_recommendations(
+    request: MatheRecsRequest = Body(...),
+    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
+    token: str = Depends(security.oauth2_scheme),
+):
+    return await _get_content_recommendations(
+        request=request,
+        claims=claims,
+        token=token,
+        content_type="document",
+        recommender=recommend_from_curricular_pool,
+    )
+
+
+@router.post(
+    "/recommend/videos",
+    response_model=MatheRecsResponse,
+    summary="Get video recommendations for a math question",
+    description="""
+Given a MathE question ID, return video lessons and reviews from its curricular pool.
+    """,
+)
+async def get_video_recommendations(
+    request: MatheRecsRequest = Body(...),
+    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
+    token: str = Depends(security.oauth2_scheme),
+):
+    return await _get_content_recommendations(
+        request=request,
+        claims=claims,
+        token=token,
+        content_type="video",
+        recommender=recommend_videos_for_question,
+    )
+
 
 @router.post("/sync")
 async def sync_data(

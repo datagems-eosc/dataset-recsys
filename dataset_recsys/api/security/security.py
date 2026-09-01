@@ -1,4 +1,4 @@
-from typing import List, Set
+from typing import List
 
 import httpx
 import structlog
@@ -179,7 +179,7 @@ def require_role(required_roles: List[str]):
 
     return role_checker
 
-async def get_authorized_entity_ids(token: str) -> Set[str]:
+async def get_authorized_entity_ids(token: str) -> dict[str, str]:
     """
     Calls the DataGEMS Gateway to get the entity IDs a user can access.
     Uses the incoming user token directly (no OBO exchange needed,
@@ -220,10 +220,10 @@ async def get_authorized_entity_ids(token: str) -> Set[str]:
             status_code=e.response.status_code,
             response=e.response.text,
         )
-        return set()
+        return {}
     except Exception as e:
         log.error(
             "An unexpected error occurred while fetching entity permissions.",
             error=str(e),
         )
-        return set()
+        return {}

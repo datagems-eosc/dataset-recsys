@@ -15,33 +15,29 @@ def test_recommend_hybrid_candidates_merges_metadata_ocr_and_question_sources(
         "subtopic_id": 20,
         "keywords": ["derivatives"],
     }
-    mathe_client.get_pdf_seed_candidates = lambda question_id: [
+    mathe_client.get_document_seed_candidates = lambda question_id: [
         {
             "material_id": 100,
-            "material_redis_id": "100.pdf",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": ["derivatives"],
         }
     ]
-    mathe_client.get_pdf_material_metadata_by_redis_ids = lambda material_ids: [
+    mathe_client.get_document_material_metadata_by_ids = lambda material_ids: [
         {
             "material_id": 100,
-            "material_redis_id": "100.pdf",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": ["derivatives"],
         },
         {
             "material_id": 101,
-            "material_redis_id": "101.pdf",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": ["chain rule"],
         },
         {
             "material_id": 200,
-            "material_redis_id": "200.pdf",
             "topic_ids": [99],
             "subtopic_ids": [99],
             "keywords": [],
@@ -52,7 +48,7 @@ def test_recommend_hybrid_candidates_merges_metadata_ocr_and_question_sources(
         lambda texts, model_name: [[0.1, 0.2, 0.3]],
     )
     embedding_client = FakeEmbeddingClient(
-        [("200.pdf", 0.95), ("100.pdf", 0.7), ("101.pdf", 0.6)]
+        [("200", 0.95), ("100", 0.7), ("101", 0.6)]
     )
 
     candidates = hybrid.recommend_hybrid_candidates(
@@ -61,7 +57,7 @@ def test_recommend_hybrid_candidates_merges_metadata_ocr_and_question_sources(
         k=3,
         mathe_mirror_client=mathe_client,
         recommendation_client=FakeRecommendationClient(
-            {"100.pdf": [("101.pdf", 0.8)]}
+            {"100": [("101", 0.8)]}
         ),
         embedding_client=embedding_client,
         metadata_weight=0.6,
@@ -70,10 +66,10 @@ def test_recommend_hybrid_candidates_merges_metadata_ocr_and_question_sources(
         question_candidate_limit=2,
     )
 
-    assert [candidate["material_redis_id"] for candidate in candidates] == [
-        "100.pdf",
-        "101.pdf",
-        "200.pdf",
+    assert [candidate["material_id"] for candidate in candidates] == [
+        "100",
+        "101",
+        "200",
     ]
     assert candidates[0]["material_to_material_similarity"] == 0.0
     assert candidates[0]["question_to_material_similarity"] == 0.7
@@ -93,17 +89,15 @@ def test_recommend_hybrid_candidates_ranks_metadata_seeds_with_question_similari
         "subtopic_id": 20,
         "keywords": ["derivatives"],
     }
-    mathe_client.get_pdf_seed_candidates = lambda question_id: [
+    mathe_client.get_document_seed_candidates = lambda question_id: [
         {
             "material_id": 100,
-            "material_redis_id": "100.pdf",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": ["derivatives"],
         },
         {
             "material_id": 101,
-            "material_redis_id": "101.pdf",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": ["derivatives"],
@@ -113,22 +107,22 @@ def test_recommend_hybrid_candidates_ranks_metadata_seeds_with_question_similari
         "dataset_recsys.mathe_recommenders.question_embedding.encode_texts",
         lambda texts, model_name: [[0.1, 0.2, 0.3]],
     )
-    embedding_client = FakeEmbeddingClient([("100.pdf", 0.5), ("101.pdf", 0.99)])
+    embedding_client = FakeEmbeddingClient([("100", 0.5), ("101", 0.99)])
 
     candidates = hybrid.recommend_hybrid_candidates(
         question_id=42,
         question="differentiate x^2",
         k=2,
         mathe_mirror_client=mathe_client,
-        recommendation_client=FakeRecommendationClient({"100.pdf": ["900.pdf"]}),
+        recommendation_client=FakeRecommendationClient({"100": ["900"]}),
         embedding_client=embedding_client,
         metadata_weight=0.6,
         question_weight=0.15,
     )
 
-    assert [candidate["material_redis_id"] for candidate in candidates] == [
-        "101.pdf",
-        "100.pdf",
+    assert [candidate["material_id"] for candidate in candidates] == [
+        "101",
+        "100",
     ]
     assert embedding_client.calls[0]["method"] == "find_similar_by_ids"
     assert candidates[0]["question_to_material_similarity"] == 0.99
@@ -144,11 +138,10 @@ def test_recommend_hybrid_candidates_keeps_question_candidate_limit_small(
         "subtopic_id": 20,
         "keywords": ["derivatives"],
     }
-    mathe_client.get_pdf_seed_candidates = lambda question_id: []
-    mathe_client.get_pdf_material_metadata_by_redis_ids = lambda material_ids: [
+    mathe_client.get_document_seed_candidates = lambda question_id: []
+    mathe_client.get_document_material_metadata_by_ids = lambda material_ids: [
         {
             "material_id": 220,
-            "material_redis_id": "220.pdf",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": ["derivatives"],
@@ -159,7 +152,7 @@ def test_recommend_hybrid_candidates_keeps_question_candidate_limit_small(
         lambda texts, model_name: [[0.1, 0.2, 0.3]],
     )
     embedding_client = FakeEmbeddingClient(
-        [("220.pdf", 0.91), ("221.pdf", 0.88), ("222.pdf", 0.85)]
+        [("220", 0.91), ("221", 0.88), ("222", 0.85)]
     )
 
     candidates = hybrid.recommend_hybrid_candidates(
@@ -171,10 +164,10 @@ def test_recommend_hybrid_candidates_keeps_question_candidate_limit_small(
         embedding_client=embedding_client,
     )
 
-    assert [candidate["material_redis_id"] for candidate in candidates] == [
-        "220.pdf",
-        "221.pdf",
-        "222.pdf",
+    assert [candidate["material_id"] for candidate in candidates] == [
+        "220",
+        "221",
+        "222",
     ]
     assert embedding_client.calls[0]["top_k"] == hybrid.MATHE_HYBRID_QUESTION_CANDIDATES
 
@@ -189,26 +182,23 @@ def test_recommend_hybrid_candidates_handles_materials_without_embeddings(
         "subtopic_id": 20,
         "keywords": ["derivatives"],
     }
-    mathe_client.get_pdf_seed_candidates = lambda question_id: [
+    mathe_client.get_document_seed_candidates = lambda question_id: [
         {
             "material_id": 100,
-            "material_redis_id": "100.pdf",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": ["derivatives"],
         }
     ]
-    mathe_client.get_pdf_material_metadata_by_redis_ids = lambda material_ids: [
+    mathe_client.get_document_material_metadata_by_ids = lambda material_ids: [
         {
             "material_id": 100,
-            "material_redis_id": "100.pdf",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": ["derivatives"],
         },
         {
             "material_id": 101,
-            "material_redis_id": "101.pdf",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": ["derivatives"],
@@ -218,7 +208,7 @@ def test_recommend_hybrid_candidates_handles_materials_without_embeddings(
         "dataset_recsys.mathe_recommenders.question_embedding.encode_texts",
         lambda texts, model_name: [[0.1, 0.2, 0.3]],
     )
-    embedding_client = FakeEmbeddingClient([("100.pdf", 0.9)])
+    embedding_client = FakeEmbeddingClient([("100", 0.9)])
 
     candidates = hybrid.recommend_hybrid_candidates(
         question_id=42,
@@ -226,15 +216,15 @@ def test_recommend_hybrid_candidates_handles_materials_without_embeddings(
         k=2,
         mathe_mirror_client=mathe_client,
         recommendation_client=FakeRecommendationClient(
-            {"100.pdf": [("101.pdf", 0.8)]}
+            {"100": [("101", 0.8)]}
         ),
         embedding_client=embedding_client,
         question_candidate_limit=0,
     )
 
     scores = {
-        candidate["material_redis_id"]: candidate["question_to_material_similarity"]
+        candidate["material_id"]: candidate["question_to_material_similarity"]
         for candidate in candidates
     }
-    assert scores["100.pdf"] == 0.9
-    assert scores["101.pdf"] == 0.0
+    assert scores["100"] == 0.9
+    assert scores["101"] == 0.0

@@ -174,7 +174,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 #   -d @dataset_recsys/api/api_docs/ap_request_example.json
 
 # MathE recommendations
-# curl -X POST "http://127.0.0.1:8000/dataset-recsys/mathe/recommend" \
+# curl -X POST "http://127.0.0.1:8000/dataset-recsys/mathe/recommend/documents" \
 #   -H "Authorization: Bearer $TOKEN" \
 #   -H "Content-Type: application/json" \
 #   -d '{"question_id":"82","question":"Differentiate y = (2x^3 - 5x)^5.","n":5}'

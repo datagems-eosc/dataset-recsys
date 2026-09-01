@@ -1,7 +1,7 @@
 import os
 from typing import Any
 
-from dataset_recsys.mathe_recommenders.metadata_ocr import resolve_db_material_ids
+from dataset_recsys.mathe_recommenders.constants import MatheApplication
 from dataset_recsys.mathe_recommenders.question_embedding import (
     DEFAULT_MATHE_EMBEDDING_MODEL,
     encode_question,
@@ -77,16 +77,16 @@ def rank_curricular_pool_candidates(
     if not pool:
         return []
 
-    candidates_by_redis_id: dict[str, dict[str, Any]] = {}
+    candidates_by_material_id: dict[str, dict[str, Any]] = {}
     for material in pool:
-        material_redis_id = str(material["material_redis_id"]).strip()
+        material_index_id = str(material["material_id"]).strip()
         keyword_jaccard = compute_keyword_jaccard(
             question_metadata.get("keywords"),
             material.get("keywords"),
         )
-        candidates_by_redis_id[material_redis_id] = {
+        candidates_by_material_id[material_index_id] = {
             **material,
-            "material_redis_id": material_redis_id,
+            "material_id": material_index_id,
             "keyword_jaccard": keyword_jaccard,
             "metadata_score": keyword_jaccard,
             "question_to_material_similarity": 0.0,
@@ -99,17 +99,18 @@ def rank_curricular_pool_candidates(
     )
     question_similarities = score_question_similarity_for_material_ids(
         question_embedding,
-        list(candidates_by_redis_id),
+        list(candidates_by_material_id),
         embedding_client,
+        application=MatheApplication.DOCUMENTS,
     )
-    for material_redis_id, similarity in question_similarities.items():
-        if material_redis_id in candidates_by_redis_id:
-            candidates_by_redis_id[material_redis_id][
+    for material_index_id, similarity in question_similarities.items():
+        if material_index_id in candidates_by_material_id:
+            candidates_by_material_id[material_index_id][
                 "question_to_material_similarity"
             ] = similarity
 
     return _rank_candidates(
-        list(candidates_by_redis_id.values()),
+        list(candidates_by_material_id.values()),
         k,
         keyword_weight,
     )
@@ -132,4 +133,4 @@ def recommend_from_curricular_pool(
         embedding_client=embedding_client,
         question_embedding=question_embedding,
     )
-    return resolve_db_material_ids(candidates, mathe_mirror_client)
+    return [str(candidate["material_id"]) for candidate in candidates]

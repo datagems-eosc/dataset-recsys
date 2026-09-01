@@ -21,11 +21,10 @@ def test_compare_question_recommenders_includes_question_embedding_scores(
         "subtopic": "Derivatives",
         "keywords": ["derivatives"],
     }
-    mathe_client.get_pdf_seed_candidates = lambda question_id: []
-    mathe_client.get_pdf_material_metadata_by_redis_ids = lambda material_ids: [
+    mathe_client.get_document_seed_candidates = lambda question_id: []
+    mathe_client.get_document_material_metadata_by_ids = lambda material_ids: [
         {
             "material_id": 220,
-            "material_redis_id": "220.pdf",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": ["derivatives"],
@@ -34,17 +33,15 @@ def test_compare_question_recommenders_includes_question_embedding_scores(
     mathe_client.get_document_materials_for_question_topic_subtopic = lambda question_id: [
         {
             "material_id": 220,
-            "material_redis_id": "220.pdf",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": ["derivatives"],
         }
     ]
-    mathe_client.get_material_by_question_id = lambda question_id: None
-    mathe_client.get_pdf_material_details = lambda material_ids: [
+    mathe_client.get_popular_document_for_question = lambda question_id: None
+    mathe_client.get_document_material_details_by_ids = lambda material_ids: [
         {
             "material_id": 220,
-            "material_redis_id": "220.pdf",
             "title": "Partial Derivatives",
         }
     ]
@@ -60,7 +57,7 @@ def test_compare_question_recommenders_includes_question_embedding_scores(
         mathe_mirror_client=mathe_client,
         recommendation_client=FakeRecommendationClient({}),
         question_text="differentiate x^2",
-        embedding_client=FakeEmbeddingClient([("220.pdf", 0.91)]),
+        embedding_client=FakeEmbeddingClient([("220", 0.91)]),
     )
 
     recommendation = report["strategies"]["question_embedding"]["recommendations"][0]
@@ -101,33 +98,29 @@ def test_metadata_ocr_scores_do_not_include_question_similarity():
         "subtopic": "Derivatives",
         "keywords": ["derivatives"],
     }
-    mathe_client.get_pdf_seed_candidates = lambda question_id: [
+    mathe_client.get_document_seed_candidates = lambda question_id: [
         {
             "material_id": 220,
-            "material_redis_id": "220.pdf",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": ["derivatives"],
         }
     ]
-    mathe_client.get_pdf_material_metadata_by_redis_ids = lambda material_ids: [
+    mathe_client.get_document_material_metadata_by_ids = lambda material_ids: [
         {
             "material_id": 221,
-            "material_redis_id": "221.pdf",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": [],
         }
     ]
-    mathe_client.get_pdf_material_details = lambda material_ids: [
+    mathe_client.get_document_material_details_by_ids = lambda material_ids: [
         {
             "material_id": 220,
-            "material_redis_id": "220.pdf",
             "title": "Derivative Seed",
         },
         {
             "material_id": 221,
-            "material_redis_id": "221.pdf",
             "title": "Derivative Neighbor",
         },
     ]
@@ -137,7 +130,7 @@ def test_metadata_ocr_scores_do_not_include_question_similarity():
         k=2,
         mathe_mirror_client=mathe_client,
         recommendation_client=FakeRecommendationClient(
-            {"220.pdf": [("221.pdf", 0.8)]}
+            {"220": [("221", 0.8)]}
         ),
         strategies=["metadata"],
     )
@@ -170,16 +163,14 @@ def test_compare_question_recommenders_runs_selected_strategies_only(monkeypatch
     mathe_client.get_document_materials_for_question_topic_subtopic = lambda question_id: [
         {
             "material_id": 220,
-            "material_redis_id": "220.pdf",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": [],
         }
     ]
-    mathe_client.get_pdf_material_details = lambda material_ids: [
+    mathe_client.get_document_material_details_by_ids = lambda material_ids: [
         {
             "material_id": 220,
-            "material_redis_id": "220.pdf",
             "title": "Derivatives",
         }
     ]
@@ -195,7 +186,7 @@ def test_compare_question_recommenders_runs_selected_strategies_only(monkeypatch
         mathe_mirror_client=mathe_client,
         recommendation_client=FakeRecommendationClient({}),
         question_text="differentiate x^2",
-        embedding_client=FakeEmbeddingClient([("220.pdf", 0.91)]),
+        embedding_client=FakeEmbeddingClient([("220", 0.91)]),
         strategies=["curricular_pool"],
     )
 
@@ -219,7 +210,6 @@ def test_comparison_csv_rows_keep_only_beatriz_columns():
                                 {
                                     "rank": 1,
                                     "material_id": 220,
-                                    "material_redis_id": "220.pdf",
                                     "title": "Derivatives",
                                     "topics": ["Differentiation"],
                                     "subtopics": ["Derivatives"],

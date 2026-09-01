@@ -25,7 +25,20 @@ TOKEN=$(poetry run python -c "from dotenv import load_dotenv; load_dotenv('.env'
 Call the local API:
 
 ```bash
-curl -s -X POST "http://127.0.0.1:8001/dataset-recsys/mathe/recommend" \
+curl -s -X POST "http://127.0.0.1:8001/dataset-recsys/mathe/recommend/documents" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question_id": "82",
+    "question": "Differentiate y = (2x^3 - 5x)^5.",
+    "n": 10
+  }' | jq
+```
+
+Call the separate video endpoint with the same request shape:
+
+```bash
+curl -s -X POST "http://127.0.0.1:8001/dataset-recsys/mathe/recommend/videos" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -42,7 +55,7 @@ Use the deployed API base URL for the environment you want to test:
 ```bash
 API_BASE_URL="<DATASET_RECSYS_API_BASE_URL>"
 
-curl -s -X POST "$API_BASE_URL/dataset-recsys/mathe/recommend" \
+curl -s -X POST "$API_BASE_URL/dataset-recsys/mathe/recommend/documents" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -62,3 +75,9 @@ The response returns MathE database material IDs:
   ]
 }
 ```
+
+`/dataset-recsys/mathe/recommend` remains available as a deprecated alias for
+clients that have not yet moved to the explicit document path.
+
+The document and video endpoints use different embedding namespaces and cannot
+return mixed recommendation lists.

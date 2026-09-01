@@ -1,6 +1,6 @@
 from dataset_recsys.mathe_recommenders.seed_scoring import (
     compute_keyword_jaccard,
-    score_pdf_seed_candidates,
+    score_document_seed_candidates,
 )
 
 
@@ -13,7 +13,7 @@ def test_compute_keyword_jaccard_handles_empty_values_and_duplicates():
     ) == 1 / 3
 
 
-def test_score_pdf_seed_candidates_enriches_and_sorts_by_metadata_score():
+def test_score_document_seed_candidates_enriches_and_sorts_by_metadata_score():
     question_metadata = {
         "question_id": 42,
         "topic_id": 10,
@@ -41,7 +41,7 @@ def test_score_pdf_seed_candidates_enriches_and_sorts_by_metadata_score():
         },
     ]
 
-    scored = score_pdf_seed_candidates(question_metadata, seed_candidates)
+    scored = score_document_seed_candidates(question_metadata, seed_candidates)
 
     assert [candidate["material_id"] for candidate in scored] == [2, 1, 3]
     assert scored[0]["keyword_jaccard"] == 1.0
@@ -52,7 +52,7 @@ def test_score_pdf_seed_candidates_enriches_and_sorts_by_metadata_score():
     assert scored[2]["metadata_score"] == 1 / 9
 
 
-def test_score_pdf_seed_candidates_matches_plural_topic_and_subtopic_ids():
+def test_score_document_seed_candidates_matches_plural_topic_and_subtopic_ids():
     question_metadata = {
         "question_id": 42,
         "topic_id": 2,
@@ -68,7 +68,7 @@ def test_score_pdf_seed_candidates_matches_plural_topic_and_subtopic_ids():
         }
     ]
 
-    scored = score_pdf_seed_candidates(question_metadata, seed_candidates)
+    scored = score_document_seed_candidates(question_metadata, seed_candidates)
 
     assert scored[0]["same_topic"] == 1
     assert scored[0]["same_subtopic"] == 1

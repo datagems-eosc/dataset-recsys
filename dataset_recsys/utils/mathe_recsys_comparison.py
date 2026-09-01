@@ -1,9 +1,9 @@
 from dataset_recsys.mathe_recommenders.metadata_ocr import (
-    MATHE_APPLICATION,
-    recommend_pdf_seeds_for_question,
+    recommend_document_seeds_for_question,
     rank_expanded_candidates,
-    seed_redis_id,
+    seed_material_id,
 )
+from dataset_recsys.mathe_recommenders.constants import MatheApplication
 from dataset_recsys.mathe_recommenders.question_embedding import (
     recommend_from_question_embedding,
 )
@@ -42,9 +42,9 @@ def _details_by_material_id(
     material_ids: list[str],
     mathe_mirror_client: MatheMirrorClient,
 ) -> dict[str, dict]:
-    details = mathe_mirror_client.get_pdf_material_details(material_ids)
+    details = mathe_mirror_client.get_document_material_details_by_ids(material_ids)
     return {
-        str(material["material_redis_id"]).strip(): dict(material)
+        str(material["material_id"]).strip(): dict(material)
         for material in details
     }
 
@@ -64,7 +64,6 @@ def _enrich_recommendations(
             {
                 "rank": rank,
                 "material_id": material.get("material_id"),
-                "material_redis_id": material_id,
                 "scores": scores_by_id.get(material_id, {}),
                 "title": material.get("title"),
                 "author": material.get("author"),
@@ -88,7 +87,7 @@ def _pick_scores(candidate: dict, keys: tuple[str, ...]) -> dict:
 
 
 def _candidate_id(candidate: dict) -> str:
-    return str(candidate["material_redis_id"]).strip()
+    return str(candidate["material_id"]).strip()
 
 
 def _candidate_scores(
@@ -143,7 +142,7 @@ def compare_question_recommenders(
     material_ids_for_details = []
 
     if "metadata" in selected:
-        metadata_seeds = recommend_pdf_seeds_for_question(
+        metadata_seeds = recommend_document_seeds_for_question(
             question_id,
             k,
             mathe_mirror_client,
@@ -167,11 +166,13 @@ def compare_question_recommenders(
         )
 
     if "popular_seed" in selected:
-        popular_seed = mathe_mirror_client.get_material_by_question_id(question_id)
-        popular_seed_id = seed_redis_id(popular_seed) if popular_seed else None
+        popular_seed = mathe_mirror_client.get_popular_document_for_question(
+            question_id
+        )
+        popular_seed_id = seed_material_id(popular_seed) if popular_seed else None
         popular_neighbors = (
             recommendation_client.get_recommendations_with_scores(
-                application=MATHE_APPLICATION,
+                application=MatheApplication.DOCUMENTS,
                 entity_id=popular_seed_id,
                 limit=k,
             )
@@ -285,7 +286,7 @@ def compare_question_recommenders(
     strategies_output = {}
     if "metadata" in strategy_payloads:
         strategies_output["metadata"] = {
-            "description": "Metadata/OCR flow: metadata seed candidates, expanded with Redis OCR neighbors only when needed.",
+            "description": "Metadata/OCR flow: document seeds expanded with stored document neighbors only when needed.",
             "recommendations": _enrich_recommendations(
                 strategy_payloads["metadata"]["ids"],
                 details_by_id,
@@ -295,7 +296,7 @@ def compare_question_recommenders(
     if "popular_seed" in strategy_payloads:
         popular_seed_id = strategy_payloads["popular_seed"].get("seed_id")
         strategies_output["popular_seed"] = {
-            "description": "Previous experimental flow: most-clicked PDF seed under the question topic, then Redis OCR neighbors.",
+            "description": "Previous experimental flow: most-clicked document seed in the question pool, then stored document neighbors.",
             "seed": (
                 _enrich_recommendations(
                     [popular_seed_id],

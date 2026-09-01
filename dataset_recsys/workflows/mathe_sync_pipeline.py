@@ -1,66 +1,172 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 from datetime import datetime, timezone
-from pathlib import Path
-import re
-from typing import Any
+from typing import Any, TypedDict
 
+from dataset_recsys.mathe_recommenders.constants import MatheApplication
 from dataset_recsys.storage.recommendation_client import RecommendationClient
 from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.retrieval import rank_similar_entities
+from dataset_recsys.utils.mathe_index_migrations import (
+    include_legacy_mathe_collection,
+)
 from dataset_recsys.utils.mathe_syncer import MathE_Syncer
 from dataset_recsys.embeddings import encode_texts
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-MATHE_APPLICATION = "mathe"
+# TODO: Remove this compatibility summary value together with legacy index
+# publication after every consumer uses a split application namespace.
+MATHE_APPLICATION = MatheApplication.LEGACY
+MATHE_SPLIT_APPLICATIONS = (
+    MatheApplication.DOCUMENTS,
+    MatheApplication.VIDEOS,
+)
 DEFAULT_MATHE_EMBEDDING_MODEL = os.getenv(
     "MATHE_EMBEDDING_MODEL",
     "BAAI/bge-m3",
 )
 
 
-def _normalize_material_id(material_id: Any) -> str:
-    """Normalize MathE ids to the API-facing PDF filename."""
-    clean_id = Path(str(material_id).strip()).name
+class CompletedMaterial(TypedDict):
+    """Completed sync entry used to build the MathE indexes."""
+    sync_entry_id: str
+    platform_material_id: str | None  # None only for legacy unresolved rows
+    type: str
+    text: str
 
-    # Check if the string matches a raw 11-char YouTube ID hash structure
-    # If it has no file extension and fits the signature, append .txt explicitly
-    if len(clean_id) == 11 and re.match(r'^[a-zA-Z0-9_-]{11}$', clean_id):
-        return f"{clean_id}.txt"
 
-    return clean_id
-
-def _get_completed_materials_from_db(syncer: MathE_Syncer) -> list[dict[str, str]]:
+def _get_completed_materials_from_db(
+    syncer: MathE_Syncer,
+) -> list[CompletedMaterial]:
     """Queries completed OCR and transcript materials directly from the SQLite database."""
     query = """
-        SELECT id, claude_ocr_text
+        SELECT id, type, platform_material_id, claude_ocr_text
         FROM sync_entries
-        WHERE status = 'completed' AND claude_ocr_text IS NOT NULL AND claude_ocr_text != ''
+        WHERE status = 'completed'
+          AND type IN ('document', 'video')
+          AND claude_ocr_text IS NOT NULL
+          AND claude_ocr_text != ''
+        ORDER BY type, id
     """
-    materials: list[dict[str, str]] = []
+    materials: list[CompletedMaterial] = []
 
     try:
         with syncer._get_sqlite_conn() as conn:
             rows = conn.execute(query).fetchall()
             
         for row in rows:
-            material_id = _normalize_material_id(row["id"])
+            sync_entry_id = str(row["id"] or "").strip()
+            material_type = str(row["type"]).strip().lower()
+            platform_material_id = (
+                str(row["platform_material_id"] or "").strip() or None
+            )
             ocr_text = str(row["claude_ocr_text"]).strip()
 
-            if not material_id or not ocr_text:
+            if not sync_entry_id or not ocr_text:
                 continue
 
-            materials.append({"id": material_id, "text": ocr_text})
+            materials.append(
+                CompletedMaterial(
+                    sync_entry_id=sync_entry_id,
+                    platform_material_id=platform_material_id,
+                    type=material_type,
+                    text=ocr_text,
+                )
+            )
 
     except Exception:
         logger.exception("Failed to load completed materials from SQLite database.")
         
     return materials
+
+
+def _build_collection_indices(
+    materials: list[CompletedMaterial],
+) -> dict[MatheApplication, dict[str, int]]:
+    """Map each permanent split-collection ID to its shared embedding row.
+    Documents are stored and compared only with documents.
+    Videos are stored and compared only with videos."""
+    collection_indices: dict[MatheApplication, dict[str, int]] = {
+        application: {} for application in MATHE_SPLIT_APPLICATIONS
+    }
+
+    for index, material in enumerate(materials):
+        platform_material_id = material.get("platform_material_id")
+        # TODO: After the legacy index migration, require platform_material_id in
+        # the loader, change CompletedMaterial.platform_material_id to str, and
+        # remove this missing-ID compatibility branch.
+        if not platform_material_id:
+            logger.warning(
+                "Skipping %s from split MathE indexes because platform_material_id is missing",
+                material["sync_entry_id"],
+            )
+            continue
+
+        application = (
+            MatheApplication.DOCUMENTS
+            if material["type"] == "document"
+            else MatheApplication.VIDEOS
+        )
+        if platform_material_id in collection_indices[application]:
+            logger.warning(
+                "Duplicate MathE platform material %s in %s; keeping the last completed row",
+                platform_material_id,
+                application,
+            )
+        collection_indices[application][platform_material_id] = index
+
+    return collection_indices
+
+
+def _replace_embedding_and_recommendation_collection(
+    application: MatheApplication,
+    entity_indices: dict[str, int],
+    materials: list[CompletedMaterial],
+    embeddings: np.ndarray,
+    embedding_client: EmbeddingClient,
+    recommendation_client: RecommendationClient,
+    run_id: str,
+) -> dict[str, int]:
+    """Replace one pgvector and Redis collection without crossing content types."""
+    entity_ids = list(entity_indices)
+    if not entity_ids:
+        embedding_client.delete_application(
+            application,
+            table=embedding_client.TABLE_MATHE,
+        )
+        recommendation_client.store_recommendations(application, {})
+        return {
+            "processed_materials": 0,
+            "embeddings_stored": 0,
+            "redis_keys_updated": 0,
+        }
+
+    indices = list(entity_indices.values())
+    collection_embeddings = embeddings[indices]
+    embedding_inputs = [materials[index]["text"] for index in indices]
+    embeddings_stored = embedding_client.store_embeddings(
+        application=application,
+        dataset_ids=entity_ids,
+        embeddings=collection_embeddings,
+        embedding_inputs=embedding_inputs,
+        embedding_model=DEFAULT_MATHE_EMBEDDING_MODEL,
+        table=embedding_client.TABLE_MATHE,
+        run_id=run_id,
+    )
+    recommendations = rank_similar_entities(entity_ids, collection_embeddings)
+    redis_keys_updated = recommendation_client.store_recommendations(
+        application=application,
+        data=recommendations,
+    )
+    return {
+        "processed_materials": len(entity_ids),
+        "embeddings_stored": embeddings_stored,
+        "redis_keys_updated": redis_keys_updated,
+    }
 
 def _build_recommendation_client():
     return RecommendationClient()
@@ -97,15 +203,6 @@ def _save_sync_status(syncer: MathE_Syncer, **updates: Any) -> dict[str, Any]:
         syncer.save_sync_status(current_status)
 
     return current_status
-
-
-def _delete_ocr_data_file(json_file: Path) -> bool:
-    if not json_file.exists():
-        return False
-
-    json_file.unlink()
-    logger.info("Deleted MathE OCR data file after Redis refresh: %s", json_file)
-    return True
 
 
 def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
@@ -146,7 +243,6 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
                 "reason": "No completed materials with OCR text found.",
             }
 
-        material_ids = [material["id"] for material in materials]
         texts = [material["text"] for material in materials]
 
         logger.info("Generating MathE OCR text embeddings for %d materials", len(materials))
@@ -154,7 +250,7 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
         batch_size = 32
         all_embeddings = []
         embeddings_created = 0
-        client = _build_embedding_client()
+        embedding_client = _build_embedding_client()
 
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
@@ -176,25 +272,34 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
             )
 
         embeddings = np.vstack(all_embeddings)
-        client.store_embeddings(
-            application=MATHE_APPLICATION,
-            dataset_ids=material_ids,
-            embeddings=embeddings,
-            embedding_inputs=texts,
-            embedding_model=DEFAULT_MATHE_EMBEDDING_MODEL,
-            table=client.TABLE_MATHE,
-            run_id=started_at,
+        collection_indices = _build_collection_indices(materials)
+        collection_indices = include_legacy_mathe_collection(
+            collection_indices,
+            materials,
         )
+        recommendation_client = _build_recommendation_client()
+        collection_summaries = {}
+        for application, entity_indices in collection_indices.items():
+            logger.info(
+                "Refreshing MathE embedding and Redis collection %s with %d materials",
+                application,
+                len(entity_indices),
+            )
+            collection_summaries[str(application)] = (
+                _replace_embedding_and_recommendation_collection(
+                    application=application,
+                    entity_indices=entity_indices,
+                    materials=materials,
+                    embeddings=embeddings,
+                    embedding_client=embedding_client,
+                    recommendation_client=recommendation_client,
+                    run_id=started_at,
+                )
+            )
 
-        logger.info("Computing full MathE nearest-neighbor recommendations")
-        recommendations = rank_similar_entities(material_ids, embeddings)
-
-        logger.info("Storing MathE recommendations in Redis")
-        logger.info("Recommendations data: %s", recommendations)
-        recs_client = _build_recommendation_client()
-        redis_keys_updated = recs_client.store_recommendations(
-            application=MATHE_APPLICATION,
-            data=recommendations,
+        redis_keys_updated = sum(
+            collection["redis_keys_updated"]
+            for collection in collection_summaries.values()
         )
         completed_at = _utc_now()
         _save_sync_status(
@@ -211,6 +316,7 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
             "embeddings_created": embeddings_created,
             "redis_keys_updated": redis_keys_updated,
             "application": MATHE_APPLICATION,
+            "collections": collection_summaries,
         }
         logger.info("Finished MathE online refresh pipeline: %s", summary)
         return summary
@@ -226,4 +332,4 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
         raise
 
 
-__all__ = ["MATHE_APPLICATION", "run_mathe_pipeline"]
+__all__ = ["run_mathe_pipeline"]

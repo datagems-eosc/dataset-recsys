@@ -49,11 +49,15 @@ The syncer can now process YouTube video materials by downloading audio and
 transcribing it into text. Transcript entities are normalized as `<video_id>.txt`
 when embeddings and Redis recommendations are rebuilt.
 
-At the moment, this broader sync/indexing capability is ahead of the production
-MathE question API. The `/dataset-recsys/mathe/recommend` endpoint still builds
-its request-time candidate pool from document teaching materials in the same
-topic/subtopic as the question. Video materials are not exposed by that endpoint
-yet.
+The explicit `/dataset-recsys/mathe/recommend/documents` endpoint builds its
+request-time candidate pool from document teaching materials in the same
+topic/subtopic as the question and scores their canonical platform IDs against
+the `mathe_documents` embedding namespace. The existing
+`/dataset-recsys/mathe/recommend` route is a backward-compatible alias.
+
+The separate `/dataset-recsys/mathe/recommend/videos` endpoint builds the same
+hard topic/subtopic pool using only video types `1` and `2`, then scores those
+platform material IDs against `mathe_videos`.
 
 ## Material Inputs
 
@@ -78,10 +82,13 @@ The MathE platform material types are:
 - `2`: Video Review
 - `3`: Teaching Material
 
-The syncer discovers video materials from the MathE platform registry with:
+The syncer discovers video materials and preserves their MathE identity with:
 
 ```text
-SELECT link FROM platform_materials WHERE type IN (1, 2);
+SELECT id, link, type
+FROM platform_materials
+WHERE type IN (1, 2)
+ORDER BY id;
 ```
 
 This selects both video categories and excludes `type = 3` teaching materials.
@@ -117,15 +124,41 @@ source_value
 internal_pdf_path
 claude_ocr_text
 status
+platform_material_id
+content_subtype
 ```
 
 The exact fields depend on the material type:
 
 - PDFs, DOCX, and PPTX entries use `type: document` and usually include
   `internal_pdf_path`, pointing to either the native PDF or the temporary PDF
-  produced by LibreOffice.
-- YouTube entries use `type: audio`, keep the original platform link in
-  `source_value`, and store the transcript text in `claude_ocr_text`.
+  produced by LibreOffice. Their subtype is `pdf`, `docx`, or `pptx`, and their
+  numeric filename stem is retained as `platform_material_id`.
+- YouTube entries use `type: video`, keep the original platform link in
+  `source_value`, and store the transcript text in `claude_ocr_text`. Their
+  `content_subtype` distinguishes `video_lesson` from `video_review`;
+  `platform_material_id` stores `platform_materials.id`; and the existing `id`
+  stores the YouTube ID. PostgreSQL discovery is exposed by
+  `MatheMirrorClient.get_video_materials()`; the syncer does not contain or
+  execute platform SQL directly.
+
+`type` is the recommendation boundary: it is either `document` or `video`.
+Audio is only an intermediate artifact in the video-to-audio-to-transcript
+processing path and is not stored as the material type. The transitional
+migration converts deployed `type: audio` rows to `type: video` in place.
+
+`id` remains the processing key: a document filename or a YouTube ID.
+API-facing identity and the split vector/Redis collections use
+`platform_material_id`.
+
+Existing SQLite catalogs are migrated in place. Missing columns are added with
+`ALTER TABLE`, document identities are backfilled from numeric filenames, and
+legacy audio entries are classified as videos. A legacy video receives its
+MathE `platform_material_id` and lesson/review subtype on the next successful
+PostgreSQL discovery pass. Until then, its `content_subtype` remains null rather
+than introducing a video subtype that is not defined by MathE. This temporary
+compatibility logic is isolated in `mathe_sync_migrations.py` so it can be
+deleted after all deployed catalogs have been upgraded.
 
 `status` controls what happens in later runs:
 
@@ -136,9 +169,13 @@ The exact fields depend on the material type:
   current batch processing loop.
 
 Only completed entries with non-empty `claude_ocr_text` are used by the refresh
-pipeline. Those texts are embedded, stored in the MathE embedding table, used to
-compute material-to-material recommendations, and then written to Redis under
-the MathE application namespace.
+pipeline. Each text is embedded once. The pipeline retains the legacy `mathe`
+collection during migration and also publishes strict `mathe_documents` and
+`mathe_videos` pgvector/Redis collections. The split collections use
+`platform_material_id` keys and compute neighbors independently, so their
+recommendation lists cannot cross the document/video boundary. A completed
+legacy video without a resolved platform ID remains in `mathe` but is skipped
+from `mathe_videos` until PostgreSQL discovery enriches it.
 
 For videos, the syncer also writes transcript backups to:
 

@@ -8,8 +8,16 @@ def fake_mathe_client():
 class FakeRecommendationClient:
     def __init__(self, recommendations):
         self.recommendations = recommendations
+        self.calls = []
 
     def get_recommendations(self, application, entity_id, limit=None):
+        self.calls.append(
+            {
+                "application": application,
+                "entity_id": entity_id,
+                "limit": limit,
+            }
+        )
         recommendations = self.recommendations.get(entity_id, [])
         return recommendations if limit is None else recommendations[:limit]
 

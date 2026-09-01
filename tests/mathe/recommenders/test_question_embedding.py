@@ -15,19 +15,17 @@ def test_recommend_from_question_embedding_queries_mathe_vector_table(
         lambda texts, model_name: [[0.1, 0.2, 0.3]],
     )
     embedding_client = FakeEmbeddingClient(
-        [("220.pdf", 0.91), ("222.pdf", 0.85)]
+        [("220", 0.91), ("222", 0.85)]
     )
-    mathe_client.get_pdf_material_metadata_by_redis_ids = lambda material_ids: [
+    mathe_client.get_document_material_metadata_by_ids = lambda material_ids: [
         {
             "material_id": 220,
-            "material_redis_id": "220.pdf",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": ["derivatives"],
         },
         {
             "material_id": 222,
-            "material_redis_id": "222.pdf",
             "topic_ids": [99],
             "subtopic_ids": [99],
             "keywords": [],
@@ -47,13 +45,13 @@ def test_recommend_from_question_embedding_queries_mathe_vector_table(
         candidate_limit=2,
     )
 
-    assert recommendations[0]["material_redis_id"] == "220.pdf"
+    assert recommendations[0]["material_id"] == "220"
     assert recommendations[0]["metadata_score"] == 1.0
     assert recommendations[0]["question_to_material_similarity"] == 0.91
     assert recommendations[0]["total_score"] == approx(0.955)
     assert embedding_client.calls == [
         {
-            "application": "mathe",
+            "application": "mathe_documents",
             "query_embedding": [0.1, 0.2, 0.3],
             "top_k": 2,
             "table": "mathe_embeddings",
@@ -69,19 +67,17 @@ def test_recommend_from_question_embedding_reranks_with_metadata(monkeypatch):
         lambda texts, model_name: [[0.1, 0.2, 0.3]],
     )
     embedding_client = FakeEmbeddingClient(
-        [("weak_metadata.pdf", 0.95), ("strong_metadata.pdf", 0.8)]
+        [("1", 0.95), ("2", 0.8)]
     )
-    mathe_client.get_pdf_material_metadata_by_redis_ids = lambda material_ids: [
+    mathe_client.get_document_material_metadata_by_ids = lambda material_ids: [
         {
             "material_id": 1,
-            "material_redis_id": "weak_metadata.pdf",
             "topic_ids": [99],
             "subtopic_ids": [99],
             "keywords": [],
         },
         {
             "material_id": 2,
-            "material_redis_id": "strong_metadata.pdf",
             "topic_ids": [10],
             "subtopic_ids": [20],
             "keywords": ["derivatives"],
@@ -102,7 +98,7 @@ def test_recommend_from_question_embedding_reranks_with_metadata(monkeypatch):
         candidate_limit=2,
     )
 
-    assert recommendations[0]["material_redis_id"] == "strong_metadata.pdf"
+    assert recommendations[0]["material_id"] == "2"
     assert recommendations[0]["metadata_score"] == 1.0
     assert recommendations[0]["question_to_material_similarity"] == 0.8
     assert recommendations[0]["total_score"] == 0.9

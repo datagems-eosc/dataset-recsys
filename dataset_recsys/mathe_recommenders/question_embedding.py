@@ -2,12 +2,14 @@ import os
 from typing import Any
 
 from dataset_recsys.embeddings import encode_texts
-from dataset_recsys.mathe_recommenders.seed_scoring import score_pdf_seed_candidates
+from dataset_recsys.mathe_recommenders.constants import MatheApplication
+from dataset_recsys.mathe_recommenders.seed_scoring import (
+    score_document_seed_candidates,
+)
 from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 
 
-MATHE_APPLICATION = "mathe"
 DEFAULT_MATHE_EMBEDDING_MODEL = os.getenv(
     "MATHE_EMBEDDING_MODEL",
     "BAAI/bge-m3",
@@ -38,8 +40,9 @@ def encode_question(
 
 def score_question_similarity_for_material_ids(
     question_embedding: list[float],
-    material_redis_ids: list[str],
+    material_ids: list[str],
     embedding_client: EmbeddingClient,
+    application: MatheApplication,
 ) -> dict[str, float]:
     """
     Score requested materials against the question embedding.
@@ -48,9 +51,9 @@ def score_question_similarity_for_material_ids(
     mapping; callers decide the default score for those candidates.
     """
     similarities = embedding_client.find_similar_by_ids(
-        application=MATHE_APPLICATION,
+        application=application,
         query_embedding=question_embedding,
-        entity_ids=material_redis_ids,
+        entity_ids=material_ids,
         table=embedding_client.TABLE_MATHE,
     )
     return {
@@ -79,7 +82,7 @@ def recommend_from_question_embedding(
     question_embedding = encode_question(question, embedding_model)
 
     results = embedding_client.find_similar(
-        application=MATHE_APPLICATION,
+        application=MatheApplication.DOCUMENTS,
         query_embedding=question_embedding,
         top_k=top_k,
         table=embedding_client.TABLE_MATHE,
@@ -87,28 +90,27 @@ def recommend_from_question_embedding(
 
     candidates = {
         str(material_id).strip(): {
-            "material_redis_id": str(material_id).strip(),
+            "material_id": str(material_id).strip(),
             "question_to_material_similarity": float(similarity),
             "metadata_score": 0.0,
         }
         for material_id, similarity in results
     }
 
-    material_metadata = mathe_mirror_client.get_pdf_material_metadata_by_redis_ids(
+    material_metadata = mathe_mirror_client.get_document_material_metadata_by_ids(
         list(candidates)
     )
-    scored_metadata = score_pdf_seed_candidates(
+    scored_metadata = score_document_seed_candidates(
         question_metadata,
         material_metadata,
     )
 
     for metadata in scored_metadata:
-        material_redis_id = str(metadata["material_redis_id"]).strip()
-        candidate = candidates.get(material_redis_id)
+        material_id = str(metadata["material_id"]).strip()
+        candidate = candidates.get(material_id)
         if candidate:
             candidate.update(
                 {
-                    "material_id": metadata.get("material_id"),
                     "keyword_jaccard": metadata.get("keyword_jaccard", 0.0),
                     "same_subtopic": metadata.get("same_subtopic", 0),
                     "same_topic": metadata.get("same_topic", 0),

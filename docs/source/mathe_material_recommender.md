@@ -12,8 +12,10 @@ It returns MathE material IDs, ranked from most to least relevant.
 
 ## Current Scope
 
-The deployed MathE question-to-material API currently returns document teaching
-materials only. Supported document formats are PDF, DOCX, and PPTX.
+This page describes the document recommendation endpoint. Supported document
+formats are PDF, DOCX, and PPTX. Video lessons and reviews are served separately
+by `/dataset-recsys/mathe/recommend/videos` and are never blended into document
+recommendations.
 
 The MathE syncer has been extended to discover and process additional material
 formats before the embedding/recommendation refresh:
@@ -24,9 +26,8 @@ formats before the embedding/recommendation refresh:
 - YouTube video materials discovered from the MathE platform registry and
   transcribed through an audio pipeline
 
-Video materials can also be
-processed by the syncer, but they are not returned by the production question
-recommendation endpoint yet.
+Processed video transcripts are indexed under `mathe_videos`; document OCR text
+is indexed under `mathe_documents`.
 
 The current production system also enforces a hard rule that a recommended
 material must have exactly the same topic and subtopic as the question.
@@ -72,8 +73,7 @@ flowchart TB
     G --> H["Score pool with question-to-material similarity"]
     H --> I["Compute final score"]
     I --> J["Rank and keep top-k"]
-    J --> K["Resolve Redis document IDs to MathE material IDs"]
-    K --> L["Return material IDs"]
+    J --> K["Return canonical MathE material IDs"]
 ```
 
 ## Request-Time Logic, Step By Step
@@ -273,30 +273,19 @@ embedding then refines the order inside the same curricular pool.
 
 ### Step 8 - Return MathE Material IDs
 
-Candidates are keyed internally by `material_redis_id`, for example:
-
-```text
-30.pdf
-31.docx
-32.pptx
-```
-
-The API response returns the MathE database material ID, for example:
+Candidates are keyed internally by the canonical MathE platform material ID,
+which is also the ID used by the `mathe_documents` embedding collection:
 
 ```text
 30
+31
+32
 ```
 
-This resolution is done by:
+The API response returns that same MathE material ID:
 
 ```text
-resolve_db_material_ids(...)
-```
-
-in:
-
-```text
-dataset_recsys/mathe_recommenders/metadata_ocr.py
+30
 ```
 
 ## What Changed From The Previous Hybrid Version
@@ -304,9 +293,9 @@ dataset_recsys/mathe_recommenders/metadata_ocr.py
 The previous hybrid recommender used three sources:
 
 ```text
-metadata seed PDFs
-OCR-neighbor PDFs
-question-nearest PDFs
+metadata seed documents
+OCR-neighbor documents
+question-nearest documents
 ```
 
 That approach was useful for open discovery, but it could recommend materials
@@ -317,6 +306,11 @@ The older hybrid implementation is still kept for comparison and validation:
 ```text
 dataset_recsys/mathe_recommenders/hybrid.py
 ```
+
+These comparison strategies now query the `mathe_documents` namespace with
+canonical MathE platform material IDs as well. They differ from production in
+their candidate-generation and ranking strategies, not in their ID format or
+content namespace.
 
 ## Implementation Map
 
@@ -332,7 +326,6 @@ dataset_recsys/mathe_recommenders/hybrid.py
 | Question embedding | `dataset_recsys/mathe_recommenders/question_embedding.py` | `encode_question` | Embeds the MathE question text. |
 | Question similarity | `dataset_recsys/mathe_recommenders/question_embedding.py` | `score_question_similarity_for_material_ids` | Scores eligible materials against the question embedding. |
 | Vector scoring by IDs | `dataset_recsys/storage/embedding_client.py` | `find_similar_by_ids` | Scores only the material IDs already in the eligible pool. |
-| ID resolution | `dataset_recsys/mathe_recommenders/metadata_ocr.py` | `resolve_db_material_ids` | Converts internal Redis document IDs back to MathE material IDs. |
 | Comparison CLI | `dataset_recsys/utils/mathe_recsys_compare_cli.py` | `main` | Runs selected recommender approaches for validation and CSV/JSON export. |
 
 ## Configuration

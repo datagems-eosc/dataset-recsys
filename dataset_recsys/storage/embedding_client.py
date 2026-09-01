@@ -115,6 +115,9 @@ class EmbeddingClient:
         VALUES %s
         ON CONFLICT ({id_column})
         DO UPDATE SET
+            -- TODO: Remove ''application = EXCLUDED.application'' after all
+            -- consumers use the permanent split MathE application namespaces.
+            application = EXCLUDED.application,
             embedding = EXCLUDED.embedding,
             embedding_input = EXCLUDED.embedding_input,
             embedding_model = EXCLUDED.embedding_model,

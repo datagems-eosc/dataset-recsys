@@ -2,13 +2,12 @@ import os
 from typing import Any
 
 from dataset_recsys.mathe_recommenders.metadata_ocr import (
-    MATHE_APPLICATION,
     MATHE_NEIGHBORS_PER_SEED,
     add_metadata_scores,
-    recommend_pdf_seeds_for_question,
-    resolve_db_material_ids,
-    seed_redis_id,
+    recommend_document_seeds_for_question,
+    seed_material_id,
 )
+from dataset_recsys.mathe_recommenders.constants import MatheApplication
 from dataset_recsys.mathe_recommenders.question_embedding import (
     DEFAULT_MATHE_EMBEDDING_MODEL,
     encode_question,
@@ -36,22 +35,20 @@ MATHE_HYBRID_QUESTION_CANDIDATES = int(
 
 def _add_candidate(
     candidates: dict[str, dict[str, Any]],
-    material_redis_id: str,
-    material_id: Any = None,
+    material_id: Any,
     material_to_material_similarity: float = 0.0,
 ) -> None:
     """
     Add a material to the candidate pool.
 
-    - Normalize/store the material_redis_id.
+    - Normalize/store the platform material ID.
     - Create the candidate if it is not already in the pool.
     - Keep the max OCR similarity across all metadata seeds.
     """
     candidate = candidates.setdefault(
-        str(material_redis_id).strip(),
+        str(material_id).strip(),
         {
-            "material_id": material_id,
-            "material_redis_id": str(material_redis_id).strip(),
+            "material_id": str(material_id).strip(),
             "metadata_score": 0.0,
             "material_to_material_similarity": 0.0,
             "question_to_material_similarity": 0.0,
@@ -72,12 +69,13 @@ def _add_question_similarities(
         question_embedding,
         list(candidates),
         embedding_client,
+        application=MatheApplication.DOCUMENTS,
     )
-    for material_redis_id, similarity in similarities.items():
+    for material_id, similarity in similarities.items():
         # Only candidates present in the embedding table get a question score;
         # missing embeddings keep the candidate default of 0.0.
-        if material_redis_id in candidates:
-            candidates[material_redis_id]["question_to_material_similarity"] = similarity
+        if material_id in candidates:
+            candidates[material_id]["question_to_material_similarity"] = similarity
 
 
 def _rank_candidates(
@@ -124,7 +122,7 @@ def recommend_hybrid_candidates(
     question_embedding: list[float] | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Recommend MathE PDF materials by merging the current metadata/OCR candidate
+    Recommend MathE documents by merging the current metadata/OCR candidate
     source with a small set of question-text embedding candidates.
     """
     question = question.strip()
@@ -137,7 +135,7 @@ def recommend_hybrid_candidates(
 
     embedding_client = embedding_client or EmbeddingClient()
     question_embedding = question_embedding or encode_question(question, embedding_model)
-    metadata_seeds = recommend_pdf_seeds_for_question(
+    metadata_seeds = recommend_document_seeds_for_question(
         question_id=question_id,
         k=k,
         mathe_mirror_client=mathe_mirror_client,
@@ -147,10 +145,10 @@ def recommend_hybrid_candidates(
         for seed in metadata_seeds:
             _add_candidate(
                 candidates,
-                seed_redis_id(seed),
-                material_id=seed.get("material_id"),
+                seed_material_id(seed),
             )
-            candidates[seed_redis_id(seed)].update(seed)
+            candidates[seed_material_id(seed)].update(seed)
+            candidates[seed_material_id(seed)]["material_id"] = seed_material_id(seed)
         _add_question_similarities(
             candidates,
             question_embedding,
@@ -168,12 +166,11 @@ def recommend_hybrid_candidates(
     for seed in metadata_seeds:
         _add_candidate(
             candidates,
-            seed_redis_id(seed),
-            material_id=seed.get("material_id"),
+            seed_material_id(seed),
         )
         neighbors = recommendation_client.get_recommendations_with_scores(
-            application=MATHE_APPLICATION,
-            entity_id=seed_redis_id(seed),
+            application=MatheApplication.DOCUMENTS,
+            entity_id=seed_material_id(seed),
             limit=neighbors_per_seed,
         )
         for neighbor_id, material_to_material_similarity in neighbors:
@@ -184,7 +181,7 @@ def recommend_hybrid_candidates(
             )
 
     question_matches = embedding_client.find_similar(
-        application=MATHE_APPLICATION,
+        application=MatheApplication.DOCUMENTS,
         query_embedding=question_embedding,
         top_k=question_candidate_limit,
         table=embedding_client.TABLE_MATHE,
@@ -241,4 +238,4 @@ def recommend_from_hybrid(
         recommendation_client=recommendation_client,
         embedding_client=embedding_client,
     )
-    return resolve_db_material_ids(candidates, mathe_mirror_client)
+    return [str(candidate["material_id"]) for candidate in candidates]

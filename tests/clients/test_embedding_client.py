@@ -1,3 +1,6 @@
+import numpy as np
+
+from dataset_recsys.storage import embedding_client as embedding_client_module
 from dataset_recsys.storage.embedding_client import EmbeddingClient
 
 
@@ -5,6 +8,7 @@ class FakeCursor:
     def __init__(self):
         self.executed_query = None
         self.executed_params = None
+        self.rowcount = 0
 
     def __enter__(self):
         return self
@@ -12,7 +16,7 @@ class FakeCursor:
     def __exit__(self, exc_type, exc, traceback):
         return False
 
-    def execute(self, query, params):
+    def execute(self, query, params=None):
         self.executed_query = query
         self.executed_params = params
 
@@ -94,3 +98,31 @@ def test_find_similar_by_ids_filters_to_requested_mathe_materials():
         "mathe",
         ["100.pdf", "101.pdf"],
     )
+
+
+def test_store_embeddings_can_move_material_to_split_application(monkeypatch):
+    client = EmbeddingClient.__new__(EmbeddingClient)
+    client.schema = "public"
+    client.conn = FakeConnection()
+    captured = {}
+
+    def fake_execute_values(cursor, query, rows):
+        captured["query"] = query
+        captured["rows"] = rows
+
+    monkeypatch.setattr(embedding_client_module, "execute_values", fake_execute_values)
+
+    stored = client.store_embeddings(
+        application="mathe_documents",
+        dataset_ids=["6"],
+        embeddings=np.array([[0.1, 0.2]]),
+        embedding_inputs=["document text"],
+        embedding_model="BAAI/bge-m3",
+        table=client.TABLE_MATHE,
+        run_id="stage-2-test",
+    )
+
+    assert stored == 1
+    assert "application = EXCLUDED.application" in captured["query"]
+    assert captured["rows"][0][0] == "mathe_documents"
+    assert captured["rows"][0][1] == "6"

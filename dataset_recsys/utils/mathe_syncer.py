@@ -11,7 +11,10 @@ from pathlib import Path
 from typing import Any, List, Dict, Optional
 import yt_dlp
 from faster_whisper import WhisperModel
-import psycopg2
+
+from dataset_recsys.mathe_recommenders.constants import VIDEO_TYPE_TO_SUBTYPE
+from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
+from dataset_recsys.utils.mathe_sync_migrations import migrate_sync_catalog
 
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
@@ -66,7 +69,7 @@ class MathE_Syncer:
         return conn
 
     def _init_db(self):
-        """Creates the sync tracking table if it doesn't already exist."""
+        """Create or migrate the sync catalog without discarding existing state."""
         with self._get_sqlite_conn() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS sync_entries (
@@ -75,10 +78,42 @@ class MathE_Syncer:
                     source_value TEXT,
                     internal_pdf_path TEXT,
                     claude_ocr_text TEXT,
-                    status TEXT NOT NULL DEFAULT 'pending'
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    platform_material_id TEXT,
+                    content_subtype TEXT
                 )
             """)
+            # TRANSITIONAL: Remove with mathe_sync_migrations after all deployed
+            # sync catalogs have been upgraded and backfilled.
+            migrate_sync_catalog(conn)
             conn.commit()
+
+    def _insert_document_entry(
+        self,
+        conn: sqlite3.Connection,
+        source_file: Path,
+        internal_pdf_path: Path,
+    ) -> None:
+        conn.execute(
+            """
+            INSERT INTO sync_entries (
+                id,
+                type,
+                internal_pdf_path,
+                status,
+                platform_material_id,
+                content_subtype
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                source_file.name,
+                "document",
+                str(internal_pdf_path),
+                "pending",
+                source_file.stem,
+                source_file.suffix.lower().lstrip("."),
+            ),
+        )
 
     def _handle_exit(self, signum, frame):
         print("Received SIGTERM, finishing current file...")
@@ -102,14 +137,9 @@ class MathE_Syncer:
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         return result.returncode == 0
 
-    def _get_db_connection(self):
-        return psycopg2.connect(
-            host=os.getenv("DATAGEMS_POSTGRES_HOST"),
-            port=int(os.getenv("DATAGEMS_POSTGRES_PORT", "5432")),
-            dbname=os.getenv("DB_DS_NAME"),
-            user=os.getenv("DB_DS_USER"),
-            password=os.getenv("DB_DS_PASSWORD"),
-            options=f"-c search_path={os.getenv('DATAGEMS_POSTGRES_SCHEMA', 'public')}"
+    def _get_mathe_client(self) -> MatheMirrorClient:
+        return MatheMirrorClient(
+            schema=os.getenv("DATAGEMS_POSTGRES_SCHEMA", "public")
         )
 
     def _is_youtube_asset(self, link_value: str) -> bool:
@@ -140,24 +170,49 @@ class MathE_Syncer:
 
         # --- ROUTE 1: Discover Video Streams from PostgreSQL ---
         print("Syncing video assets from PostgreSQL platform registry...")
+        mathe_client = None
         try:
-            with self._get_db_connection() as conn:
-                with conn.cursor() as cursor:
-                    # MathE material_type: 1 = Video Lesson, 2 = Video Review.
-                    cursor.execute(
-                        "SELECT link FROM platform_materials WHERE type IN (1, 2);"
-                    )
-                    rows = cursor.fetchall()
-                    db_links = [row[0] for row in rows if row[0]]
+            mathe_client = self._get_mathe_client()
+            db_videos = [
+                {
+                    "platform_material_id": str(row["platform_material_id"]),
+                    "link": str(row["link"]).strip(),
+                    "platform_type": int(row["platform_type"]),
+                }
+                for row in mathe_client.get_video_materials()
+            ]
         except Exception as e:
             print(f"Warning: PostgreSQL lookup failed. Relying on local data cache. Exception: {e}")
-            db_links = []
+            db_videos = []
+        finally:
+            if mathe_client is not None:
+                try:
+                    mathe_client.close()
+                except Exception as e:
+                    logger.warning("Failed to close MathE PostgreSQL client: %s", e)
 
         with self._get_sqlite_conn() as conn:
-            for link in db_links:
+            seen_video_ids: dict[str, str] = {}
+            for video in db_videos:
+                link = video["link"]
                 if self._is_youtube_asset(link):
                     try:
                         video_id = self._extract_video_id(link)
+                        platform_material_id = video["platform_material_id"]
+                        if video_id in seen_video_ids:
+                            logger.warning(
+                                "Multiple MathE materials reference YouTube video %s; "
+                                "keeping platform material %s and skipping %s",
+                                video_id,
+                                seen_video_ids[video_id],
+                                platform_material_id,
+                            )
+                            continue
+                        seen_video_ids[video_id] = platform_material_id
+
+                        content_subtype = VIDEO_TYPE_TO_SUBTYPE.get(
+                            video["platform_type"]
+                        )
                         
                         # If a transcript file already exists in the folder, sync state instantly
                         backup_text_file = self._transcript_dir / f"{video_id}.txt"
@@ -171,11 +226,44 @@ class MathE_Syncer:
                                     ocr_text = f.read()
 
                             conn.execute(
-                                "INSERT INTO sync_entries (id, type, source_value, claude_ocr_text, status) VALUES (?, ?, ?, ?, ?)",
-                                (video_id, "audio", link, ocr_text, status)
+                                """
+                                INSERT INTO sync_entries (
+                                    id,
+                                    type,
+                                    source_value,
+                                    claude_ocr_text,
+                                    status,
+                                    platform_material_id,
+                                    content_subtype
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                                """,
+                                (
+                                    video_id,
+                                    "video",
+                                    link,
+                                    ocr_text,
+                                    status,
+                                    platform_material_id,
+                                    content_subtype,
+                                ),
                             )
                             existing_ids.add(video_id)
                         else:
+                            conn.execute(
+                                """
+                                UPDATE sync_entries
+                                SET source_value = ?,
+                                    platform_material_id = ?,
+                                    content_subtype = ?
+                                WHERE id = ?
+                                """,
+                                (
+                                    link,
+                                    platform_material_id,
+                                    content_subtype,
+                                    video_id,
+                                ),
+                            )
                             # Self-healing backup check for tracking cache mapping
                             entry = state_map.get(video_id)
                             if entry and entry.get("status") == "pending" and backup_text_file.exists():
@@ -219,10 +307,7 @@ class MathE_Syncer:
                                         continue
 
                             print(f"Queueing converted DOCX target: {original_id}")
-                            conn.execute(
-                                "INSERT INTO sync_entries (id, type, internal_pdf_path, status) VALUES (?, ?, ?, ?)",
-                                (original_id, "document", str(local_pdf_target), "pending")
-                            )
+                            self._insert_document_entry(conn, f, local_pdf_target)
                             existing_ids.add(original_id)
 
             # 2. Preprocess PowerPoint presentations -> Store location context as local /tmp
@@ -250,10 +335,7 @@ class MathE_Syncer:
                                         continue
 
                             print(f"Queueing converted PPTX target: {original_id}")
-                            conn.execute(
-                                "INSERT INTO sync_entries (id, type, internal_pdf_path, status) VALUES (?, ?, ?, ?)",
-                                (original_id, "document", str(local_pdf_target), "pending")
-                            )
+                            self._insert_document_entry(conn, f, local_pdf_target)
                             existing_ids.add(original_id)
 
             # 3. Discover native pre-existing material PDFs directly from server directory
@@ -263,10 +345,7 @@ class MathE_Syncer:
                         original_id = f.name  # e.g., "3.pdf"
                         if original_id not in existing_ids:
                             print(f"Discovered native production target: {original_id}")
-                            conn.execute(
-                                "INSERT INTO sync_entries (id, type, internal_pdf_path, status) VALUES (?, ?, ?, ?)",
-                                (original_id, "document", str(f), "pending")
-                            )
+                            self._insert_document_entry(conn, f, f)
                             existing_ids.add(original_id)
             conn.commit()
 
@@ -295,7 +374,17 @@ class MathE_Syncer:
 
         if df.empty:
             return pd.DataFrame(
-                columns=["id", "source_type", "claude_ocr_text", "status", "material_id", "pdf_path"]
+                columns=[
+                    "id",
+                    "type",
+                    "platform_material_id",
+                    "content_subtype",
+                    "claude_ocr_text",
+                    "status",
+                    "material_id",
+                    "source_type",
+                    "pdf_path",
+                ]
             )
             
         df["material_id"] = df["id"]
@@ -362,11 +451,11 @@ class MathE_Syncer:
             pending_entries = [dict(row) for row in conn.execute(query).fetchall()]
 
         if not pending_entries:
-            print("No pending work detected across audio formats or documents.")
+            print("No pending work detected across videos or documents.")
             return
 
         whisper_model = None
-        if any(e.get("type") == "audio" for e in pending_entries):
+        if any(e.get("type") == "video" for e in pending_entries):
             print("Initializing local Whisper extraction runtime engines...")
             whisper_model = WhisperModel("base", device="cpu", compute_type="float32")
 
@@ -395,8 +484,8 @@ class MathE_Syncer:
             )
             print(f"Current status: {entry.get('status')}, OCR text length: {len(str(entry.get('claude_ocr_text') or ''))}")
 
-            if entry.get("type") == "audio":
-                self._process_audio_entry(entry, whisper_model)
+            if entry.get("type") == "video":
+                self._process_video_entry(entry, whisper_model)
             else:
                 self._process_document_entry(entry)
 
@@ -421,7 +510,7 @@ class MathE_Syncer:
         if unfinished == 0:
             self._send_notification("OCR process finished for all files.")
 
-    def _process_audio_entry(self, entry: Dict, whisper_model: WhisperModel):
+    def _process_video_entry(self, entry: Dict, whisper_model: WhisperModel):
         video_id = entry["id"]
 
         backup_text_file = self._transcript_dir / f"{video_id}.txt"
@@ -518,21 +607,3 @@ class MathE_Syncer:
     def _send_notification(self, msg: str):
         # Placeholder for notification logic (e.g., email, Slack)
         print(f"NOTIFICATION: {msg}")
-
-    def _perform_claude_call(self, p: Path) -> str:
-        # (Same logic as previous step)
-        with open(p, "rb") as f:
-            pdf_bytes = f.read()
-
-        response = self.bedrock.converse(
-            modelId=self.model_id,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"document": {"name": p.stem, "format": "pdf", "source": {"bytes": pdf_bytes}}},
-                    {"text": "Extract all text from this math document. Use LaTeX for equations. Follow the native language of the document. Do not add any commentary or explanations, just return the raw extracted text."}
-                ]
-            }],
-            inferenceConfig={"temperature": 0.0}
-        )
-        return response['output']['message']['content'][0]['text']

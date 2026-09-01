@@ -1,3 +1,4 @@
+from dataset_recsys.storage import mathe_mirror_client as mathe_mirror_client_module
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 
 
@@ -29,7 +30,6 @@ class FakeCursor:
     def fetchone(self):
         return {
             "material_id": 30,
-            "material_redis_id": "30.pdf",
             "title": "Product Rule",
             "file_ext": "pdf",
             "clicks": 2,
@@ -42,6 +42,31 @@ class FakeConnection:
 
     def cursor(self, cursor_factory=None):
         return self.cursor_instance
+
+
+def test_client_uses_configured_schema(monkeypatch):
+    connection = FakeConnection()
+    connect_kwargs = {}
+
+    def fake_connect(**kwargs):
+        connect_kwargs.update(kwargs)
+        return connection
+
+    monkeypatch.setattr(
+        mathe_mirror_client_module.psycopg2,
+        "connect",
+        fake_connect,
+    )
+
+    client = MatheMirrorClient(dbname="test_db", schema="mathe_dev")
+
+    assert client.schema == "mathe_dev"
+    assert connection.autocommit is True
+    assert connection.cursor_instance.executed_query is not None
+    assert connect_kwargs["dbname"] == "test_db"
+
+    default_client = MatheMirrorClient(dbname="test_db")
+    assert default_client.schema == "public"
 
 
 def test_get_questions_by_topic_subtopics_filters_requested_pairs():
@@ -68,6 +93,22 @@ def test_get_questions_by_topic_subtopics_filters_requested_pairs():
         "fundamental mathematics",
         "algebraic expressions, equations, and inequalities",
     ]
+
+
+def test_get_video_materials_selects_lesson_and_review_fields():
+    client = MatheMirrorClient.__new__(MatheMirrorClient)
+    client.conn = FakeConnection()
+
+    client.get_video_materials()
+
+    cursor = client.conn.cursor_instance
+    assert "id AS platform_material_id" in cursor.executed_query
+    assert "link" in cursor.executed_query
+    assert "type AS platform_type" in cursor.executed_query
+    assert "WHERE type IN (1, 2)" in cursor.executed_query
+    assert "AND NULLIF(BTRIM(link), '') IS NOT NULL" in cursor.executed_query
+    assert "ORDER BY id" in cursor.executed_query
+    assert cursor.executed_params is None
 
 
 def test_get_questions_by_topic_subtopics_returns_empty_for_no_pairs():
@@ -118,15 +159,52 @@ def test_get_document_materials_for_question_topic_subtopic_uses_hard_pool():
     assert "q.subtopic IS NULL AND pool_mts.platformsubtopicid IS NULL" in cursor.executed_query
     assert "m.type = 3" in cursor.executed_query
     assert "LOWER(m.file_ext) IN ('pdf', 'docx', 'pptx')" in cursor.executed_query
-    assert "m.id::text || '.' || LOWER(m.file_ext) AS material_redis_id" in cursor.executed_query
+    assert "m.id AS material_id" in cursor.executed_query
+    assert "AS material_redis_id" not in cursor.executed_query
     assert cursor.executed_params == (82,)
 
 
-def test_get_most_popular_document_material_for_question_topic_subtopic_limits_to_top_click():
+def test_get_videos_for_question_uses_video_only_hard_pool():
     client = MatheMirrorClient.__new__(MatheMirrorClient)
     client.conn = FakeConnection()
 
-    material = client.get_most_popular_document_material_for_question_topic_subtopic(82)
+    client.get_videos_for_question(82)
+
+    cursor = client.conn.cursor_instance
+    assert "SELECT DISTINCT" in cursor.executed_query
+    assert "m.id AS material_id" in cursor.executed_query
+    assert "m.type AS platform_type" in cursor.executed_query
+    assert "q.topic = pool_mts.platformtopicid" in cursor.executed_query
+    assert "q.subtopic = pool_mts.platformsubtopicid" in cursor.executed_query
+    assert "q.subtopic IS NULL AND pool_mts.platformsubtopicid IS NULL" in cursor.executed_query
+    assert "m.type IN (1, 2)" in cursor.executed_query
+    assert "m.type = 3" not in cursor.executed_query
+    assert "NULLIF(BTRIM(m.link), '') IS NOT NULL" in cursor.executed_query
+    assert cursor.executed_params == (82,)
+
+
+def test_get_document_seed_candidates_use_platform_ids():
+    client = MatheMirrorClient.__new__(MatheMirrorClient)
+    client.conn = FakeConnection()
+
+    client.get_document_seed_candidates(82)
+
+    cursor = client.conn.cursor_instance
+    assert "m.id AS material_id" in cursor.executed_query
+    assert "AS material_redis_id" not in cursor.executed_query
+    assert "eligible_material_ids AS" in cursor.executed_query
+    assert "UNION" in cursor.executed_query
+    assert "EXISTS" not in cursor.executed_query
+    assert "m.type = 3" in cursor.executed_query
+    assert "LOWER(m.file_ext) IN ('pdf', 'docx', 'pptx')" in cursor.executed_query
+    assert cursor.executed_params == (82,)
+
+
+def test_get_popular_document_for_question_limits_to_top_click():
+    client = MatheMirrorClient.__new__(MatheMirrorClient)
+    client.conn = FakeConnection()
+
+    material = client.get_popular_document_for_question(82)
 
     cursor = client.conn.cursor_instance
     assert material["material_id"] == 30
@@ -143,49 +221,18 @@ def test_get_most_popular_document_material_for_question_topic_subtopic_limits_t
     assert cursor.executed_params == (82,)
 
 
-def test_get_pdf_materials_for_question_topic_subtopic_stays_pdf_only():
+def test_document_details_and_metadata_by_ids_use_platform_ids():
     client = MatheMirrorClient.__new__(MatheMirrorClient)
     client.conn = FakeConnection()
 
-    client.get_pdf_materials_for_question_topic_subtopic(82)
-
-    cursor = client.conn.cursor_instance
-    assert "q.topic = pool_mts.platformtopicid" in cursor.executed_query
-    assert "q.subtopic = pool_mts.platformsubtopicid" in cursor.executed_query
-    assert "q.subtopic IS NULL AND pool_mts.platformsubtopicid IS NULL" in cursor.executed_query
-    assert "m.file_ext = 'pdf'" in cursor.executed_query
-    assert "LOWER(m.file_ext) IN ('pdf', 'docx', 'pptx')" not in cursor.executed_query
-    assert "m.id::text || '.pdf' AS material_redis_id" in cursor.executed_query
-    assert cursor.executed_params == (82,)
-
-
-def test_document_details_and_metadata_use_document_extensions():
-    client = MatheMirrorClient.__new__(MatheMirrorClient)
-    client.conn = FakeConnection()
-
-    client.get_document_material_details(["100.docx"])
+    client.get_document_material_details_by_ids(["100", "invalid", "100"])
     details_query = client.conn.cursor_instance.executed_query
-    assert "m.id::text || '.' || LOWER(m.file_ext) AS material_redis_id" in details_query
-    assert "LOWER(m.file_ext) IN ('pdf', 'docx', 'pptx')" in details_query
+    assert "m.id AS material_id" in details_query
+    assert "AS material_redis_id" not in details_query
+    assert client.conn.cursor_instance.executed_params == ([100],)
 
-    client.get_document_material_metadata_by_redis_ids(["100.pptx"])
+    client.get_document_material_metadata_by_ids(["101"])
     metadata_query = client.conn.cursor_instance.executed_query
-    assert "m.id::text || '.' || LOWER(m.file_ext) AS material_redis_id" in metadata_query
-    assert "LOWER(m.file_ext) IN ('pdf', 'docx', 'pptx')" in metadata_query
-
-
-def test_pdf_details_and_metadata_stay_pdf_only():
-    client = MatheMirrorClient.__new__(MatheMirrorClient)
-    client.conn = FakeConnection()
-
-    client.get_pdf_material_details(["100.pdf"])
-    details_query = client.conn.cursor_instance.executed_query
-    assert "m.id::text || '.pdf' AS material_redis_id" in details_query
-    assert "m.file_ext = 'pdf'" in details_query
-    assert "LOWER(m.file_ext) IN ('pdf', 'docx', 'pptx')" not in details_query
-
-    client.get_pdf_material_metadata_by_redis_ids(["100.pdf"])
-    metadata_query = client.conn.cursor_instance.executed_query
-    assert "m.id::text || '.pdf' AS material_redis_id" in metadata_query
-    assert "m.file_ext = 'pdf'" in metadata_query
-    assert "LOWER(m.file_ext) IN ('pdf', 'docx', 'pptx')" not in metadata_query
+    assert "m.id AS material_id" in metadata_query
+    assert "AS material_redis_id" not in metadata_query
+    assert client.conn.cursor_instance.executed_params == ([101],)

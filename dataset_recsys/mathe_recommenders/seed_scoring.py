@@ -25,11 +25,11 @@ def compute_keyword_jaccard(
     return len(question_keyword_set & material_keyword_set) / len(union)
 
 
-def score_pdf_seed_candidates(
+def score_document_seed_candidates(
     question_metadata: dict[str, Any],
     seed_candidates: Iterable[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Score PDF seed candidates using keyword, topic, and subtopic metadata."""
+    """Score document seed candidates using keyword, topic, and subtopic metadata."""
     question_keywords = question_metadata.get("keywords")
     question_topic_id = question_metadata.get("topic_id")
     question_subtopic_id = question_metadata.get("subtopic_id")
@@ -80,5 +80,5 @@ def score_pdf_seed_candidates(
 
 __all__ = [
     "compute_keyword_jaccard",
-    "score_pdf_seed_candidates",
+    "score_document_seed_candidates",
 ]

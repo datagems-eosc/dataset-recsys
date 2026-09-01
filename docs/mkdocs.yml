@@ -7,6 +7,7 @@ nav:
     - Architecture: architecture.md
     - Workflows: workflows.md
     - MathE Material Recommender: mathe_material_recommender.md
+    - MathE Document and Video Separation: mathe_content_separation.md
     - MathE Workflows: mathe_workflows.md
     - MathE RecSys Testing: mathe_recsys_testing.md
   - API: index.md

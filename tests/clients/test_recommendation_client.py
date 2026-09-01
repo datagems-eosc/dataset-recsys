@@ -29,6 +29,9 @@ class FakeRedis:
     def pipeline(self):
         return self.pipeline_instance
 
+    def sismember(self, *_args):
+        return True
+
     def zrevrange(self, *args, **kwargs):
         self.calls.append(("zrevrange", args, kwargs))
         if kwargs.get("withscores"):

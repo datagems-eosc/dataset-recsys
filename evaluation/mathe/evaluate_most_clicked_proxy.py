@@ -39,7 +39,7 @@ def evaluate_most_clicked_proxy(
     evaluation_rows = []
     for question in benchmark_rows:
         question_id = int(question["question_id"])
-        most_clicked = mathe_client.get_most_popular_document_material_for_question_topic_subtopic(
+        most_clicked = mathe_client.get_popular_document_for_question(
             question_id
         ) or {}
         most_clicked_id = (

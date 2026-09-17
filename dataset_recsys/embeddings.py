@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 
 import numpy as np
 import torch
@@ -13,6 +14,7 @@ from dataset_recsys.ingestion.fetch_gems_datasets import DatasetProfile
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+_SENTENCE_TRANSFORMER_LOAD_LOCK = Lock()
 EMBEDDING_MODEL_CONFIG = {
     "allenai/specter2_base": {
         "backend": "transformers",
@@ -128,12 +130,26 @@ def _encode_sentence_transformer_texts(
 
 
 @lru_cache(maxsize=2)
-def _load_sentence_transformer_model(model_name: str) -> SentenceTransformer:
-    model = SentenceTransformer(_model_path(model_name), device=DEVICE)
+def _load_sentence_transformer_model_cached(
+    model_name: str,
+) -> SentenceTransformer:
+    model = SentenceTransformer(
+        _model_path(model_name),
+        device=DEVICE,
+        model_kwargs={"low_cpu_mem_usage": False},
+    )
     max_length = get_default_max_length(model_name)
     if hasattr(model, "max_seq_length"):
         model.max_seq_length = max_length
     return model
+
+
+def _load_sentence_transformer_model(model_name: str) -> SentenceTransformer:
+    # functools.lru_cache can call its wrapped function more than once when the
+    # same missing key is requested concurrently. Loading this model twice can
+    # exhaust pod memory, so keep the cache lookup inside the initialization lock.
+    with _SENTENCE_TRANSFORMER_LOAD_LOCK:
+        return _load_sentence_transformer_model_cached(model_name)
 
 
 def encode_texts(

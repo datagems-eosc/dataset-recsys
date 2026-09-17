@@ -10,7 +10,18 @@ Examples:
 
 * Clients that read/write recommendations from Redis
 * Clients that store/query embeddings in PostgreSQL + pgvector
+* The local MathE synchronization catalog stored in SQLite
 * Utilities that manage keys, indexes, schemas, or lookup operations
+
+## MathE synchronization catalog
+
+`mathe_sync_catalog.py` owns the local `sync_entries` SQLite table. It stores
+document OCR and video transcript processing state, applies transitional schema
+migrations, reconciles the catalog with the currently available document and
+video sources, and exposes completed entries to the MathE refresh pipeline.
+
+Filesystem discovery, document conversion, video transcription, and workflow
+orchestration remain outside the storage layer.
 
 
 ## Redis Storage (Recommendations)

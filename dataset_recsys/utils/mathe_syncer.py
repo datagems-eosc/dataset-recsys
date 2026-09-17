@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import re
-import sqlite3
 import pandas as pd
 from pathlib import Path
 from typing import Any, List, Dict, Optional
@@ -13,8 +12,13 @@ import yt_dlp
 from faster_whisper import WhisperModel
 
 from dataset_recsys.mathe_recommenders.constants import VIDEO_TYPE_TO_SUBTYPE
+from dataset_recsys.storage.mathe_sync_catalog import (
+    DocumentSyncSource,
+    MathESyncCatalog,
+    VideoSyncSource,
+    has_completed_processing,
+)
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
-from dataset_recsys.utils.mathe_sync_migrations import migrate_sync_catalog
 
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
@@ -30,13 +34,6 @@ def _progress_bar(current: int, total: int, width: int = 20) -> str:
     return f"[{'#' * filled}{'-' * (width - filled)}] {current}/{total} {percent}%"
 
 
-def _has_completed_processing(entry: Dict[str, Any]) -> bool:
-    """Verifies if an entry already has successfully parsed text content."""
-    text = str(entry.get("claude_ocr_text") or "")
-    return entry.get("status") == "completed" or (
-        bool(text) and not (text.startswith("OCR Failed") or text.startswith("Transcription Failed"))
-    )
-
 class MathE_Syncer:
     def __init__(self, base_dir: Path) -> None:
         self._base_dir = base_dir
@@ -47,7 +44,7 @@ class MathE_Syncer:
         self._transcript_dir.mkdir(parents=True, exist_ok=True)
 
         self.db_path = self._base_dir / "syncer.db"
-        self._init_db()        
+        self.catalog = MathESyncCatalog(self.db_path)
 
         self.status_file = self._base_dir / "sync_status.json"
         self.cookie_file = self._base_dir / "cookies.txt"
@@ -58,62 +55,10 @@ class MathE_Syncer:
         self.bedrock = boto3.client("bedrock-runtime", region_name=self.region, aws_access_key_id=AWS_ACCESS_KEY, aws_secret_access_key=AWS_SECRET_KEY)
         
         # Graceful shutdown handling
-        self.is_running = False  # Add this line        
+        # The top-level MathE pipeline owns this lifecycle guard.
+        self.is_running = False
         self.keep_running = True
         signal.signal(signal.SIGTERM, self._handle_exit)                
-
-    def _get_sqlite_conn(self):
-        """Returns a connection context manager yielding dict-like rows."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row  # Allows accessing columns by name
-        return conn
-
-    def _init_db(self):
-        """Create or migrate the sync catalog without discarding existing state."""
-        with self._get_sqlite_conn() as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS sync_entries (
-                    id TEXT PRIMARY KEY,
-                    type TEXT NOT NULL,
-                    source_value TEXT,
-                    internal_pdf_path TEXT,
-                    claude_ocr_text TEXT,
-                    status TEXT NOT NULL DEFAULT 'pending',
-                    platform_material_id TEXT,
-                    content_subtype TEXT
-                )
-            """)
-            # TRANSITIONAL: Remove with mathe_sync_migrations after all deployed
-            # sync catalogs have been upgraded and backfilled.
-            migrate_sync_catalog(conn)
-            conn.commit()
-
-    def _insert_document_entry(
-        self,
-        conn: sqlite3.Connection,
-        source_file: Path,
-        internal_pdf_path: Path,
-    ) -> None:
-        conn.execute(
-            """
-            INSERT INTO sync_entries (
-                id,
-                type,
-                internal_pdf_path,
-                status,
-                platform_material_id,
-                content_subtype
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                source_file.name,
-                "document",
-                str(internal_pdf_path),
-                "pending",
-                source_file.stem,
-                source_file.suffix.lower().lstrip("."),
-            ),
-        )
 
     def _handle_exit(self, signum, frame):
         print("Received SIGTERM, finishing current file...")
@@ -156,21 +101,141 @@ class MathE_Syncer:
             return id_match.group(1)
         raise ValueError(f"Could not parse valid YouTube identifier: {link_value}")
 
-    def _init_data(self) -> None:
-        """Loads and processes discovery directly into the SQLite Engine."""
+    def _read_transcript_backup(self, video_id: str) -> Optional[str]:
+        """Returns a usable transcript backup; empty files are not completed work."""
+        backup_path = self._transcript_dir / f"{video_id}.txt"
+        if not backup_path.exists():
+            return None
+
+        try:
+            transcript = backup_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as error:
+            logger.warning(
+                "Could not read transcript backup %s: %s",
+                backup_path,
+                error,
+            )
+            return None
+        return transcript if transcript.strip() else None
+
+    def _convert_office_document(
+        self,
+        source_file: Path,
+        output_dir: Path,
+        target_pdf: Path,
+    ) -> bool:
+        if not self._libreoffice_convert(source_file, output_dir):
+            return False
+
+        generated_pdf = output_dir / f"{source_file.stem}.pdf"
+        try:
+            generated_pdf.rename(target_pdf)
+        except OSError as error:
+            logger.warning(
+                "Failed to move converted PDF for %s: %s",
+                source_file.name,
+                error,
+            )
+            return False
+        return True
+
+    def _discover_office_documents(
+        self,
+        source_dir: Path,
+        subtype: str,
+        output_dir: Path,
+        existing_entries: dict[str, Dict[str, Any]],
+        discovered_sources: list[DocumentSyncSource],
+    ) -> bool:
+        """Discovers one available office-document source directory."""
+        if not source_dir.exists():
+            return False
+
+        for source_file in source_dir.iterdir():
+            if not (
+                source_file.is_file()
+                and source_file.suffix.lower() == f".{subtype}"
+                and source_file.stem.isnumeric()
+            ):
+                continue
+
+            filename = source_file.name
+            target_pdf = output_dir / f"{source_file.stem}_{subtype}.pdf"
+            existing_entry = existing_entries.get(filename)
+
+            if existing_entry is not None:
+                entry_id = str(existing_entry["id"])
+                internal_path = existing_entry.get("internal_pdf_path")
+                if (
+                    existing_entry.get("status") == "pending"
+                    and (not internal_path or not Path(internal_path).exists())
+                ):
+                    print(
+                        "Regenerating vanished temporary sandboxed PDF for: "
+                        f"{filename}"
+                    )
+                    self._convert_office_document(
+                        source_file,
+                        output_dir,
+                        target_pdf,
+                    )
+            else:
+                entry_id = filename
+                if not target_pdf.exists():
+                    print(
+                        f"Converting {subtype.upper()} to local memory sandbox: "
+                        f"{filename}"
+                    )
+                    if not self._convert_office_document(
+                        source_file,
+                        output_dir,
+                        target_pdf,
+                    ):
+                        logger.warning(
+                            "Could not create a PDF for MathE source %s",
+                            filename,
+                        )
+                        continue
+                print(f"Queueing converted {subtype.upper()} target: {filename}")
+
+            discovered_sources.append(
+                DocumentSyncSource(
+                    entry_id=entry_id,
+                    internal_pdf_path=str(target_pdf),
+                    platform_material_id=source_file.stem,
+                    content_subtype=subtype,
+                )
+            )
+
+        return True
+
+    def reconcile_sources(self) -> None:
+        """Discover current MathE sources and reconcile the local catalog."""
         if not self._base_dir.exists():
             print(f"MathE base directory does not exist: {self._base_dir}")
             return
 
-        # Query existing state indexes directly from local DB
-        with self._get_sqlite_conn() as conn:
-            rows = conn.execute("SELECT id, status, internal_pdf_path FROM sync_entries").fetchall()
-            state_map = {row["id"]: {"status": row["status"], "internal_pdf_path": row["internal_pdf_path"]} for row in rows}
-            existing_ids = set(state_map.keys())
+        rows = self.catalog.list_entries()
+
+        # A deployed legacy catalog may store a document as "./221.pdf". Match
+        # by filename so reconciliation preserves its completed OCR instead of
+        # inserting a second row for the same platform material.
+        document_entries_by_filename: dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            if row.get("type") != "document":
+                continue
+            filename = Path(str(row["id"])).name
+            current = document_entries_by_filename.get(filename)
+            if current is None or (
+                has_completed_processing(row)
+                and not has_completed_processing(current)
+            ):
+                document_entries_by_filename[filename] = row
 
         # --- ROUTE 1: Discover Video Streams from PostgreSQL ---
         print("Syncing video assets from PostgreSQL platform registry...")
         mathe_client = None
+        video_catalog_loaded = False
         try:
             mathe_client = self._get_mathe_client()
             db_videos = [
@@ -181,6 +246,7 @@ class MathE_Syncer:
                 }
                 for row in mathe_client.get_video_materials()
             ]
+            video_catalog_loaded = True
         except Exception as e:
             print(f"Warning: PostgreSQL lookup failed. Relying on local data cache. Exception: {e}")
             db_videos = []
@@ -191,163 +257,123 @@ class MathE_Syncer:
                 except Exception as e:
                     logger.warning("Failed to close MathE PostgreSQL client: %s", e)
 
-        with self._get_sqlite_conn() as conn:
-            seen_video_ids: dict[str, str] = {}
-            for video in db_videos:
-                link = video["link"]
-                if self._is_youtube_asset(link):
-                    try:
-                        video_id = self._extract_video_id(link)
-                        platform_material_id = video["platform_material_id"]
-                        if video_id in seen_video_ids:
-                            logger.warning(
-                                "Multiple MathE materials reference YouTube video %s; "
-                                "keeping platform material %s and skipping %s",
-                                video_id,
-                                seen_video_ids[video_id],
-                                platform_material_id,
-                            )
-                            continue
-                        seen_video_ids[video_id] = platform_material_id
+        seen_video_ids: dict[str, str] = {}
+        video_sources: list[VideoSyncSource] = []
+        for video in db_videos:
+            link = video["link"]
+            if not self._is_youtube_asset(link):
+                continue
+            try:
+                video_id = self._extract_video_id(link)
+            except ValueError:
+                continue
 
-                        content_subtype = VIDEO_TYPE_TO_SUBTYPE.get(
-                            video["platform_type"]
-                        )
-                        
-                        # If a transcript file already exists in the folder, sync state instantly
-                        backup_text_file = self._transcript_dir / f"{video_id}.txt"
-                        
-                        if video_id not in existing_ids:
-                            status = "completed" if backup_text_file.exists() else "pending"
-                            ocr_text = None
-                            
-                            if backup_text_file.exists():
-                                with open(backup_text_file, "r", encoding="utf-8") as f:
-                                    ocr_text = f.read()
+            platform_material_id = video["platform_material_id"]
+            if video_id in seen_video_ids:
+                logger.warning(
+                    "Multiple MathE materials reference YouTube video %s; "
+                    "keeping platform material %s and skipping %s",
+                    video_id,
+                    seen_video_ids[video_id],
+                    platform_material_id,
+                )
+                continue
 
-                            conn.execute(
-                                """
-                                INSERT INTO sync_entries (
-                                    id,
-                                    type,
-                                    source_value,
-                                    claude_ocr_text,
-                                    status,
-                                    platform_material_id,
-                                    content_subtype
-                                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                                """,
-                                (
-                                    video_id,
-                                    "video",
-                                    link,
-                                    ocr_text,
-                                    status,
-                                    platform_material_id,
-                                    content_subtype,
-                                ),
-                            )
-                            existing_ids.add(video_id)
-                        else:
-                            conn.execute(
-                                """
-                                UPDATE sync_entries
-                                SET source_value = ?,
-                                    platform_material_id = ?,
-                                    content_subtype = ?
-                                WHERE id = ?
-                                """,
-                                (
-                                    link,
-                                    platform_material_id,
-                                    content_subtype,
-                                    video_id,
-                                ),
-                            )
-                            # Self-healing backup check for tracking cache mapping
-                            entry = state_map.get(video_id)
-                            if entry and entry.get("status") == "pending" and backup_text_file.exists():
-                                with open(backup_text_file, "r", encoding="utf-8") as f:
-                                    ocr_text = f.read()
-                                conn.execute(
-                                    "UPDATE sync_entries SET status = 'completed', claude_ocr_text = ? WHERE id = ?",
-                                    (ocr_text, video_id)
-                                )
-                    except ValueError:
-                        continue
-            conn.commit()
+            seen_video_ids[video_id] = platform_material_id
+            video_sources.append(
+                VideoSyncSource(
+                    entry_id=video_id,
+                    source_value=link,
+                    platform_material_id=platform_material_id,
+                    content_subtype=VIDEO_TYPE_TO_SUBTYPE.get(
+                        video["platform_type"]
+                    ),
+                    transcript_backup=self._read_transcript_backup(video_id),
+                )
+            )
+
+        # An empty successful registry result means there are no videos. A
+        # failed query is not authoritative and must preserve the local cache.
+        if video_catalog_loaded:
+            removed_count = self.catalog.reconcile_videos(video_sources)
+            if removed_count:
+                logger.info(
+                    "Removed %s MathE videos no longer present in the platform registry",
+                    removed_count,
+                )
 
         # --- ROUTE 2: Discover Structural Office Documents via Local Directories ---
         tmp_build_dir = Path("/tmp/libo_out")
         tmp_build_dir.mkdir(parents=True, exist_ok=True)
 
-        with self._get_sqlite_conn() as conn:
-            # 1. Preprocess Word documents -> Store location context as local /tmp
-            if self._docx_dir.exists():
-                for f in self._docx_dir.iterdir():
-                    if f.is_file() and f.suffix.lower() == ".docx" and f.stem.isnumeric():
-                        original_id = f.name  # e.g., "3.docx"
-                        local_pdf_target = tmp_build_dir / f"{f.stem}_docx.pdf"                    
-                        
-                        # Recover sandboxed file if it missing from /tmp on server reload
-                        if original_id in existing_ids:
-                            entry = state_map.get(original_id)
-                            if entry and entry.get("status") == "pending" and not Path(entry.get("internal_pdf_path", "")).exists():
-                                print(f"Regenerating vanished temporary sandboxed PDF for: {f.name}")
-                                if self._libreoffice_convert(f, tmp_build_dir):
-                                    (tmp_build_dir / f"{f.stem}.pdf").rename(local_pdf_target)
-                        else:
-                            if not local_pdf_target.exists():
-                                print(f"Converting DOCX to local memory sandbox: {f.name}")
-                                if self._libreoffice_convert(f, tmp_build_dir):
-                                    try:
-                                        (tmp_build_dir / f"{f.stem}.pdf").rename(local_pdf_target)
-                                    except Exception as e:
-                                        print(f"❌ Failed to rename local PDF for {f.name}: {e}")
-                                        continue
+        document_sources: list[DocumentSyncSource] = []
+        authoritative_document_subtypes: set[str] = set()
 
-                            print(f"Queueing converted DOCX target: {original_id}")
-                            self._insert_document_entry(conn, f, local_pdf_target)
-                            existing_ids.add(original_id)
+        # Office source directories are authoritative only when available.
+        if self._discover_office_documents(
+            self._docx_dir,
+            "docx",
+            tmp_build_dir,
+            document_entries_by_filename,
+            document_sources,
+        ):
+            authoritative_document_subtypes.add("docx")
 
-            # 2. Preprocess PowerPoint presentations -> Store location context as local /tmp
-            if self._ppt_dir.exists():
-                for f in self._ppt_dir.iterdir():
-                    if f.is_file() and f.suffix.lower() == ".pptx" and f.stem.isnumeric():
-                        original_id = f.name  # e.g., "3.pptx"
-                        local_pdf_target = tmp_build_dir / f"{f.stem}_pptx.pdf"
-                        
-                        # Recover sandboxed file if it missing from /tmp on server reload
-                        if original_id in existing_ids:
-                            entry = state_map.get(original_id)
-                            if entry and entry.get("status") == "pending" and not Path(entry.get("internal_pdf_path", "")).exists():
-                                print(f"Regenerating vanished temporary sandboxed PDF for: {f.name}")
-                                if self._libreoffice_convert(f, tmp_build_dir):
-                                    (tmp_build_dir / f"{f.stem}.pdf").rename(local_pdf_target)
-                        else:
-                            if not local_pdf_target.exists():
-                                print(f"Converting PPTX to local memory sandbox: {f.name}")
-                                if self._libreoffice_convert(f, tmp_build_dir):
-                                    try:
-                                        (tmp_build_dir / f"{f.stem}.pdf").rename(local_pdf_target)
-                                    except Exception as e:
-                                        print(f"❌ Failed to rename local PDF for {f.name}: {e}")
-                                        continue
+        if self._discover_office_documents(
+            self._ppt_dir,
+            "pptx",
+            tmp_build_dir,
+            document_entries_by_filename,
+            document_sources,
+        ):
+            authoritative_document_subtypes.add("pptx")
 
-                            print(f"Queueing converted PPTX target: {original_id}")
-                            self._insert_document_entry(conn, f, local_pdf_target)
-                            existing_ids.add(original_id)
+        # Discover native pre-existing material PDFs directly from server directory.
+        if self._pdf_dir.exists():
+            authoritative_document_subtypes.add("pdf")
+            for source_file in self._pdf_dir.iterdir():
+                if not (
+                    source_file.is_file()
+                    and source_file.suffix.lower() == ".pdf"
+                    and source_file.stem.isnumeric()
+                ):
+                    continue
 
-            # 3. Discover native pre-existing material PDFs directly from server directory
-            if self._pdf_dir.exists():
-                for f in self._pdf_dir.iterdir():
-                    if f.is_file() and f.suffix.lower() == ".pdf" and f.stem.isnumeric():
-                        original_id = f.name  # e.g., "3.pdf"
-                        if original_id not in existing_ids:
-                            print(f"Discovered native production target: {original_id}")
-                            self._insert_document_entry(conn, f, f)
-                            existing_ids.add(original_id)
-            conn.commit()
+                existing_entry = document_entries_by_filename.get(source_file.name)
+                entry_id = (
+                    str(existing_entry["id"])
+                    if existing_entry is not None
+                    else source_file.name
+                )
+                if existing_entry is None:
+                    print(
+                        "Discovered native production target: "
+                        f"{source_file.name}"
+                    )
+                document_sources.append(
+                    DocumentSyncSource(
+                        entry_id=entry_id,
+                        internal_pdf_path=str(source_file),
+                        platform_material_id=source_file.stem,
+                        content_subtype="pdf",
+                    )
+                )
+
+        removed_count = self.catalog.reconcile_documents(
+            document_sources,
+            authoritative_document_subtypes,
+        )
+        if removed_count:
+            logger.info(
+                "Removed %s MathE documents no longer present in mounted source directories",
+                removed_count,
+            )
+
+        total_entries = self.catalog.count_entries()
+        print(
+            f"Discovered {total_entries} total entries, with "
+            f"{self.count_available_pdfs()} available PDFs."
+        )
 
     def get_sync_status(self) -> Dict[str, Any]:
         if not self.status_file.exists():
@@ -369,8 +395,7 @@ class MathE_Syncer:
 
     def get(self) -> pd.DataFrame:
         """Returns the main table directly from SQLite as a DataFrame."""
-        with self._get_sqlite_conn() as conn:
-            df = pd.read_sql_query("SELECT * FROM sync_entries", conn)
+        df = pd.DataFrame(self.catalog.list_entries())
 
         if df.empty:
             return pd.DataFrame(
@@ -395,22 +420,18 @@ class MathE_Syncer:
 
     def get_raw(self) -> List[Dict]:
         """Returns the raw database records as a list of dictionaries."""
-        with self._get_sqlite_conn() as conn:
-            rows = conn.execute("SELECT * FROM sync_entries").fetchall()
-            return [dict(row) for row in rows]
+        return self.catalog.list_entries()
+
+    def get_completed_materials(self) -> List[Dict]:
+        """Return completed document OCR and video transcript entries."""
+        return self.catalog.list_completed_materials()
 
     def count_available_pdfs(self) -> int:
         """Counts files that have a valid converted or native PDF living on disk."""
-        with self._get_sqlite_conn() as conn:
-            rows = conn.execute("SELECT internal_pdf_path FROM sync_entries WHERE internal_pdf_path IS NOT NULL").fetchall()
-            
-        valid_count = 0
-        for row in rows:
-            path_str = row["internal_pdf_path"]
-            if path_str and Path(path_str).exists():
-                valid_count += 1
-                
-        return valid_count
+        return sum(
+            Path(path_str).exists()
+            for path_str in self.catalog.list_internal_pdf_paths()
+        )
 
     def get_info(self) -> Dict[str, str]:
         """Returns high-level info."""
@@ -420,35 +441,11 @@ class MathE_Syncer:
             "dataset_folder": str(self._base_dir),
         }
 
-    def sync_and_process(self, limit: Optional[int] = None):
-        if self.is_running:
-            print("Sync job is already in progress.")
-            return
-        
-        self.is_running = True
-        try:
-            print("Starting sync/process lifecycle...")
-            self._init_data()
-            # --- TO THIS SAFE BLOCK ---
-            with self._get_sqlite_conn() as conn:
-                total_db_entries = conn.execute("SELECT COUNT(*) FROM sync_entries").fetchone()[0]
-            print(f"Discovered {total_db_entries} total entries, with {self.count_available_pdfs()} available PDFs.")
-            # limit = 1 # For testing, process only 1 file at a time. Remove or adjust this for full batch processing.
-            self.run_hybrid_batch_processing(limit=limit)
-            print("Lifecycle complete.")
-        except Exception as e:
-            print(f"Error during sync/process lifecycle: {e}")
-        finally:
-            self.is_running = False  # Ensure it always releases the lock
-
     # --- OCR Logic ---
 
-    def run_hybrid_batch_processing(self, limit: Optional[int] = None):
-        with self._get_sqlite_conn() as conn:
-            query = "SELECT * FROM sync_entries WHERE status != 'completed' AND status != 'failed'"
-            if limit is not None:
-                query += f" LIMIT {limit}"
-            pending_entries = [dict(row) for row in conn.execute(query).fetchall()]
+    def process_pending_materials(self, limit: Optional[int] = None) -> None:
+        """Run document OCR or video transcription for pending catalog entries."""
+        pending_entries = self.catalog.list_pending_entries(limit=limit)
 
         if not pending_entries:
             print("No pending work detected across videos or documents.")
@@ -459,8 +456,7 @@ class MathE_Syncer:
             print("Initializing local Whisper extraction runtime engines...")
             whisper_model = WhisperModel("base", device="cpu", compute_type="float32")
 
-        with self._get_sqlite_conn() as conn:
-            total_entries = conn.execute("SELECT COUNT(*) FROM sync_entries").fetchone()[0]
+        total_entries = self.catalog.count_entries()
         skipped = total_entries - len(pending_entries)
 
         logger.info(
@@ -489,12 +485,11 @@ class MathE_Syncer:
             else:
                 self._process_document_entry(entry)
 
-            with self._get_sqlite_conn() as conn:
-                conn.execute(
-                    "UPDATE sync_entries SET status = ?, claude_ocr_text = ? WHERE id = ?",
-                    (entry["status"], entry["claude_ocr_text"], entry["id"])
-                )
-                conn.commit()
+            self.catalog.update_processing_result(
+                entry_id=entry["id"],
+                status=entry["status"],
+                text=entry["claude_ocr_text"],
+            )
             
             print(f"Finished processing {entry['id']}. Status: {entry['status']}, OCR text length: {len(str(entry.get('claude_ocr_text') or ''))}")
             logger.info(
@@ -505,8 +500,7 @@ class MathE_Syncer:
             )
             processed += 1
 
-        with self._get_sqlite_conn() as conn:
-            unfinished = conn.execute("SELECT COUNT(*) FROM sync_entries WHERE status NOT IN ('completed', 'failed')").fetchone()[0]
+        unfinished = self.catalog.count_unfinished_entries()
         if unfinished == 0:
             self._send_notification("OCR process finished for all files.")
 
@@ -514,10 +508,10 @@ class MathE_Syncer:
         video_id = entry["id"]
 
         backup_text_file = self._transcript_dir / f"{video_id}.txt"
-        if backup_text_file.exists():
+        backup_text = self._read_transcript_backup(video_id)
+        if backup_text is not None:
             print(f"-> Found local backup inside transcripts/ folder for video {video_id}. Restoring state...")
-            with open(backup_text_file, "r", encoding="utf-8") as f:
-                entry["claude_ocr_text"] = f.read()
+            entry["claude_ocr_text"] = backup_text
             entry["status"] = "completed"
             return
 

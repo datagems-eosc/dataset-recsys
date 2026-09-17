@@ -264,7 +264,10 @@ async def sync_data(
     return {
         "message": "Sync, OCR, and recommendation refresh initiated.",
         "status": "Accepted",
-        "details": "The system is now discovering new PDFs, processing OCR, and rebuilding MathE recommendations in the background."
+        "details": (
+            "The system is reconciling MathE documents and videos, processing "
+            "pending content, and rebuilding recommendations in the background."
+        ),
     }
 
 @router.get("/status")

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 from fastapi import BackgroundTasks
 
 from dataset_recsys.workflows import mathe_sync_pipeline
@@ -18,17 +19,37 @@ import dataset_recsys.utils.mathe_syncer as mathe_syncer_module
 class FakeSyncer:
     def __init__(self, db_path: Path):
         self.db_path = db_path
-        self.sync_called = False
+        self.is_running = False
+        self.reconcile_called = False
+        self.process_called = False
         self.status = {}
 
-    def sync_and_process(self):
-        self.sync_called = True
+    def reconcile_sources(self):
+        self.reconcile_called = True
+
+    def process_pending_materials(self):
+        self.process_called = True
 
     def get_sync_status(self):
         return dict(self.status)
 
     def save_sync_status(self, status):
         self.status = dict(status)
+
+    def get_completed_materials(self):
+        with self._get_sqlite_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, type, platform_material_id, claude_ocr_text
+                FROM sync_entries
+                WHERE status = 'completed'
+                  AND type IN ('document', 'video')
+                  AND claude_ocr_text IS NOT NULL
+                  AND claude_ocr_text != ''
+                ORDER BY type, id
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def _get_sqlite_conn(self):
         conn = sqlite3.connect(self.db_path)
@@ -202,7 +223,9 @@ def test_run_mathe_pipeline_builds_separate_document_and_video_indexes(
     FakeEmbeddingClient.deleted = []
     summary = mathe_sync_pipeline.run_mathe_pipeline(fake_syncer)
 
-    assert fake_syncer.sync_called is True
+    assert fake_syncer.reconcile_called is True
+    assert fake_syncer.process_called is True
+    assert fake_syncer.is_running is False
     assert summary == {
         "status": "completed",
         "processed_materials": 4,
@@ -337,18 +360,86 @@ def test_split_indexes_skip_unresolved_platform_ids_and_clear_empty_collection()
     ]
 
 
-# The pipeline should skip recommendation storage when SQLite has no completed materials.
+# A broken local catalog must fail safely instead of clearing published indexes.
 def test_run_mathe_pipeline_handles_missing_sync_database(tmp_path):
     fake_syncer = FakeSyncer(tmp_path / "missing.db")
 
+    with pytest.raises(sqlite3.OperationalError):
+        mathe_sync_pipeline.run_mathe_pipeline(fake_syncer)
+
+    assert fake_syncer.reconcile_called is True
+    assert fake_syncer.process_called is True
+    assert fake_syncer.is_running is False
+    assert fake_syncer.status["sync_status"] == "failed"
+    assert fake_syncer.status["embeddings_created"] == 0
+
+
+def test_run_mathe_pipeline_does_not_start_a_duplicate_run(tmp_path):
+    fake_syncer = FakeSyncer(tmp_path / "unused.db")
+    fake_syncer.is_running = True
+
     summary = mathe_sync_pipeline.run_mathe_pipeline(fake_syncer)
 
-    assert fake_syncer.sync_called is True
-    assert summary["status"] == "skipped"
+    assert summary == {
+        "status": "already_running",
+        "processed_materials": 0,
+        "embeddings_created": 0,
+        "redis_keys_updated": 0,
+        "reason": "A MathE refresh pipeline is already running.",
+    }
+    assert fake_syncer.reconcile_called is False
+    assert fake_syncer.process_called is False
+    assert fake_syncer.status == {}
+    assert fake_syncer.is_running is True
+
+
+def test_run_mathe_pipeline_clears_collections_for_empty_catalog(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = tmp_path / "syncer.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE sync_entries (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                claude_ocr_text TEXT,
+                status TEXT NOT NULL,
+                platform_material_id TEXT
+            )
+            """
+        )
+
+    fake_syncer = FakeSyncer(db_path)
+    monkeypatch.setattr(
+        mathe_sync_pipeline,
+        "_build_recommendation_client",
+        lambda: FakeRecommendationClient(),
+    )
+    monkeypatch.setattr(
+        mathe_sync_pipeline,
+        "_build_embedding_client",
+        lambda: FakeEmbeddingClient(),
+    )
+    FakeRecommendationClient.stored = []
+    FakeEmbeddingClient.stored = []
+    FakeEmbeddingClient.deleted = []
+
+    summary = mathe_sync_pipeline.run_mathe_pipeline(fake_syncer)
+
+    expected_applications = {"mathe", "mathe_documents", "mathe_videos"}
+    assert summary["status"] == "completed"
     assert summary["processed_materials"] == 0
-    assert summary["redis_keys_updated"] == 0
-    assert fake_syncer.status["sync_status"] == "skipped"
-    assert fake_syncer.status["embeddings_created"] == 0
+    assert summary["embeddings_created"] == 0
+    assert {call["application"] for call in FakeEmbeddingClient.deleted} == (
+        expected_applications
+    )
+    assert {
+        call["application"] for call in FakeRecommendationClient.stored
+    } == expected_applications
+    assert all(not call["data"] for call in FakeRecommendationClient.stored)
+    assert FakeEmbeddingClient.stored == []
 
 
 # This test checks that the MathE /sync API endpoint is wired correctly.
@@ -512,7 +603,7 @@ def test_batch_processing_skips_completed_and_failed_entries(monkeypatch, tmp_pa
         lambda *args, **kwargs: object(),
     )
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
-    with syncer._get_sqlite_conn() as conn:
+    with syncer.catalog.connection() as conn:
         conn.executemany(
             """
             INSERT INTO sync_entries (
@@ -536,10 +627,10 @@ def test_batch_processing_skips_completed_and_failed_entries(monkeypatch, tmp_pa
 
     monkeypatch.setattr(syncer, "_process_document_entry", fake_process_document_entry)
 
-    syncer.run_hybrid_batch_processing()
+    syncer.process_pending_materials()
 
     assert processed == ["9.pdf"]
-    with syncer._get_sqlite_conn() as conn:
+    with syncer.catalog.connection() as conn:
         rows = {
             row["id"]: dict(row)
             for row in conn.execute(
@@ -566,7 +657,7 @@ def test_batch_processing_routes_video_type_to_transcription(monkeypatch, tmp_pa
         lambda *args, **kwargs: whisper_model,
     )
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
-    with syncer._get_sqlite_conn() as conn:
+    with syncer.catalog.connection() as conn:
         conn.execute(
             """
             INSERT INTO sync_entries (
@@ -591,7 +682,7 @@ def test_batch_processing_routes_video_type_to_transcription(monkeypatch, tmp_pa
         entry["status"] = "completed"
 
     monkeypatch.setattr(syncer, "_process_video_entry", fake_process_video_entry)
-    syncer.run_hybrid_batch_processing()
+    syncer.process_pending_materials()
 
     assert processed == [("abcdefghijk", whisper_model)]
     assert syncer.get_raw()[0]["type"] == "video"

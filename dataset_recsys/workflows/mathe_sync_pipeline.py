@@ -39,25 +39,14 @@ class CompletedMaterial(TypedDict):
     text: str
 
 
-def _get_completed_materials_from_db(
+def _get_completed_materials(
     syncer: MathE_Syncer,
 ) -> list[CompletedMaterial]:
-    """Queries completed OCR and transcript materials directly from the SQLite database."""
-    query = """
-        SELECT id, type, platform_material_id, claude_ocr_text
-        FROM sync_entries
-        WHERE status = 'completed'
-          AND type IN ('document', 'video')
-          AND claude_ocr_text IS NOT NULL
-          AND claude_ocr_text != ''
-        ORDER BY type, id
-    """
+    """Load normalized completed OCR and transcript materials."""
     materials: list[CompletedMaterial] = []
 
     try:
-        with syncer._get_sqlite_conn() as conn:
-            rows = conn.execute(query).fetchall()
-            
+        rows = syncer.get_completed_materials()
         for row in rows:
             sync_entry_id = str(row["id"] or "").strip()
             material_type = str(row["type"]).strip().lower()
@@ -80,6 +69,7 @@ def _get_completed_materials_from_db(
 
     except Exception:
         logger.exception("Failed to load completed materials from SQLite database.")
+        raise
         
     return materials
 
@@ -206,72 +196,85 @@ def _save_sync_status(syncer: MathE_Syncer, **updates: Any) -> dict[str, Any]:
 
 
 def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
-    """Run MathE sync/OCR, rebuild recommendations, and publish them to Redis."""
-    logger.info("Starting MathE online refresh pipeline")
-    started_at = _utc_now()
-    _save_sync_status(
-        syncer,
-        sync_status="running",
-        last_sync_started_at=started_at,
-        last_sync_heartbeat_at=started_at,
-        last_sync_completed_at=None,
-        embeddings_created=0,
-    )
+    """Reconcile, process, rebuild, and publish all MathE recommendations."""
+    if getattr(syncer, "is_running", False):
+        logger.warning("MathE refresh pipeline is already running")
+        return {
+            "status": "already_running",
+            "processed_materials": 0,
+            "embeddings_created": 0,
+            "redis_keys_updated": 0,
+            "reason": "A MathE refresh pipeline is already running.",
+        }
 
+    syncer.is_running = True
     try:
-        syncer.sync_and_process()
+        logger.info("Starting MathE online refresh pipeline")
+        started_at = _utc_now()
+        _save_sync_status(
+            syncer,
+            sync_status="running",
+            last_sync_started_at=started_at,
+            last_sync_heartbeat_at=started_at,
+            last_sync_completed_at=None,
+            embeddings_created=0,
+        )
+
+        logger.info("Reconciling MathE document and video sources")
+        syncer.reconcile_sources()
+        _save_sync_status(syncer, last_sync_heartbeat_at=_utc_now())
+
+        logger.info("Processing pending MathE documents and videos")
+        syncer.process_pending_materials()
         _save_sync_status(syncer, last_sync_heartbeat_at=_utc_now())
         logger.info("MathE sync and OCR complete, loading data for recommendation refresh")
 
-        materials = _get_completed_materials_from_db(syncer)
+        materials = _get_completed_materials(syncer)
         logger.info("Loaded %d completed materials from SQLite", len(materials))
 
-        if not materials:
-            logger.warning("No completed MathE materials with OCR text found")
-            completed_at = _utc_now()
-            _save_sync_status(
-                syncer,
-                sync_status="skipped",
-                last_sync_heartbeat_at=completed_at,
-                last_sync_completed_at=completed_at,
-                embeddings_created=0,
-            )
-            return {
-                "status": "skipped",
-                "processed_materials": 0,
-                "redis_keys_updated": 0,
-                "reason": "No completed materials with OCR text found.",
-            }
-
-        texts = [material["text"] for material in materials]
-
-        logger.info("Generating MathE OCR text embeddings for %d materials", len(materials))
-
-        batch_size = 32
-        all_embeddings = []
-        embeddings_created = 0
         embedding_client = _build_embedding_client()
-
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            batch_number = i // batch_size + 1
-            print(f"Encoding batch {batch_number} with {len(batch)} materials...")
-            batch_encodings = encode_texts(batch, model_name=DEFAULT_MATHE_EMBEDDING_MODEL)
-            all_embeddings.append(batch_encodings)
-            embeddings_created += len(batch_encodings)
-            _save_sync_status(
-                syncer,
-                embeddings_created=embeddings_created,
-                last_sync_heartbeat_at=_utc_now(),
-            )
-            print(f"Embedding progress {_progress_bar(embeddings_created, len(texts))}")
+        embeddings_created = 0
+        if materials:
+            texts = [material["text"] for material in materials]
             logger.info(
-                "MathE embedding progress %s batch=%s",
-                _progress_bar(embeddings_created, len(texts)),
-                batch_number,
+                "Generating MathE OCR text embeddings for %d materials",
+                len(materials),
             )
 
-        embeddings = np.vstack(all_embeddings)
+            batch_size = 32
+            all_embeddings = []
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i : i + batch_size]
+                batch_number = i // batch_size + 1
+                print(f"Encoding batch {batch_number} with {len(batch)} materials...")
+                batch_encodings = encode_texts(
+                    batch,
+                    model_name=DEFAULT_MATHE_EMBEDDING_MODEL,
+                )
+                all_embeddings.append(batch_encodings)
+                embeddings_created += len(batch_encodings)
+                _save_sync_status(
+                    syncer,
+                    embeddings_created=embeddings_created,
+                    last_sync_heartbeat_at=_utc_now(),
+                )
+                print(
+                    f"Embedding progress "
+                    f"{_progress_bar(embeddings_created, len(texts))}"
+                )
+                logger.info(
+                    "MathE embedding progress %s batch=%s",
+                    _progress_bar(embeddings_created, len(texts)),
+                    batch_number,
+                )
+
+            embeddings = np.vstack(all_embeddings)
+        else:
+            # A successful empty catalog is authoritative. Publish empty
+            # collections so removed materials cannot remain recommendable.
+            logger.info("MathE catalog has no completed recommendation materials")
+            embeddings = np.empty((0, 0), dtype=float)
+
         collection_indices = _build_collection_indices(materials)
         collection_indices = include_legacy_mathe_collection(
             collection_indices,
@@ -330,6 +333,8 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
         )
         logger.exception("MathE online refresh pipeline failed")
         raise
+    finally:
+        syncer.is_running = False
 
 
 __all__ = ["run_mathe_pipeline"]

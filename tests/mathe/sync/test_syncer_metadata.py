@@ -2,6 +2,8 @@
 
 import sqlite3
 
+import pytest
+
 from dataset_recsys.utils import mathe_sync_migrations
 import dataset_recsys.utils.mathe_syncer as mathe_syncer_module
 
@@ -88,7 +90,7 @@ def test_sync_catalog_migrates_and_backfills_legacy_entries(tmp_path, monkeypatc
     _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
 
-    with syncer._get_sqlite_conn() as conn:
+    with syncer.catalog.connection() as conn:
         columns = {
             row["name"]
             for row in conn.execute("PRAGMA table_info(sync_entries)").fetchall()
@@ -137,7 +139,7 @@ def test_sync_catalog_migrates_and_backfills_legacy_entries(tmp_path, monkeypatc
     assert entries["223.pptx"]["content_subtype"] == "pptx"
 
     # Transitional Stage 1 placeholder values are normalized in place.
-    with syncer._get_sqlite_conn() as conn:
+    with syncer.catalog.connection() as conn:
         conn.execute(
             """
             UPDATE sync_entries
@@ -148,7 +150,7 @@ def test_sync_catalog_migrates_and_backfills_legacy_entries(tmp_path, monkeypatc
         conn.commit()
 
     # Re-running the migration must preserve state and remain idempotent.
-    syncer._init_db()
+    syncer.catalog = type(syncer.catalog)(syncer.db_path)
     assert len(syncer.get_raw()) == 4
     migrated_video = {
         entry["id"]: entry for entry in syncer.get_raw()
@@ -163,7 +165,7 @@ def test_discovery_preserves_platform_id_and_video_subtype(tmp_path, monkeypatch
 
     _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
-    with syncer._get_sqlite_conn() as conn:
+    with syncer.catalog.connection() as conn:
         conn.execute(
             """
             INSERT INTO sync_entries (
@@ -215,8 +217,8 @@ def test_discovery_preserves_platform_id_and_video_subtype(tmp_path, monkeypatch
     fake_mathe_client = FakeMatheClient()
     monkeypatch.setattr(syncer, "_get_mathe_client", lambda: fake_mathe_client)
 
-    syncer._init_data()
-    syncer._init_data()
+    syncer.reconcile_sources()
+    syncer.reconcile_sources()
 
     entries = {entry["id"]: entry for entry in syncer.get_raw()}
     assert len(entries) == 3
@@ -242,3 +244,258 @@ def test_discovery_preserves_platform_id_and_video_subtype(tmp_path, monkeypatch
     assert document["platform_material_id"] == "221"
     assert document["type"] == "document"
     assert document["content_subtype"] == "pdf"
+
+
+def test_discovery_reconciles_added_updated_and_removed_materials(
+    tmp_path,
+    monkeypatch,
+):
+    pdf_dir = tmp_path / "pdfs"
+    pdf_dir.mkdir()
+    (pdf_dir / "221.pdf").write_bytes(b"first")
+    (pdf_dir / "222.pdf").write_bytes(b"second")
+
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    video_rows = [
+        {
+            "platform_material_id": 901,
+            "link": "https://www.youtube.com/watch?v=abcdefghijk",
+            "platform_type": 1,
+        },
+        {
+            "platform_material_id": 902,
+            "link": "Zyxwvutsrqp",
+            "platform_type": 2,
+        },
+    ]
+
+    class FakeMatheClient:
+        def get_video_materials(self):
+            return video_rows
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(syncer, "_get_mathe_client", FakeMatheClient)
+    syncer.reconcile_sources()
+
+    removed_transcript = syncer._transcript_dir / "Zyxwvutsrqp.txt"
+    removed_transcript.write_text("recoverable transcript", encoding="utf-8")
+    (pdf_dir / "221.pdf").unlink()
+    (pdf_dir / "223.pdf").write_bytes(b"third")
+    video_rows[:] = [
+        {
+            "platform_material_id": 904,
+            "link": "https://youtu.be/abcdefghijk",
+            "platform_type": 2,
+        },
+        {
+            "platform_material_id": 905,
+            "link": "https://youtube.com/watch?v=abcdefghijk",
+            "platform_type": 1,
+        },
+        {
+            "platform_material_id": 906,
+            "link": "newvideo123",
+            "platform_type": 1,
+        },
+    ]
+
+    syncer.reconcile_sources()
+
+    entries = {entry["id"]: entry for entry in syncer.get_raw()}
+    assert set(entries) == {"222.pdf", "223.pdf", "abcdefghijk", "newvideo123"}
+    assert entries["abcdefghijk"]["platform_material_id"] == "904"
+    assert entries["abcdefghijk"]["content_subtype"] == "video_review"
+    assert entries["abcdefghijk"]["source_value"] == (
+        "https://youtu.be/abcdefghijk"
+    )
+    assert entries["newvideo123"]["content_subtype"] == "video_lesson"
+    assert removed_transcript.read_text(encoding="utf-8") == (
+        "recoverable transcript"
+    )
+
+
+def test_video_registry_failure_preserves_cached_catalog(tmp_path, monkeypatch):
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    with syncer.catalog.connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO sync_entries (
+                id, type, source_value, claude_ocr_text, status,
+                platform_material_id, content_subtype
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "abcdefghijk",
+                "video",
+                "https://youtu.be/abcdefghijk",
+                "cached transcript",
+                "completed",
+                "901",
+                "video_lesson",
+            ),
+        )
+        conn.commit()
+
+    class FailingMatheClient:
+        def get_video_materials(self):
+            raise RuntimeError("temporary PostgreSQL outage")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(syncer, "_get_mathe_client", FailingMatheClient)
+
+    syncer.reconcile_sources()
+
+    assert [entry["id"] for entry in syncer.get_raw()] == ["abcdefghijk"]
+
+
+def test_document_reconciliation_only_uses_available_source_directories(
+    tmp_path,
+    monkeypatch,
+):
+    pdf_dir = tmp_path / "pdfs"
+    pdf_dir.mkdir()
+
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    with syncer.catalog.connection() as conn:
+        conn.executemany(
+            """
+            INSERT INTO sync_entries (
+                id, type, internal_pdf_path, claude_ocr_text, status,
+                platform_material_id, content_subtype
+            ) VALUES (?, 'document', ?, ?, 'completed', ?, ?)
+            """,
+            [
+                ("221.pdf", "/old/221.pdf", "pdf text", "221", "pdf"),
+                (
+                    "222.docx",
+                    "/old/222_docx.pdf",
+                    "docx text",
+                    "222",
+                    "docx",
+                ),
+            ],
+        )
+        conn.commit()
+
+    class EmptyMatheClient:
+        def get_video_materials(self):
+            return []
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(syncer, "_get_mathe_client", EmptyMatheClient)
+
+    syncer.reconcile_sources()
+
+    entries = {entry["id"]: entry for entry in syncer.get_raw()}
+    assert "221.pdf" not in entries
+    assert entries["222.docx"]["claude_ocr_text"] == "docx text"
+
+
+def test_reconciliation_preserves_completed_legacy_document_row(
+    tmp_path,
+    monkeypatch,
+):
+    pdf_dir = tmp_path / "pdfs"
+    pdf_dir.mkdir()
+    source_pdf = pdf_dir / "221.pdf"
+    source_pdf.write_bytes(b"current source")
+
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    with syncer.catalog.connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO sync_entries (
+                id, type, internal_pdf_path, claude_ocr_text, status,
+                platform_material_id, content_subtype
+            ) VALUES (?, 'document', ?, ?, 'completed', ?, 'pdf')
+            """,
+            ("./221.pdf", "./221.pdf", "completed OCR", "221"),
+        )
+        conn.commit()
+
+    class EmptyMatheClient:
+        def get_video_materials(self):
+            return []
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(syncer, "_get_mathe_client", EmptyMatheClient)
+
+    syncer.reconcile_sources()
+
+    entries = syncer.get_raw()
+    assert len(entries) == 1
+    assert entries[0]["id"] == "./221.pdf"
+    assert entries[0]["internal_pdf_path"] == str(source_pdf)
+    assert entries[0]["claude_ocr_text"] == "completed OCR"
+    assert entries[0]["status"] == "completed"
+
+
+def test_empty_video_transcript_is_requeued(tmp_path, monkeypatch):
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    with syncer.catalog.connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO sync_entries (
+                id, type, source_value, claude_ocr_text, status,
+                platform_material_id, content_subtype
+            ) VALUES (?, 'video', ?, '', 'completed', ?, ?)
+            """,
+            (
+                "abcdefghijk",
+                "https://youtu.be/abcdefghijk",
+                "901",
+                "video_lesson",
+            ),
+        )
+        conn.commit()
+    (syncer._transcript_dir / "abcdefghijk.txt").write_text(
+        "\n",
+        encoding="utf-8",
+    )
+
+    class FakeMatheClient:
+        def get_video_materials(self):
+            return [
+                {
+                    "platform_material_id": 901,
+                    "link": "https://youtu.be/abcdefghijk",
+                    "platform_type": 1,
+                }
+            ]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(syncer, "_get_mathe_client", FakeMatheClient)
+
+    syncer.reconcile_sources()
+
+    [entry] = syncer.get_raw()
+    assert entry["status"] == "pending"
+    assert entry["claude_ocr_text"] is None
+
+
+def test_source_reconciliation_propagates_catalog_failure(tmp_path, monkeypatch):
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+
+    def fail_catalog_read():
+        raise RuntimeError("catalog read failed")
+
+    monkeypatch.setattr(syncer.catalog, "list_entries", fail_catalog_read)
+
+    with pytest.raises(RuntimeError, match="catalog read failed"):
+        syncer.reconcile_sources()

@@ -6,8 +6,25 @@ from dataset_recsys.storage.recommendation_client import RecommendationClient
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/dataset-recsys", tags=["Service Health"])
-recs_client = RecommendationClient()
-embedding_client = EmbeddingClient()
+recs_client: RecommendationClient | None = None
+embedding_client: EmbeddingClient | None = None
+
+
+def get_recommendation_client() -> RecommendationClient:
+    """Create the Redis client only when a health check needs it."""
+    global recs_client
+    if recs_client is None:
+        recs_client = RecommendationClient()
+    return recs_client
+
+
+def get_embedding_client() -> EmbeddingClient:
+    """Connect to PostgreSQL only when an endpoint needs it."""
+    global embedding_client
+    if embedding_client is None:
+        embedding_client = EmbeddingClient()
+    return embedding_client
+
 
 @router.get(
     "/health",
@@ -17,8 +34,8 @@ embedding_client = EmbeddingClient()
 )
 async def health_check():
     try:
-        is_redis_up = recs_client.check_connection()
-        is_vector_db_up = embedding_client.check_connection()
+        is_redis_up = get_recommendation_client().check_connection()
+        is_vector_db_up = get_embedding_client().check_connection()
 
         if not is_redis_up or not is_vector_db_up:
             logger.error(
@@ -61,9 +78,7 @@ async def root():
 )
 async def get_schema():
     try:
-        if embedding_client is None:
-            raise HTTPException(status_code=503, detail="Embedding client not initialized")
-        schema = embedding_client.get_schema_overview()
+        schema = get_embedding_client().get_schema_overview()
         return {"status": "ok", "schema": schema}
     except Exception as e:
         logger.error(f"Error fetching schema: {e}", exc_info=True)

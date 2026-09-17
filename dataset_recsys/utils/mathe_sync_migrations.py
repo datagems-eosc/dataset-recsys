@@ -1,6 +1,6 @@
 """Transitional migrations for MathE's deployed SQLite sync catalog.
 
-Delete this module and its single call from ``MathE_Syncer._init_db`` after all
+Delete this module and its call from ``MathESyncCatalog._initialize`` after all
 deployed catalogs contain and have backfilled the Stage 1 content metadata.
 """
 

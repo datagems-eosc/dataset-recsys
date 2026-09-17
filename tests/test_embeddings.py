@@ -1,5 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
-from threading import Event
+from threading import Event, Lock
+
+import numpy as np
 
 from dataset_recsys import embeddings
 
@@ -77,3 +79,62 @@ def test_sentence_transformer_is_loaded_once_for_concurrent_requests(monkeypatch
 
     assert first_model is second_model
     assert created_models == [first_model]
+
+
+def test_sentence_transformer_encoding_is_serialized(monkeypatch):
+    first_encoding_started = Event()
+    release_first_encoding = Event()
+    active_lock = Lock()
+    active_encodings = 0
+    max_active_encodings = 0
+
+    class FakeTokenizer:
+        def __call__(self, text, truncation=False):
+            return {"input_ids": [1]}
+
+    class FakeSentenceTransformer:
+        tokenizer = FakeTokenizer()
+        max_seq_length = 8192
+
+        def encode(self, texts, **kwargs):
+            nonlocal active_encodings, max_active_encodings
+            with active_lock:
+                active_encodings += 1
+                max_active_encodings = max(max_active_encodings, active_encodings)
+                is_first_encoding = active_encodings == 1 and not first_encoding_started.is_set()
+
+            if is_first_encoding:
+                first_encoding_started.set()
+                assert release_first_encoding.wait(timeout=2)
+
+            try:
+                return np.ones((len(texts), 2))
+            finally:
+                with active_lock:
+                    active_encodings -= 1
+
+    model = FakeSentenceTransformer()
+    monkeypatch.setattr(
+        embeddings,
+        "_load_sentence_transformer_model",
+        lambda model_name: model,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(
+            embeddings._encode_sentence_transformer_texts,
+            ["first"],
+            "BAAI/bge-m3",
+        )
+        assert first_encoding_started.wait(timeout=2)
+        second = executor.submit(
+            embeddings._encode_sentence_transformer_texts,
+            ["second"],
+            "BAAI/bge-m3",
+        )
+        release_first_encoding.set()
+
+        first.result(timeout=2)
+        second.result(timeout=2)
+
+    assert max_active_encodings == 1

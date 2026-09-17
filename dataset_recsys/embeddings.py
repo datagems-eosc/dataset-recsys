@@ -15,6 +15,7 @@ from dataset_recsys.ingestion.fetch_gems_datasets import DatasetProfile
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 _SENTENCE_TRANSFORMER_LOAD_LOCK = Lock()
+_SENTENCE_TRANSFORMER_ENCODE_LOCK = Lock()
 EMBEDDING_MODEL_CONFIG = {
     "allenai/specter2_base": {
         "backend": "transformers",
@@ -93,40 +94,48 @@ def _encode_sentence_transformer_texts(
     model_name: str,
 ) -> np.ndarray:
     model = _load_sentence_transformer_model(model_name)
-    max_length = get_default_max_length(model_name)
-    if hasattr(model, "max_seq_length"):
-        model.max_seq_length = max_length
+    with _SENTENCE_TRANSFORMER_ENCODE_LOCK:
+        max_length = get_default_max_length(model_name)
+        if hasattr(model, "max_seq_length"):
+            model.max_seq_length = max_length
 
-    if not texts:
-        return np.empty((0, 0))
+        if not texts:
+            return np.empty((0, 0))
 
-    tokenizer = model.tokenizer
-    token_counts = [_token_count(text, tokenizer) for text in texts]
-    embeddings: list[np.ndarray | None] = [None] * len(texts)
+        tokenizer = model.tokenizer
+        token_counts = [_token_count(text, tokenizer) for text in texts]
+        embeddings: list[np.ndarray | None] = [None] * len(texts)
 
-    short_indices = [
-        index for index, token_count in enumerate(token_counts)
-        if token_count <= max_length
-    ]
-    if short_indices:
-        short_embeddings = model.encode(
-            [texts[index] for index in short_indices],
-            batch_size=8,
-            convert_to_numpy=True,
-            show_progress_bar=False,
-        )
-        for index, embedding in zip(short_indices, short_embeddings, strict=False):
-            embeddings[index] = embedding
-
-    for index, token_count in enumerate(token_counts):
-        if token_count > max_length:
-            embeddings[index] = _encode_with_optional_chunking(
-                texts[index],
-                model=model,
-                max_length=max_length,
+        short_indices = [
+            index
+            for index, token_count in enumerate(token_counts)
+            if token_count <= max_length
+        ]
+        if short_indices:
+            short_embeddings = model.encode(
+                [texts[index] for index in short_indices],
+                batch_size=8,
+                convert_to_numpy=True,
+                show_progress_bar=False,
             )
+            for index, embedding in zip(
+                short_indices,
+                short_embeddings,
+                strict=False,
+            ):
+                embeddings[index] = embedding
 
-    return np.stack([embedding for embedding in embeddings if embedding is not None])
+        for index, token_count in enumerate(token_counts):
+            if token_count > max_length:
+                embeddings[index] = _encode_with_optional_chunking(
+                    texts[index],
+                    model=model,
+                    max_length=max_length,
+                )
+
+        return np.stack(
+            [embedding for embedding in embeddings if embedding is not None]
+        )
 
 
 @lru_cache(maxsize=2)

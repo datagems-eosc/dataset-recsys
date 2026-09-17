@@ -6,6 +6,7 @@ from typing import Callable
 
 import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException, status, BackgroundTasks
+from starlette.concurrency import run_in_threadpool
 
 from dataset_recsys.api.analytical_patterns.models import (
     MatheRecommendation,
@@ -138,13 +139,16 @@ async def _get_content_recommendations(
                 detail="Insufficient permissions to access MathE recommendations.",
             )
 
-        recommended_material_ids = recommender(
-            question_id=question_id_int,
-            question=question,
-            k=request.n,
-            mathe_mirror_client=get_mathe_client(),
-            embedding_client=get_embedding_client(),
-        )
+        def run_recommender() -> list[str]:
+            return recommender(
+                question_id=question_id_int,
+                question=question,
+                k=request.n,
+                mathe_mirror_client=get_mathe_client(),
+                embedding_client=get_embedding_client(),
+            )
+
+        recommended_material_ids = await run_in_threadpool(run_recommender)
         if not recommended_material_ids:
             log.warning(
                 "No %s recommendations found for question_id %s",

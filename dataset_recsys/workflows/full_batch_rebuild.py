@@ -17,6 +17,7 @@ from dataset_recsys.embeddings import build_embedding_text, encode_texts
 from dataset_recsys.retrieval import RankedNeighbors, rank_similar_entities
 from dataset_recsys.storage.recommendation_client import RecommendationClient
 from dataset_recsys.storage.embedding_client import EmbeddingClient
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from dataset_recsys.utils.text_preprocessing import preprocess_catalog
 
 logger = logging.getLogger(__name__)
@@ -235,6 +236,8 @@ def run_full_batch_rebuild(
     redis_host="localhost",
     redis_port=6379,
     redis_db=0,
+    qdrant_host="localhost",
+    qdrant_port=6333,
     application: str = "ds2ds",
     enrichment_llm: str = "claude-sonnet-4-6",
     prompt_version: str = "catalog_summary_v1",
@@ -243,6 +246,7 @@ def run_full_batch_rebuild(
     """Run the full batch rebuild workflow for the dataset recommender."""
     recs_client = RecommendationClient(host=redis_host, port=redis_port, db=redis_db)
     embedding_client = EmbeddingClient()
+    qdrant_client = QdrantStorageClient(host=qdrant_host, port=qdrant_port)
 
     def generate_embeddings_step(catalog):
         embedding_texts = [build_embedding_text(profile) for profile in catalog]
@@ -277,6 +281,7 @@ def run_full_batch_rebuild(
         # Store embeddings + metadata in Postgres/vector DB
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")  # unique per workflow run
         dataset_ids = [p.id for p in catalog]
+        # 1. Store in legacy PostgreSQL/pgvector        
         embedding_client.store_embeddings(
             application=application,
             dataset_ids=dataset_ids,
@@ -287,14 +292,33 @@ def run_full_batch_rebuild(
             prompt_version=prompt_version,
             run_id=run_id,
         )
-        print(f"[TEST] Stored {len(dataset_ids)} embeddings with metadata (run_id={run_id})")        
+        # 2. Store in Qdrant Vector Database
+        qdrant_client.store_embeddings(
+            application=application,
+            dataset_ids=dataset_ids,
+            embeddings=embeddings,
+            embedding_inputs=embedding_texts,
+            embedding_model=embedding_model,
+            enrichment_llm=enrichment_llm,
+            prompt_version=prompt_version,
+            run_id=run_id,
+        )
+        print(f"[TEST] Stored {len(dataset_ids)} embeddings in PostgreSQL and Qdrant (run_id={run_id})")   
 
     def compute_recommendations_step(payload, catalog):
         embeddings = payload["embeddings"]
         return rank_similar_entities([profile.id for profile in catalog], embeddings)
 
     def write_recommendations_step(recommendations):
+        # 1. Store in legacy Redis
         recs_client.store_recommendations(application=application, data=recommendations)
+        
+        # 2. Store in Qdrant Payload
+        qdrant_client.store_recommendations(
+            application=application,
+            recommendations=recommendations
+        )
+        print(f"[TEST] Recommendations written to Redis and Qdrant payload for '{application}'")
 
     workflow = FullBatchRebuildWorkflow(
         fetch_catalog=fetch_catalog,
@@ -341,8 +365,10 @@ if __name__ == "__main__":
         user="postgres",
         password="postgres"
     )
+    qdrant_client = QdrantStorageClient(host="localhost", port=6333)
     print("Redis OK:", recs_client.check_connection())
     print("Embedding DB OK:", embedding_client.check_connection())
+    print("Qdrant OK:", qdrant_client.check_connection())
 
     def fetch_catalog_step():
         catalog = fetch_catalog()
@@ -386,6 +412,8 @@ if __name__ == "__main__":
         # Store embeddings + metadata in Postgres/vector DB
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")  # unique per workflow run
         dataset_ids = [p.id for p in catalog]
+        
+        # 1. Store in legacy PostgreSQL/pgvector
         embedding_client.store_embeddings(
             application=application,
             dataset_ids=dataset_ids,
@@ -396,7 +424,19 @@ if __name__ == "__main__":
             prompt_version=prompt_version,
             run_id=run_id,
         )
-        print(f"[TEST] Stored {len(dataset_ids)} embeddings with metadata (run_id={run_id})")
+        
+        # 2. Store in Qdrant Vector Database
+        qdrant_client.store_embeddings(
+            application=application,
+            dataset_ids=dataset_ids,
+            embeddings=embeddings,
+            embedding_inputs=embedding_texts,
+            embedding_model=embedding_model,
+            enrichment_llm=enrichment_llm,
+            prompt_version=prompt_version,
+            run_id=run_id,
+        )
+        print(f"[TEST] Stored {len(dataset_ids)} embeddings in PostgreSQL and Qdrant (run_id={run_id})")
 
     def compute_recommendations_step(payload, catalog):
         embeddings = payload["embeddings"]
@@ -404,8 +444,9 @@ if __name__ == "__main__":
 
     def write_recommendations_step(recommendations):
         stored_entities = recs_client.store_recommendations(application=application, data=recommendations)
+        qdrant_client.store_recommendations(application=application, recommendations=recommendations)
         print(
-            f"[TEST] Recommendations written to Redis for application '{application}' "
+            f"[TEST] Recommendations written to Redis and Qdrant for application '{application}' "
             f"({stored_entities} entities stored)"
         )
 

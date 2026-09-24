@@ -1,28 +1,30 @@
 """
-CLI utility to manage recommendation data stored in Redis.
+CLI utility to manage recommendation data stored in Qdrant.
 
 Supported actions:
 - ingest recommendation results for one application
 - delete all stored recommendations for one application
 - list stored entity IDs for one application
+- fetch recommendations for a specific entity
+- remove a dataset and its references from one application
 """
+import argparse
 import json
 import os
-import argparse
 from typing import Optional
-from dataset_recsys.storage.recommendation_client import RecommendationClient
+
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 
 
-def get_client() -> Optional[RecommendationClient]:
-    """Create a Redis client using the local test configuration."""
-    os.environ["REDIS_HOST"] = "localhost"
-    os.environ["REDIS_PORT"] = "6380"
-    os.environ["REDIS_DB"] = "0"
+def get_client() -> Optional[QdrantStorageClient]:
+    """Create a Qdrant client using local test or environment configuration."""
+    host = os.getenv("QDRANT_HOST", "localhost")
+    port = int(os.getenv("QDRANT_PORT", "6333"))
 
-    client = RecommendationClient()
+    client = QdrantStorageClient(host=host, port=port)
 
     if not client.check_connection():
-        print("Sub-optimal: Could not connect to Redis. Is the port-forward active?")
+        print("Sub-optimal: Could not connect to Qdrant. Is the port-forward or service active?")
         return None
 
     return client
@@ -33,13 +35,13 @@ def ingest_recommendations(file_path: str, application: str):
         return
 
     print(f"Starting ingestion for application: {application}...")
-    
+
     try:
         result = client.ingest_dataset(file_path, application=application)
         print(f"✅ Success: {result}")
     except Exception as e:
         print(f"❌ Ingestion failed: {e}")
-        
+
 
 def delete_application(application: str):
     client = get_client()
@@ -50,9 +52,10 @@ def delete_application(application: str):
 
     try:
         result = client.delete_application(application)
-        print(f"✅ Deleted {result} recommendation keys for application '{application}'.")
+        print(f"✅ Deleted recommendations for application '{application}'.")
     except Exception as e:
         print(f"❌ Delete failed: {e}")
+
 
 def remove_dataset(application: str, entity_id: str):
     client = get_client()
@@ -63,9 +66,10 @@ def remove_dataset(application: str, entity_id: str):
 
     try:
         deleted = client.remove_dataset(application, entity_id)
-        print(f"✅ Removed dataset '{entity_id}' (deleted keys: {deleted}).")
+        print(f"✅ Removed dataset '{entity_id}'.")
     except Exception as e:
         print(f"❌ Remove dataset failed: {e}")
+
 
 def get_recommendations(application: str, entity_id: str, limit: int):
     client = get_client()
@@ -74,12 +78,11 @@ def get_recommendations(application: str, entity_id: str, limit: int):
 
     print(f"🔍 Fetching recommendations for '{entity_id}' in application '{application}'...")
     recs = client.get_recommendations(application, entity_id, limit=limit)
-    
+
     if not recs:
         print(f"⚠️ No recommendations found for entity '{entity_id}'.")
     else:
         print(f"✅ Found {len(recs)} recommendations:")
-        # Print as a clean JSON list for easy reading
         print(json.dumps(recs, indent=2))
 
 def list_entities(application: str):
@@ -92,7 +95,7 @@ def list_entities(application: str):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Manage application recommendations stored in Redis")
+    parser = argparse.ArgumentParser(description="Manage application recommendations stored in Qdrant")
     subparsers = parser.add_subparsers(dest="command")
 
     ingest_parser = subparsers.add_parser("ingest", help="Ingest recommendation JSON file for one application")
@@ -128,13 +131,3 @@ if __name__ == "__main__":
         remove_dataset(args.application, args.entity_id)
     else:
         parser.print_help()
-
-# python dataset_recsys/storage/manage_recommendations.py ingest data/mathe/mathe_top20_recommendations.json mathe
-# python dataset_recsys/storage/manage_recommendations.py ingest data/gems_datasets_metadata/moma/datagems_dataset_recommendations_claude-sonnet-4-6.json ds2ds
-# python dataset_recsys/storage/manage_recommendations.py delete-application mathe
-# python dataset_recsys/storage/manage_recommendations.py delete-application ds2ds
-# python dataset_recsys/storage/manage_recommendations.py list-entities mathe
-# python dataset_recsys/storage/manage_recommendations.py list-entities ds2ds
-# python dataset_recsys/storage/manage_recommendations.py get mathe 6.pdf
-# python dataset_recsys/storage/manage_recommendations.py get ds2ds 07382b91-5bc5-42f9-8391-33adc2460c19
-# python dataset_recsys/storage/manage_recommendations.py remove-dataset mathe 7.pdf

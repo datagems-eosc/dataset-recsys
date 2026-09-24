@@ -1,30 +1,18 @@
 import structlog
 from fastapi import APIRouter, HTTPException
 
-from dataset_recsys.storage.embedding_client import EmbeddingClient
-from dataset_recsys.storage.recommendation_client import RecommendationClient
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/dataset-recsys", tags=["Service Health"])
-recs_client: RecommendationClient | None = None
-embedding_client: EmbeddingClient | None = None
+qdrant_client: QdrantStorageClient | None = None
 
-
-def get_recommendation_client() -> RecommendationClient:
-    """Create the Redis client only when a health check needs it."""
-    global recs_client
-    if recs_client is None:
-        recs_client = RecommendationClient()
-    return recs_client
-
-
-def get_embedding_client() -> EmbeddingClient:
-    """Connect to PostgreSQL only when an endpoint needs it."""
-    global embedding_client
-    if embedding_client is None:
-        embedding_client = EmbeddingClient()
-    return embedding_client
-
+def get_qdrant_client() -> QdrantStorageClient:
+    """Connect to Qdrant only when an endpoint needs it."""
+    global qdrant_client
+    if qdrant_client is None:
+        qdrant_client = QdrantStorageClient()
+    return qdrant_client
 
 @router.get(
     "/health",
@@ -34,14 +22,11 @@ def get_embedding_client() -> EmbeddingClient:
 )
 async def health_check():
     try:
-        is_redis_up = get_recommendation_client().check_connection()
-        is_vector_db_up = get_embedding_client().check_connection()
-
-        if not is_redis_up or not is_vector_db_up:
+        is_qdrant_up = get_qdrant_client().check_connection()
+        if not is_qdrant_up:
             logger.error(
                 "Health check failed",
-                redis=is_redis_up,
-                vector_db=is_vector_db_up,
+                qdrant=is_qdrant_up,
             )
             raise HTTPException(
                 status_code=503,
@@ -78,7 +63,7 @@ async def root():
 )
 async def get_schema():
     try:
-        schema = get_embedding_client().get_schema_overview()
+        schema = get_qdrant_client().get_schema_overview()
         return {"status": "ok", "schema": schema}
     except Exception as e:
         logger.error(f"Error fetching schema: {e}", exc_info=True)

@@ -14,7 +14,7 @@ from dataset_recsys.mathe_recommenders.curricular_pool_ranker import (
     rank_curricular_pool_candidates,
 )
 from dataset_recsys.mathe_recommenders.seed_scoring import compute_keyword_jaccard
-from dataset_recsys.storage.embedding_client import EmbeddingClient
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 from recs_metrics.ranked_list import (
     binary_precision_at_k,
@@ -55,7 +55,7 @@ def _percentile_defined(values: list[float | None], percentile: float) -> float 
 def evaluate_keyword_proxy(
     benchmark_rows: list[dict],
     mathe_client: MatheMirrorClient,
-    embedding_client: EmbeddingClient,
+    qdrant_client: QdrantStorageClient,
     recommendations_k: int,
 ) -> list[dict]:
     """Evaluate ranking agreement with question-material keyword overlap."""
@@ -91,7 +91,7 @@ def evaluate_keyword_proxy(
             question=str(question.get("question") or ""),
             k=recommendations_k,
             mathe_mirror_client=mathe_client,
-            embedding_client=embedding_client,
+            qdrant_client=qdrant_client,
         )
         recommendation_time_seconds = time.perf_counter() - recommendation_start
         recommended_ids = [
@@ -255,19 +255,19 @@ def excluded_questions(rows: list[dict]) -> list[dict]:
 
 def run_evaluation(output_path: Path, recommendations_k: int = 10) -> int:
     mathe_client = MatheMirrorClient()
-    embedding_client = EmbeddingClient()
+    qdrant_client = QdrantStorageClient()
     try:
         benchmark_rows = mathe_client.get_evaluation_benchmark_questions()
         rows = evaluate_keyword_proxy(
             benchmark_rows,
             mathe_client,
-            embedding_client,
+            qdrant_client,
             recommendations_k,
         )
         summary_rows = summarize(rows, recommendations_k)
         excluded_rows = excluded_questions(rows)
     finally:
-        embedding_client.close()
+        qdrant_client.close()
         mathe_client.close()
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

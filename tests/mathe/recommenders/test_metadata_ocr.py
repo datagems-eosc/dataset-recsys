@@ -4,8 +4,7 @@ from dataset_recsys.mathe_recommenders.metadata_ocr import (
     recommend_document_seeds_for_question,
 )
 
-from fakes import FakeRecommendationClient, fake_mathe_client
-
+from fakes import FakeQdrantStorageClient, fake_mathe_client
 
 def test_recommend_document_seeds_for_question_scores_and_limits_candidates():
     mathe_client = fake_mathe_client()
@@ -54,14 +53,14 @@ def test_recommend_document_seeds_for_question_returns_empty_when_question_missi
 
 def test_rank_expanded_candidates_uses_seed_and_document_similarity_scores():
     seeds = [{"material_id": 6, "metadata_score": 1.0}]
-    recommendation_client = FakeRecommendationClient(
+    qdrant_client = FakeQdrantStorageClient(
         {"6": [("10", 0.42), ("11", 0.91), ("12", 0.5)]}
     )
 
     candidates = rank_expanded_candidates(
         seeds=seeds,
         k=3,
-        recommendation_client=recommendation_client,
+        qdrant_client=qdrant_client,
         material_similarity_weight=1.0,
         neighbors_per_seed=3,
     )
@@ -99,7 +98,7 @@ def test_rank_expanded_candidates_scores_neighbor_metadata():
     candidates = rank_expanded_candidates(
         seeds=[{"material_id": 818, "metadata_score": 1.0}],
         k=2,
-        recommendation_client=FakeRecommendationClient({"818": ["900"]}),
+        qdrant_client=FakeQdrantStorageClient({"818": [("900", 0.5)]}),
         question_metadata=question_metadata,
         mathe_mirror_client=mathe_client,
     )
@@ -148,9 +147,7 @@ def test_recommend_from_metadata_seeds_returns_platform_material_ids():
         question_id=42,
         k=2,
         mathe_mirror_client=mathe_client,
-        recommendation_client=FakeRecommendationClient(
-            {"818": ["900"]}
-        ),
+        qdrant_client=FakeQdrantStorageClient({"818": [("900", 0.5)]}),
     )
 
     assert recommendations == ["818", "900"]

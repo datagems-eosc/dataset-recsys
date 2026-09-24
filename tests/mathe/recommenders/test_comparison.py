@@ -6,7 +6,7 @@ from dataset_recsys.utils.mathe_recsys_comparison import (
     compare_question_recommenders,
 )
 
-from fakes import FakeEmbeddingClient, FakeRecommendationClient, fake_mathe_client
+from fakes import FakeQdrantStorageClient, fake_mathe_client
 
 
 def test_compare_question_recommenders_includes_question_embedding_scores(
@@ -55,9 +55,11 @@ def test_compare_question_recommenders_includes_question_embedding_scores(
         question_id=42,
         k=1,
         mathe_mirror_client=mathe_client,
-        recommendation_client=FakeRecommendationClient({}),
+        qdrant_client=FakeQdrantStorageClient(
+            recommendations={},
+            similar_results=[("220", 0.91)],
+        ),
         question_text="differentiate x^2",
-        embedding_client=FakeEmbeddingClient([("220", 0.91)]),
     )
 
     recommendation = report["strategies"]["question_embedding"]["recommendations"][0]
@@ -129,8 +131,8 @@ def test_metadata_ocr_scores_do_not_include_question_similarity():
         question_id=42,
         k=2,
         mathe_mirror_client=mathe_client,
-        recommendation_client=FakeRecommendationClient(
-            {"220": [("221", 0.8)]}
+        qdrant_client=FakeQdrantStorageClient(
+            recommendations={"220": [("221", 0.8)]}
         ),
         strategies=["metadata"],
     )
@@ -184,9 +186,11 @@ def test_compare_question_recommenders_runs_selected_strategies_only(monkeypatch
         question_id=42,
         k=1,
         mathe_mirror_client=mathe_client,
-        recommendation_client=FakeRecommendationClient({}),
+        qdrant_client=FakeQdrantStorageClient(
+            recommendations={},
+            similar_results=[("220", 0.91)],
+        ),
         question_text="differentiate x^2",
-        embedding_client=FakeEmbeddingClient([("220", 0.91)]),
         strategies=["curricular_pool"],
     )
 

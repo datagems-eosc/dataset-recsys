@@ -11,9 +11,8 @@ from dataset_recsys.mathe_recommenders.hybrid import recommend_hybrid_candidates
 from dataset_recsys.mathe_recommenders.curricular_pool_ranker import (
     rank_curricular_pool_candidates,
 )
-from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
-from dataset_recsys.storage.recommendation_client import RecommendationClient
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 
 
 AVAILABLE_STRATEGIES = (
@@ -124,9 +123,8 @@ def compare_question_recommenders(
     question_id: int,
     k: int,
     mathe_mirror_client: MatheMirrorClient,
-    recommendation_client: RecommendationClient,
+    qdrant_client: QdrantStorageClient,
     question_text: str | None = None,
-    embedding_client: EmbeddingClient | None = None,
     strategies: list[str] | tuple[str, ...] | None = None,
 ) -> dict:
     """Build an internal comparison report for MathE recommender strategies."""
@@ -150,7 +148,7 @@ def compare_question_recommenders(
         metadata_candidates = rank_expanded_candidates(
             seeds=metadata_seeds,
             k=k,
-            recommendation_client=recommendation_client,
+            qdrant_client=qdrant_client,
             question_metadata=dict(question_metadata),
             mathe_mirror_client=mathe_mirror_client,
         )
@@ -171,10 +169,11 @@ def compare_question_recommenders(
         )
         popular_seed_id = seed_material_id(popular_seed) if popular_seed else None
         popular_neighbors = (
-            recommendation_client.get_recommendations_with_scores(
+            qdrant_client.get_recommendations_with_scores(
                 application=MatheApplication.DOCUMENTS,
                 entity_id=popular_seed_id,
                 limit=k,
+                collection_name=qdrant_client.COLLECTION_MATHE,
             )
             if popular_seed_id
             else []
@@ -200,7 +199,7 @@ def compare_question_recommenders(
             recommend_from_question_embedding(
                 question_text,
                 k,
-                embedding_client=embedding_client,
+                qdrant_client=qdrant_client,
                 question_metadata=dict(question_metadata),
                 mathe_mirror_client=mathe_mirror_client,
             )
@@ -226,8 +225,7 @@ def compare_question_recommenders(
                 question=question_text,
                 k=k,
                 mathe_mirror_client=mathe_mirror_client,
-                recommendation_client=recommendation_client,
-                embedding_client=embedding_client,
+                qdrant_client=qdrant_client,
             )
             if question_text
             else []
@@ -254,7 +252,7 @@ def compare_question_recommenders(
                 question=question_text,
                 k=k,
                 mathe_mirror_client=mathe_mirror_client,
-                embedding_client=embedding_client,
+                qdrant_client=qdrant_client,
             )
             if question_text
             else []
@@ -314,7 +312,7 @@ def compare_question_recommenders(
         }
     if "question_embedding" in strategy_payloads:
         strategies_output["question_embedding"] = {
-            "description": "Question-text flow: embed provided question text, then query MathE material embeddings in pgvector.",
+            "description": "Question-text flow: embed provided question text, then query MathE material embeddings in Qdrant.",
             "recommendations": _enrich_recommendations(
                 strategy_payloads["question_embedding"]["ids"],
                 details_by_id,

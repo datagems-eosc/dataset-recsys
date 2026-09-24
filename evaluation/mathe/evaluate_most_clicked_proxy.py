@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from dataset_recsys.mathe_recommenders.curricular_pool_ranker import (
     recommend_from_curricular_pool,
 )
-from dataset_recsys.storage.embedding_client import EmbeddingClient
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 
 
@@ -32,7 +32,7 @@ def _benchmark_questions_with_document_candidates(
 def evaluate_most_clicked_proxy(
     benchmark_rows: list[dict],
     mathe_client: MatheMirrorClient,
-    embedding_client: EmbeddingClient,
+    qdrant_client: QdrantStorageClient,
     recommendations_k: int,
 ) -> list[dict]:
     """Evaluate whether each pool's most-clicked document appears in recommendations."""
@@ -52,7 +52,7 @@ def evaluate_most_clicked_proxy(
             question=str(question.get("question") or ""),
             k=recommendations_k,
             mathe_mirror_client=mathe_client,
-            embedding_client=embedding_client,
+            qdrant_client=qdrant_client,
         )
         recommender_rank = (
             recommendations.index(most_clicked_id) + 1
@@ -88,17 +88,17 @@ def evaluate_most_clicked_proxy(
 
 def run_evaluation(output_path: Path, recommendations_k: int = 10) -> int:
     mathe_client = MatheMirrorClient()
-    embedding_client = EmbeddingClient()
+    qdrant_client = QdrantStorageClient()
     try:
         benchmark_rows = _benchmark_questions_with_document_candidates(mathe_client)
         rows = evaluate_most_clicked_proxy(
             benchmark_rows,
             mathe_client,
-            embedding_client,
+            qdrant_client,
             recommendations_k,
         )
     finally:
-        embedding_client.close()
+        qdrant_client.close()
         mathe_client.close()
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

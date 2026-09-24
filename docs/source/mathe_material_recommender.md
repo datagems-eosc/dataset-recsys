@@ -208,7 +208,7 @@ dataset_recsys/mathe_recommenders/question_embedding.py
 Internally, this calls:
 
 ```text
-EmbeddingClient.find_similar_by_ids(...)
+QdrantStorageClient.find_similar_by_ids(...)
 ```
 
 from:

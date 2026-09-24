@@ -5,7 +5,7 @@ from dataset_recsys.mathe_recommenders.curricular_pool_ranker import (
     recommend_from_curricular_pool,
 )
 
-from fakes import FakeEmbeddingClient, fake_mathe_client
+from fakes import FakeQdrantClient, fake_mathe_client
 
 
 def test_rank_curricular_pool_candidates_scores_only_the_same_pool():
@@ -30,7 +30,7 @@ def test_rank_curricular_pool_candidates_scores_only_the_same_pool():
             "keywords": [],
         },
     ]
-    embedding_client = FakeEmbeddingClient(
+    qdrant_client = FakeQdrantClient(
         [("100", 0.2), ("101", 0.9), ("900", 1.0)]
     )
 
@@ -39,7 +39,7 @@ def test_rank_curricular_pool_candidates_scores_only_the_same_pool():
         question="Differentiate x sin(x).",
         k=2,
         mathe_mirror_client=mathe_client,
-        embedding_client=embedding_client,
+        qdrant_client=qdrant_client,
         keyword_weight=0.4,
         question_embedding=[0.1, 0.2],
     )
@@ -50,13 +50,13 @@ def test_rank_curricular_pool_candidates_scores_only_the_same_pool():
     ]
     assert candidates[0]["final_score"] == approx(0.54)
     assert candidates[1]["final_score"] == approx(0.52)
-    assert embedding_client.calls == [
+    assert qdrant_client.calls == [
         {
             "method": "find_similar_by_ids",
             "application": "mathe_documents",
             "query_embedding": [0.1, 0.2],
             "entity_ids": ["100", "101"],
-            "table": embedding_client.TABLE_MATHE,
+            "collection_name": qdrant_client.COLLECTION_MATHE,
         }
     ]
 
@@ -83,14 +83,14 @@ def test_rank_curricular_pool_candidates_keeps_missing_embeddings_at_zero():
             "keywords": ["product rule"],
         },
     ]
-    embedding_client = FakeEmbeddingClient([("101", 0.8)])
+    qdrant_client = FakeQdrantClient([("101", 0.8)])
 
     candidates = rank_curricular_pool_candidates(
         question_id=42,
         question="Differentiate a composition.",
         k=2,
         mathe_mirror_client=mathe_client,
-        embedding_client=embedding_client,
+        qdrant_client=qdrant_client,
         question_embedding=[0.1, 0.2],
     )
 
@@ -124,7 +124,7 @@ def test_recommend_from_curricular_pool_returns_db_material_ids():
         question="Differentiate x.",
         k=1,
         mathe_mirror_client=mathe_client,
-        embedding_client=FakeEmbeddingClient([("100", 0.9)]),
+        qdrant_client=FakeQdrantClient([("100", 0.9)]),
         question_embedding=[0.1, 0.2],
     )
 

@@ -5,7 +5,7 @@ from dataset_recsys.mathe_recommenders.seed_scoring import (
     score_document_seed_candidates,
 )
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
-from dataset_recsys.storage.recommendation_client import RecommendationClient
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 
 
 MATHE_MATERIAL_SIMILARITY_WEIGHT = min(
@@ -43,7 +43,7 @@ def add_metadata_scores(
 def rank_expanded_candidates(
     seeds: list[dict],
     k: int,
-    recommendation_client: RecommendationClient,
+    qdrant_client: QdrantStorageClient,
     question_metadata: dict | None = None,
     mathe_mirror_client: MatheMirrorClient | None = None,
     material_similarity_weight: float = MATHE_MATERIAL_SIMILARITY_WEIGHT,
@@ -84,10 +84,11 @@ def rank_expanded_candidates(
     for seed_entity_id in seed_by_entity_id:
         # Failed-OCR materials have no stored recommendation neighbors. They
         # stay in the candidate pool as metadata seeds, but do not expand.
-        neighbors = recommendation_client.get_recommendations_with_scores(
+        neighbors = qdrant_client.get_recommendations_with_scores(
             application=MatheApplication.DOCUMENTS,
             entity_id=seed_entity_id,
             limit=neighbors_per_seed,
+            collection_name=qdrant_client.COLLECTION_MATHE,
         )
 
         for neighbor_id, material_to_material_similarity in neighbors:
@@ -158,7 +159,7 @@ def recommend_from_metadata_seeds(
     question_id: int,
     k: int,
     mathe_mirror_client: MatheMirrorClient,
-    recommendation_client: RecommendationClient,
+    qdrant_client: QdrantStorageClient,
 ) -> list[str]:
     question_metadata = mathe_mirror_client.get_question_metadata(question_id)
     if not question_metadata:
@@ -172,7 +173,7 @@ def recommend_from_metadata_seeds(
     candidates = rank_expanded_candidates(
         seeds=seeds,
         k=k,
-        recommendation_client=recommendation_client,
+        qdrant_client=qdrant_client,
         question_metadata=dict(question_metadata),
         mathe_mirror_client=mathe_mirror_client,
     )

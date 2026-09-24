@@ -2,7 +2,7 @@ from pytest import approx
 
 from dataset_recsys.mathe_recommenders import question_embedding
 
-from fakes import FakeEmbeddingClient, fake_mathe_client
+from fakes import FakeQdrantClient, fake_mathe_client
 
 
 def test_recommend_from_question_embedding_queries_mathe_vector_table(
@@ -14,7 +14,7 @@ def test_recommend_from_question_embedding_queries_mathe_vector_table(
         "encode_texts",
         lambda texts, model_name: [[0.1, 0.2, 0.3]],
     )
-    embedding_client = FakeEmbeddingClient(
+    qdrant_client = FakeQdrantClient(
         [("220", 0.91), ("222", 0.85)]
     )
     mathe_client.get_document_material_metadata_by_ids = lambda material_ids: [
@@ -41,7 +41,7 @@ def test_recommend_from_question_embedding_queries_mathe_vector_table(
             "keywords": ["derivatives"],
         },
         mathe_mirror_client=mathe_client,
-        embedding_client=embedding_client,
+        qdrant_client=qdrant_client,
         candidate_limit=2,
     )
 
@@ -49,7 +49,7 @@ def test_recommend_from_question_embedding_queries_mathe_vector_table(
     assert recommendations[0]["metadata_score"] == 1.0
     assert recommendations[0]["question_to_material_similarity"] == 0.91
     assert recommendations[0]["total_score"] == approx(0.955)
-    assert embedding_client.calls == [
+    assert qdrant_client.calls == [
         {
             "application": "mathe_documents",
             "query_embedding": [0.1, 0.2, 0.3],
@@ -66,7 +66,7 @@ def test_recommend_from_question_embedding_reranks_with_metadata(monkeypatch):
         "encode_texts",
         lambda texts, model_name: [[0.1, 0.2, 0.3]],
     )
-    embedding_client = FakeEmbeddingClient(
+    qdrant_client = FakeQdrantClient(
         [("1", 0.95), ("2", 0.8)]
     )
     mathe_client.get_document_material_metadata_by_ids = lambda material_ids: [
@@ -87,7 +87,7 @@ def test_recommend_from_question_embedding_reranks_with_metadata(monkeypatch):
     recommendations = question_embedding.recommend_from_question_embedding(
         question="differentiate x^2",
         k=1,
-        embedding_client=embedding_client,
+        qdrant_client=qdrant_client,
         question_metadata={
             "topic_id": 10,
             "subtopic_id": 20,

@@ -6,7 +6,7 @@ from dataset_recsys.mathe_recommenders.constants import MatheApplication
 from dataset_recsys.mathe_recommenders.seed_scoring import (
     score_document_seed_candidates,
 )
-from dataset_recsys.storage.embedding_client import EmbeddingClient
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 
 
@@ -41,7 +41,7 @@ def encode_question(
 def score_question_similarity_for_material_ids(
     question_embedding: list[float],
     material_ids: list[str],
-    embedding_client: EmbeddingClient,
+    qdrant_client: QdrantStorageClient,
     application: MatheApplication,
 ) -> dict[str, float]:
     """
@@ -50,11 +50,11 @@ def score_question_similarity_for_material_ids(
     Materials without a stored MathE embedding are absent from the returned
     mapping; callers decide the default score for those candidates.
     """
-    similarities = embedding_client.find_similar_by_ids(
+    similarities = qdrant_client.find_similar_by_ids(
         application=application,
         query_embedding=question_embedding,
         entity_ids=material_ids,
-        table=embedding_client.TABLE_MATHE,
+        collection_name=qdrant_client.COLLECTION_MATHE,
     )
     return {
         str(material_id).strip(): float(similarity)
@@ -67,7 +67,7 @@ def recommend_from_question_embedding(
     k: int,
     question_metadata: dict[str, Any],
     mathe_mirror_client: MatheMirrorClient,
-    embedding_client: EmbeddingClient | None = None,
+    qdrant_client: QdrantStorageClient | None = None,
     embedding_model: str = DEFAULT_MATHE_EMBEDDING_MODEL,
     similarity_weight: float = MATHE_QUESTION_EMBEDDING_WEIGHT,
     candidate_limit: int = MATHE_QUESTION_EMBEDDING_CANDIDATES,
@@ -77,15 +77,15 @@ def recommend_from_question_embedding(
     if not question or k <= 0:
         return []
 
-    embedding_client = embedding_client or EmbeddingClient()
+    qdrant_client = qdrant_client or QdrantStorageClient()
     top_k = max(k, candidate_limit)
     question_embedding = encode_question(question, embedding_model)
 
-    results = embedding_client.find_similar(
+    results = qdrant_client.find_similar(
         application=MatheApplication.DOCUMENTS,
         query_embedding=question_embedding,
         top_k=top_k,
-        table=embedding_client.TABLE_MATHE,
+        collection_name=qdrant_client.COLLECTION_MATHE,
     )
 
     candidates = {

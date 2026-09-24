@@ -2,7 +2,7 @@ from pytest import approx
 
 from dataset_recsys.mathe_recommenders import hybrid
 
-from fakes import FakeEmbeddingClient, FakeRecommendationClient, fake_mathe_client
+from fakes import FakeQdrantStorageClient, fake_mathe_client
 
 
 def test_recommend_hybrid_candidates_merges_metadata_ocr_and_question_sources(
@@ -47,8 +47,9 @@ def test_recommend_hybrid_candidates_merges_metadata_ocr_and_question_sources(
         "dataset_recsys.mathe_recommenders.question_embedding.encode_texts",
         lambda texts, model_name: [[0.1, 0.2, 0.3]],
     )
-    embedding_client = FakeEmbeddingClient(
-        [("200", 0.95), ("100", 0.7), ("101", 0.6)]
+    qdrant_client = FakeQdrantStorageClient(
+        recommendations={"100": [("101", 0.8)]},
+        similar_results=[("200", 0.95), ("100", 0.7), ("101", 0.6)],
     )
 
     candidates = hybrid.recommend_hybrid_candidates(
@@ -56,10 +57,7 @@ def test_recommend_hybrid_candidates_merges_metadata_ocr_and_question_sources(
         question="Differentiate y = (2x^3 - 5x)^5.",
         k=3,
         mathe_mirror_client=mathe_client,
-        recommendation_client=FakeRecommendationClient(
-            {"100": [("101", 0.8)]}
-        ),
-        embedding_client=embedding_client,
+        qdrant_client=qdrant_client,
         metadata_weight=0.6,
         material_ocr_weight=0.25,
         question_weight=0.15,
@@ -107,15 +105,17 @@ def test_recommend_hybrid_candidates_ranks_metadata_seeds_with_question_similari
         "dataset_recsys.mathe_recommenders.question_embedding.encode_texts",
         lambda texts, model_name: [[0.1, 0.2, 0.3]],
     )
-    embedding_client = FakeEmbeddingClient([("100", 0.5), ("101", 0.99)])
+    qdrant_client = FakeQdrantStorageClient(
+            recommendations={"100": ["900"]},
+            similar_results=[("100", 0.5), ("101", 0.99)],
+        )
 
     candidates = hybrid.recommend_hybrid_candidates(
         question_id=42,
         question="differentiate x^2",
         k=2,
         mathe_mirror_client=mathe_client,
-        recommendation_client=FakeRecommendationClient({"100": ["900"]}),
-        embedding_client=embedding_client,
+        qdrant_client=qdrant_client,
         metadata_weight=0.6,
         question_weight=0.15,
     )
@@ -124,7 +124,7 @@ def test_recommend_hybrid_candidates_ranks_metadata_seeds_with_question_similari
         "101",
         "100",
     ]
-    assert embedding_client.calls[0]["method"] == "find_similar_by_ids"
+    assert qdrant_client.calls[0]["method"] == "find_similar_by_ids"
     assert candidates[0]["question_to_material_similarity"] == 0.99
 
 
@@ -151,8 +151,9 @@ def test_recommend_hybrid_candidates_keeps_question_candidate_limit_small(
         "dataset_recsys.mathe_recommenders.question_embedding.encode_texts",
         lambda texts, model_name: [[0.1, 0.2, 0.3]],
     )
-    embedding_client = FakeEmbeddingClient(
-        [("220", 0.91), ("221", 0.88), ("222", 0.85)]
+    qdrant_client = FakeQdrantStorageClient(
+        recommendations={},
+        similar_results=[("220", 0.91), ("221", 0.88), ("222", 0.85)],
     )
 
     candidates = hybrid.recommend_hybrid_candidates(
@@ -160,8 +161,7 @@ def test_recommend_hybrid_candidates_keeps_question_candidate_limit_small(
         question="differentiate x^2",
         k=10,
         mathe_mirror_client=mathe_client,
-        recommendation_client=FakeRecommendationClient({}),
-        embedding_client=embedding_client,
+        qdrant_client=qdrant_client,
     )
 
     assert [candidate["material_id"] for candidate in candidates] == [
@@ -169,7 +169,7 @@ def test_recommend_hybrid_candidates_keeps_question_candidate_limit_small(
         "221",
         "222",
     ]
-    assert embedding_client.calls[0]["top_k"] == hybrid.MATHE_HYBRID_QUESTION_CANDIDATES
+    assert qdrant_client.calls[0]["top_k"] == hybrid.MATHE_HYBRID_QUESTION_CANDIDATES
 
 
 def test_recommend_hybrid_candidates_handles_materials_without_embeddings(
@@ -208,17 +208,17 @@ def test_recommend_hybrid_candidates_handles_materials_without_embeddings(
         "dataset_recsys.mathe_recommenders.question_embedding.encode_texts",
         lambda texts, model_name: [[0.1, 0.2, 0.3]],
     )
-    embedding_client = FakeEmbeddingClient([("100", 0.9)])
+    qdrant_client = FakeQdrantStorageClient(
+        recommendations={},
+        similar_results=[("100", 0.9), ("101", 0.8)],
+    )
 
     candidates = hybrid.recommend_hybrid_candidates(
         question_id=42,
         question="differentiate x^2",
         k=2,
         mathe_mirror_client=mathe_client,
-        recommendation_client=FakeRecommendationClient(
-            {"100": [("101", 0.8)]}
-        ),
-        embedding_client=embedding_client,
+        qdrant_client=qdrant_client,
         question_candidate_limit=0,
     )
 

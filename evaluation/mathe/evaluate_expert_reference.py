@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from dataset_recsys.mathe_recommenders.curricular_pool_ranker import (
     rank_curricular_pool_candidates,
 )
-from dataset_recsys.storage.embedding_client import EmbeddingClient
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 from recs_metrics.ranked_list import (
     binary_precision_at_k,
@@ -111,7 +111,7 @@ def _first_relevant_rank(
 def evaluate_expert_reference(
     reference_rows: list[dict[str, Any]],
     mathe_client: MatheMirrorClient,
-    embedding_client: EmbeddingClient,
+    qdrant_client: QdrantStorageClient,
     recommendations_k: int,
 ) -> list[dict[str, Any]]:
     """Evaluate MathE recommendations against expert-provided document IDs."""
@@ -137,7 +137,7 @@ def evaluate_expert_reference(
             question=_safe_text(reference.get("question")),
             k=recommendations_k,
             mathe_mirror_client=mathe_client,
-            embedding_client=embedding_client,
+            qdrant_client=qdrant_client,
         )
         recommendation_time_seconds = time.perf_counter() - recommendation_start
 
@@ -477,19 +477,19 @@ def run_evaluation(
         return write_evaluation_workbook(output_path, rows, summary_rows, excluded_rows)
 
     mathe_client = MatheMirrorClient()
-    embedding_client = EmbeddingClient()
+    qdrant_client = QdrantStorageClient()
     try:
         reference_rows = load_reference_rows(reference_workbook)
         rows = evaluate_expert_reference(
             reference_rows,
             mathe_client,
-            embedding_client,
+            qdrant_client,
             recommendations_k,
         )
         summary_rows = summarize(rows, recommendations_k)
         excluded_rows = excluded_questions(rows)
     finally:
-        embedding_client.close()
+        qdrant_client.close()
         mathe_client.close()
 
     return write_evaluation_workbook(output_path, rows, summary_rows, excluded_rows)

@@ -1,6 +1,6 @@
 from dataset_recsys.mathe_recommenders.popular_seed import recommend_from_popular_seed
 
-from fakes import FakeRecommendationClient, fake_mathe_client
+from fakes import FakeQdrantStorageClient, fake_mathe_client
 
 
 def test_recommend_from_popular_seed_uses_document_platform_ids():
@@ -8,7 +8,7 @@ def test_recommend_from_popular_seed_uses_document_platform_ids():
     mathe_client.get_popular_document_for_question = (
         lambda question_id: {"material_id": 6}
     )
-    recommendation_client = FakeRecommendationClient(
+    qdrant_client = FakeQdrantStorageClient(
         {"6": ["10", "11", "12"]}
     )
 
@@ -16,11 +16,11 @@ def test_recommend_from_popular_seed_uses_document_platform_ids():
         question_id=42,
         k=2,
         mathe_mirror_client=mathe_client,
-        recommendation_client=recommendation_client,
+        qdrant_client=qdrant_client,
     )
 
     assert recommendations == ["10", "11"]
-    assert recommendation_client.calls == [
+    assert qdrant_client.calls == [
         {
             "application": "mathe_documents",
             "entity_id": "6",

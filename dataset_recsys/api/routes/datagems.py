@@ -8,8 +8,6 @@ from fastapi.responses import JSONResponse
 from dataset_recsys.api.analytical_patterns.ap_handling import (
     create_recommendation_response_ap,
     parse_recommendation_request_ap,
-    create_template_response_metadata,
-    parse_template_request_metadata,    
 )
 from dataset_recsys.api.analytical_patterns.models import (
     Recommendation,
@@ -25,12 +23,12 @@ from dataset_recsys.api.api_docs_loader import (
     load_json_file,
 )
 from dataset_recsys.api.security import security
-from dataset_recsys.storage.recommendation_client import RecommendationClient
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 
 logger = structlog.get_logger(__name__)
 accounting_logger = structlog.get_logger("accounting")
 router = APIRouter(prefix="/dataset-recsys", tags=["DataGEMS Recommendation Service"])
-recs_client = RecommendationClient()
+qdrant_client = QdrantStorageClient()
 
 examples_data = load_json_file(DOCS_VALID_EXAMPLES_PATH)
 errors_data = load_json_file(DOCS_ERROR_EXAMPLES_PATH)
@@ -38,11 +36,11 @@ ap_examples_data = load_json_file(AP_DOCS_VALID_EXAMPLES_PATH)
 ap_errors_data = load_json_file(AP_DOCS_ERROR_EXAMPLES_PATH)
 ap_request_example = load_json_file(AP_REQUEST_EXAMPLE_PATH)
 
-from dataset_recsys.utils.redis_logger import start_daily_purge_scheduler, write_request_log_to_redis
+from dataset_recsys.utils.sqlite_log_writer import start_daily_purge_scheduler, write_request_log_to_sqlite
 @router.on_event("startup")
 async def startup_event():
     # Spawns the background thread loop once as the pod initializes
-    start_daily_purge_scheduler(recs_client)
+    start_daily_purge_scheduler()
 
 @router.post(
     "/recommend",
@@ -134,8 +132,7 @@ async def get_recommendations(
     request.entity_id = request.entity_id.strip()
     if not request.entity_id:
         log.warning("Missing entity_id.")
-        write_request_log_to_redis(
-            recs_client,
+        write_request_log_to_sqlite(
             user_id=user_subject,
             action="get_recommendations",
             entity_id=request.entity_id,
@@ -151,12 +148,11 @@ async def get_recommendations(
 
     lookup_id = request.entity_id
     try:
-        entity_status = recs_client.get_entity_status(application="ds2ds", entity_id=lookup_id)
+        entity_status = qdrant_client.get_entity_status(application="ds2ds", entity_id=lookup_id)
 
         if entity_status == "NOT_FOUND":
             log.warning("Requested entity does not exist in backend catalog", entity_id=lookup_id)
-            write_request_log_to_redis(
-                recs_client,
+            write_request_log_to_sqlite(
                 user_id=user_subject,
                 action="get_recommendations",
                 entity_id=lookup_id,
@@ -187,8 +183,7 @@ async def get_recommendations(
         user_role = authorized_entities[lookup_id]
         if lookup_id in authorized_entities.keys() and user_role != "dg_ds-browse":
             log.warning(f"User {user_subject} has role '{user_role}' for entity {lookup_id}, which is not sufficient for recommendations.")
-            write_request_log_to_redis(
-                recs_client,
+            write_request_log_to_sqlite(
                 user_id=user_subject,
                 action="get_recommendations",
                 entity_id=lookup_id,
@@ -205,8 +200,7 @@ async def get_recommendations(
 
         if entity_status == "NO_RECOMMENDATIONS":
             log.info("Entity exists, but has no precomputed recommendations", entity_id=lookup_id)
-            write_request_log_to_redis(
-                recs_client,
+            write_request_log_to_sqlite(
                 user_id=user_subject,
                 action="get_recommendations",
                 entity_id=lookup_id,
@@ -220,7 +214,7 @@ async def get_recommendations(
                 content=RecsResponse(entity_id=request.entity_id, recommendations=[]).dict()
             )
 
-        raw_recs = recs_client.get_recommendations(
+        raw_recs = qdrant_client.get_recommendations(
             application="ds2ds",
             entity_id=request.entity_id,
             limit=None,
@@ -255,9 +249,8 @@ async def get_recommendations(
             f"Returning {len(filtered_recs)} recs for {lookup_id} in {query_time:.3f}s"
         )
         
-        # Write the request log to Redis
-        write_request_log_to_redis(
-            recs_client,
+        # Write the request log to SQLite
+        write_request_log_to_sqlite(
             user_id=user_subject,
             action="get_recommendations",
             entity_id=lookup_id,
@@ -274,8 +267,7 @@ async def get_recommendations(
         raise
     except Exception as e:
         log.error("Unexpected error", error=str(e), exc_info=True)
-        write_request_log_to_redis(
-            recs_client,
+        write_request_log_to_sqlite(
             user_id=user_subject,
             action="get_recommendations",
             entity_id=lookup_id,

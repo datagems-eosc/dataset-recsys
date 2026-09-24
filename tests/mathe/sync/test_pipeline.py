@@ -79,25 +79,23 @@ class FakeSyncer:
 
         return df.replace("", pd.NA)
 
-class FakeRecommendationClient:
-    stored = []
-
-    def store_recommendations(self, application, data):
-        self.__class__.stored.append({"application": application, "data": data})
-        return len(data)
-
-
-class FakeEmbeddingClient:
-    TABLE_MATHE = "mathe_embeddings"
-    stored = []
+class FakeQdrantStorageClient:
+    stored_embeddings = []
+    stored_recommendations = []
     deleted = []
 
     def store_embeddings(self, **kwargs):
-        self.__class__.stored.append(kwargs)
+        self.__class__.stored_embeddings.append(kwargs)
         return len(kwargs["dataset_ids"])
 
-    def delete_application(self, application, table):
-        self.__class__.deleted.append({"application": application, "table": table})
+    def store_recommendations(self, application, data):
+        self.__class__.stored_recommendations.append(
+            {"application": application, "data": data}
+        )
+        return len(data)
+
+    def delete_application(self, application):
+        self.__class__.deleted.append({"application": application})
         return 0
 
 
@@ -209,18 +207,13 @@ def test_run_mathe_pipeline_builds_separate_document_and_video_indexes(
     monkeypatch.setattr(mathe_sync_pipeline, "encode_texts", fake_encode_texts)
     monkeypatch.setattr(
         mathe_sync_pipeline,
-        "_build_recommendation_client",
-        lambda: FakeRecommendationClient(),
-    )
-    monkeypatch.setattr(
-        mathe_sync_pipeline,
-        "_build_embedding_client",
-        lambda: FakeEmbeddingClient(),
+        "_build_qdrant_client",
+        lambda: FakeQdrantStorageClient(),
     )
 
-    FakeRecommendationClient.stored = []
-    FakeEmbeddingClient.stored = []
-    FakeEmbeddingClient.deleted = []
+    FakeQdrantStorageClient.stored_embeddings = []
+    FakeQdrantStorageClient.stored_recommendations = []
+    FakeQdrantStorageClient.deleted = []
     summary = mathe_sync_pipeline.run_mathe_pipeline(fake_syncer)
 
     assert fake_syncer.reconcile_called is True
@@ -230,23 +223,23 @@ def test_run_mathe_pipeline_builds_separate_document_and_video_indexes(
         "status": "completed",
         "processed_materials": 4,
         "embeddings_created": 4,
-        "redis_keys_updated": 8,
+        "qdrant_records_updated": 8,
         "application": "mathe",
         "collections": {
             "mathe": {
                 "processed_materials": 4,
                 "embeddings_stored": 4,
-                "redis_keys_updated": 4,
+                "qdrant_records_updated": 4,
             },
             "mathe_documents": {
                 "processed_materials": 2,
                 "embeddings_stored": 2,
-                "redis_keys_updated": 2,
+                "qdrant_records_updated": 2,
             },
             "mathe_videos": {
                 "processed_materials": 2,
                 "embeddings_stored": 2,
-                "redis_keys_updated": 2,
+                "qdrant_records_updated": 2,
             },
         },
     }
@@ -260,37 +253,37 @@ def test_run_mathe_pipeline_builds_separate_document_and_video_indexes(
         "review transcript",
     ]
 
-    redis_by_application = {
+    recommendations_by_application = {
         str(call["application"]): call["data"]
-        for call in FakeRecommendationClient.stored
+        for call in FakeQdrantStorageClient.stored_recommendations
     }
-    assert set(redis_by_application) == {
+    assert set(recommendations_by_application) == {
         "mathe",
         "mathe_documents",
         "mathe_videos",
     }
-    assert set(redis_by_application["mathe"]) == {
+    assert set(recommendations_by_application["mathe"]) == {
         "6.pdf",
         "7.docx",
         "abcdefghijk.txt",
         "zyxwvutsrqp.txt",
     }
-    assert set(redis_by_application["mathe_documents"]) == {"6", "7"}
-    assert set(redis_by_application["mathe_videos"]) == {"901", "902"}
+    assert set(recommendations_by_application["mathe_documents"]) == {"6", "7"}
+    assert set(recommendations_by_application["mathe_videos"]) == {"901", "902"}
     assert {
         neighbor_id
-        for neighbors in redis_by_application["mathe_documents"].values()
+        for neighbors in recommendations_by_application["mathe_documents"].values()
         for neighbor_id, _score in neighbors
     } <= {"6", "7"}
     assert {
         neighbor_id
-        for neighbors in redis_by_application["mathe_videos"].values()
+        for neighbors in recommendations_by_application["mathe_videos"].values()
         for neighbor_id, _score in neighbors
     } <= {"901", "902"}
 
     embeddings_by_application = {
         str(call["application"]): call
-        for call in FakeEmbeddingClient.stored
+        for call in FakeQdrantStorageClient.stored_embeddings
     }
     assert embeddings_by_application["mathe"]["dataset_ids"] == [
         "6.pdf",
@@ -300,11 +293,7 @@ def test_run_mathe_pipeline_builds_separate_document_and_video_indexes(
     ]
     assert embeddings_by_application["mathe_documents"]["dataset_ids"] == ["6", "7"]
     assert embeddings_by_application["mathe_videos"]["dataset_ids"] == ["901", "902"]
-    assert all(
-        call["table"] == "mathe_embeddings"
-        for call in FakeEmbeddingClient.stored
-    )
-    assert FakeEmbeddingClient.deleted == []
+    assert FakeQdrantStorageClient.deleted == []
 
 
 def test_split_indexes_skip_unresolved_platform_ids_and_clear_empty_collection():
@@ -331,18 +320,16 @@ def test_split_indexes_skip_unresolved_platform_ids_and_clear_empty_collection()
     assert set(indices[mathe_sync_pipeline.MatheApplication.DOCUMENTS]) == {"6"}
     assert indices[mathe_sync_pipeline.MatheApplication.VIDEOS] == {}
 
-    embedding_client = FakeEmbeddingClient()
-    recommendation_client = FakeRecommendationClient()
-    FakeEmbeddingClient.deleted = []
-    FakeRecommendationClient.stored = []
+    qdrant_client = FakeQdrantStorageClient()
+    FakeQdrantStorageClient.deleted = []
+    FakeQdrantStorageClient.stored_recommendations = []
     result = (
         mathe_sync_pipeline._replace_embedding_and_recommendation_collection(
             application=mathe_sync_pipeline.MatheApplication.VIDEOS,
             entity_indices={},
             materials=materials,
             embeddings=np.array([[1.0, 0.0], [0.0, 1.0]]),
-            embedding_client=embedding_client,
-            recommendation_client=recommendation_client,
+            qdrant_client=qdrant_client,
             run_id="stage-2-test",
         )
     )
@@ -350,12 +337,63 @@ def test_split_indexes_skip_unresolved_platform_ids_and_clear_empty_collection()
     assert result == {
         "processed_materials": 0,
         "embeddings_stored": 0,
-        "redis_keys_updated": 0,
+        "qdrant_records_updated": 0,
     }
-    assert FakeEmbeddingClient.deleted == [
-        {"application": "mathe_videos", "table": "mathe_embeddings"}
+    assert FakeQdrantStorageClient.deleted == [
+        {"application": "mathe_videos"}
     ]
-    assert FakeRecommendationClient.stored == [
+    assert FakeQdrantStorageClient.stored_recommendations == [
+        {"application": "mathe_videos", "data": {}}
+    ]
+
+
+def test_split_indexes_skip_unresolved_platform_ids_and_clear_empty_collection():
+    materials = [
+        {
+            "sync_entry_id": "6.pdf",
+            "platform_material_id": "6",
+            "type": "document",
+            "text": "document text",
+        },
+        {
+            "sync_entry_id": "abcdefghijk",
+            "platform_material_id": None,
+            "type": "video",
+            "text": "legacy transcript",
+        },
+    ]
+    indices = mathe_sync_pipeline._build_collection_indices(materials)
+
+    assert set(indices) == {
+        mathe_sync_pipeline.MatheApplication.DOCUMENTS,
+        mathe_sync_pipeline.MatheApplication.VIDEOS,
+    }
+    assert set(indices[mathe_sync_pipeline.MatheApplication.DOCUMENTS]) == {"6"}
+    assert indices[mathe_sync_pipeline.MatheApplication.VIDEOS] == {}
+
+    qdrant_client = FakeQdrantStorageClient()
+    FakeQdrantStorageClient.deleted = []
+    FakeQdrantStorageClient.stored_recommendations = []
+    result = (
+        mathe_sync_pipeline._replace_embedding_and_recommendation_collection(
+            application=mathe_sync_pipeline.MatheApplication.VIDEOS,
+            entity_indices={},
+            materials=materials,
+            embeddings=np.array([[1.0, 0.0], [0.0, 1.0]]),
+            qdrant_client=qdrant_client,
+            run_id="stage-2-test",
+        )
+    )
+
+    assert result == {
+        "processed_materials": 0,
+        "embeddings_stored": 0,
+        "qdrant_records_updated": 0,
+    }
+    assert FakeQdrantStorageClient.deleted == [
+        {"application": "mathe_videos"}
+    ]
+    assert FakeQdrantStorageClient.stored_recommendations == [
         {"application": "mathe_videos", "data": {}}
     ]
 
@@ -414,17 +452,12 @@ def test_run_mathe_pipeline_clears_collections_for_empty_catalog(
     fake_syncer = FakeSyncer(db_path)
     monkeypatch.setattr(
         mathe_sync_pipeline,
-        "_build_recommendation_client",
-        lambda: FakeRecommendationClient(),
+        "_build_qdrant_client",
+        lambda: FakeQdrantStorageClient(),
     )
-    monkeypatch.setattr(
-        mathe_sync_pipeline,
-        "_build_embedding_client",
-        lambda: FakeEmbeddingClient(),
-    )
-    FakeRecommendationClient.stored = []
-    FakeEmbeddingClient.stored = []
-    FakeEmbeddingClient.deleted = []
+    FakeQdrantStorageClient.stored_embeddings = []
+    FakeQdrantStorageClient.stored_recommendations = []
+    FakeQdrantStorageClient.deleted = []
 
     summary = mathe_sync_pipeline.run_mathe_pipeline(fake_syncer)
 
@@ -432,15 +465,17 @@ def test_run_mathe_pipeline_clears_collections_for_empty_catalog(
     assert summary["status"] == "completed"
     assert summary["processed_materials"] == 0
     assert summary["embeddings_created"] == 0
-    assert {call["application"] for call in FakeEmbeddingClient.deleted} == (
+    assert {call["application"] for call in FakeQdrantStorageClient.deleted} == (
         expected_applications
     )
     assert {
-        call["application"] for call in FakeRecommendationClient.stored
+        call["application"]
+        for call in FakeQdrantStorageClient.stored_recommendations
     } == expected_applications
-    assert all(not call["data"] for call in FakeRecommendationClient.stored)
-    assert FakeEmbeddingClient.stored == []
-
+    assert all(
+        not call["data"] for call in FakeQdrantStorageClient.stored_recommendations
+    )
+    assert FakeQdrantStorageClient.stored_embeddings == []
 
 # This test checks that the MathE /sync API endpoint is wired correctly.
 # It verifies that when the endpoint is hit,

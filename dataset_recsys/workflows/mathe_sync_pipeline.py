@@ -6,8 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, TypedDict
 
 from dataset_recsys.mathe_recommenders.constants import MatheApplication
-from dataset_recsys.storage.recommendation_client import RecommendationClient
-from dataset_recsys.storage.embedding_client import EmbeddingClient
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from dataset_recsys.retrieval import rank_similar_entities
 from dataset_recsys.utils.mathe_index_migrations import (
     include_legacy_mathe_collection,
@@ -117,53 +116,46 @@ def _replace_embedding_and_recommendation_collection(
     entity_indices: dict[str, int],
     materials: list[CompletedMaterial],
     embeddings: np.ndarray,
-    embedding_client: EmbeddingClient,
-    recommendation_client: RecommendationClient,
+    qdrant_client: QdrantStorageClient,
     run_id: str,
 ) -> dict[str, int]:
-    """Replace one pgvector and Redis collection without crossing content types."""
+    """Replace one Qdrant collection without crossing content types."""
     entity_ids = list(entity_indices)
     if not entity_ids:
-        embedding_client.delete_application(
-            application,
-            table=embedding_client.TABLE_MATHE,
-        )
-        recommendation_client.store_recommendations(application, {})
+        qdrant_client.delete_application(application, collection_name=qdrant_client.COLLECTION_MATHE)
+        qdrant_client.store_recommendations(application, {}, collection_name=qdrant_client.COLLECTION_MATHE)
         return {
             "processed_materials": 0,
             "embeddings_stored": 0,
-            "redis_keys_updated": 0,
+            "qdrant_records_updated": 0,
         }
 
     indices = list(entity_indices.values())
     collection_embeddings = embeddings[indices]
     embedding_inputs = [materials[index]["text"] for index in indices]
-    embeddings_stored = embedding_client.store_embeddings(
+    embeddings_stored = qdrant_client.store_embeddings(
         application=application,
         dataset_ids=entity_ids,
         embeddings=collection_embeddings,
         embedding_inputs=embedding_inputs,
         embedding_model=DEFAULT_MATHE_EMBEDDING_MODEL,
-        table=embedding_client.TABLE_MATHE,
         run_id=run_id,
     )
     recommendations = rank_similar_entities(entity_ids, collection_embeddings)
-    redis_keys_updated = recommendation_client.store_recommendations(
+    qdrant_records_updated = qdrant_client.store_recommendations(
         application=application,
         data=recommendations,
+        collection_name=qdrant_client.COLLECTION_MATHE
     )
     return {
         "processed_materials": len(entity_ids),
         "embeddings_stored": embeddings_stored,
-        "redis_keys_updated": redis_keys_updated,
+        "qdrant_records_updated": qdrant_records_updated,
     }
 
-def _build_recommendation_client():
-    return RecommendationClient()
 
-
-def _build_embedding_client():
-    return EmbeddingClient()
+def _build_qdrant_client():
+    return QdrantStorageClient()
 
 
 def _utc_now() -> str:
@@ -196,14 +188,14 @@ def _save_sync_status(syncer: MathE_Syncer, **updates: Any) -> dict[str, Any]:
 
 
 def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
-    """Reconcile, process, rebuild, and publish all MathE recommendations."""
+    """Reconcile, process, rebuild, and publish all MathE recommendations using Qdrant."""
     if getattr(syncer, "is_running", False):
         logger.warning("MathE refresh pipeline is already running")
         return {
             "status": "already_running",
             "processed_materials": 0,
             "embeddings_created": 0,
-            "redis_keys_updated": 0,
+            "qdrant_records_updated": 0,
             "reason": "A MathE refresh pipeline is already running.",
         }
 
@@ -232,7 +224,7 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
         materials = _get_completed_materials(syncer)
         logger.info("Loaded %d completed materials from SQLite", len(materials))
 
-        embedding_client = _build_embedding_client()
+        qdrant_client = _build_qdrant_client()
         embeddings_created = 0
         if materials:
             texts = [material["text"] for material in materials]
@@ -280,11 +272,10 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
             collection_indices,
             materials,
         )
-        recommendation_client = _build_recommendation_client()
         collection_summaries = {}
         for application, entity_indices in collection_indices.items():
             logger.info(
-                "Refreshing MathE embedding and Redis collection %s with %d materials",
+                "Refreshing MathE embedding and Qdrant collection %s with %d materials",
                 application,
                 len(entity_indices),
             )
@@ -294,14 +285,13 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
                     entity_indices=entity_indices,
                     materials=materials,
                     embeddings=embeddings,
-                    embedding_client=embedding_client,
-                    recommendation_client=recommendation_client,
+                    qdrant_client=qdrant_client,
                     run_id=started_at,
                 )
             )
 
-        redis_keys_updated = sum(
-            collection["redis_keys_updated"]
+        qdrant_records_updated = sum(
+            collection["qdrant_records_updated"]
             for collection in collection_summaries.values()
         )
         completed_at = _utc_now()
@@ -317,7 +307,7 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
             "status": "completed",
             "processed_materials": len(materials),
             "embeddings_created": embeddings_created,
-            "redis_keys_updated": redis_keys_updated,
+            "qdrant_records_updated": qdrant_records_updated,
             "application": MATHE_APPLICATION,
             "collections": collection_summaries,
         }

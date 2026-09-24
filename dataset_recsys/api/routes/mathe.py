@@ -19,8 +19,8 @@ from dataset_recsys.mathe_recommenders.curricular_pool_ranker import (
 from dataset_recsys.mathe_recommenders.video_pool_ranker import (
     recommend_videos_for_question,
 )
-from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from dataset_recsys.utils.mathe_syncer import MathE_Syncer
 from dataset_recsys.workflows.mathe_sync_pipeline import run_mathe_pipeline
 from dataset_recsys.api.security import security
@@ -35,7 +35,6 @@ accounting_logger = structlog.get_logger("accounting")
 
 router = APIRouter(prefix="/dataset-recsys/mathe", tags=["MathE Recommendation Service"])
 mathe_client: MatheMirrorClient | None = None
-embedding_client: EmbeddingClient | None = None
 
 
 def get_mathe_client() -> MatheMirrorClient:
@@ -44,12 +43,11 @@ def get_mathe_client() -> MatheMirrorClient:
         mathe_client = MatheMirrorClient()
     return mathe_client
 
-
-def get_embedding_client() -> EmbeddingClient:
-    global embedding_client
-    if embedding_client is None:
-        embedding_client = EmbeddingClient()
-    return embedding_client
+def get_qdrant_client() -> QdrantStorageClient:
+    global qdrant_client
+    if qdrant_client is None:
+        qdrant_client = QdrantStorageClient()
+    return qdrant_client
 
 
 def _parse_utc_timestamp(value: str | None) -> datetime | None:
@@ -145,7 +143,7 @@ async def _get_content_recommendations(
                 question=question,
                 k=request.n,
                 mathe_mirror_client=get_mathe_client(),
-                embedding_client=get_embedding_client(),
+                qdrant_client=get_qdrant_client(),
             )
 
         recommended_material_ids = await run_in_threadpool(run_recommender)

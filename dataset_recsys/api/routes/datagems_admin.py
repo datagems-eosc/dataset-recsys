@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List
 
 import structlog
@@ -7,14 +7,13 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from dataset_recsys.api.api_docs_loader import DOCS_ERROR_EXAMPLES_PATH, load_json_file
 from dataset_recsys.api.security import security
 from dataset_recsys.ingestion.moma_dataset import MomaDataset
-from dataset_recsys.storage.embedding_client import EmbeddingClient
-from dataset_recsys.storage.recommendation_client import RecommendationClient
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from dataset_recsys.workflows.incremental_update import process_incremental_update
 
 logger = structlog.get_logger(__name__)
 accounting_logger = structlog.get_logger("accounting")
 router = APIRouter(prefix="/dataset-recsys", tags=["DataGEMS Dataset Management"])
-recs_client = RecommendationClient()
+qdrant_client = QdrantStorageClient()
 
 DEFAULT_APPLICATION = "ds2ds"
 
@@ -99,7 +98,7 @@ async def add_dataset(
         Resource="dataset2dataset_recommender",
         Domain="datagems",
         DatasetId=entity_id,
-        Timestamp=datetime.utcnow().isoformat() + "Z",
+        Timestamp=datetime.now(timezone.utc).isoformat(),
     )
 
     entity_id = entity_id.strip()
@@ -109,20 +108,16 @@ async def add_dataset(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Dataset ID is required.",
         )
-    
-    embedding_client = EmbeddingClient()
-    
+
     try:
         moma = MomaDataset(user_token=token)
-        # Assuming get_from_external might raise an error if not found
         moma.get_from_external(entity_id)
         profile = moma.to_dataset_profile()
 
         was_added = await process_incremental_update(
             profile, 
             application=DEFAULT_APPLICATION, 
-            recs_client=recs_client, 
-            emb_client=embedding_client
+            qdrant_client=qdrant_client
         )
 
         if not was_added:
@@ -139,7 +134,6 @@ async def add_dataset(
         raise
     except Exception as e:
         log.error(f"Error adding dataset {entity_id}: {e}", exc_info=True)
-        # Providing a cleaner error message for the user while logging the full exception
         raise HTTPException(
             status_code=500,
             detail="An unexpected error occurred while adding the dataset."
@@ -187,25 +181,20 @@ async def remove_dataset(
         Resource="dataset2dataset_recommender",
         Domain="datagems",
         DatasetId=entity_id,
-        Timestamp=datetime.utcnow().isoformat() + "Z",
+        Timestamp=datetime.now(timezone.utc).isoformat(),
     )
 
-    # Validate input
     entity_id = entity_id.strip()
     if not entity_id:
         raise HTTPException(status_code=422, detail="Entity ID is required.")
 
     try:
         from dataset_recsys.workflows.dataset_removal import dataset_removal
-        
-        # Dependency check: ensuring we have our clients ready
-        embedding_client = EmbeddingClient()
-        
+
         was_removed = await dataset_removal(
             entity_id=entity_id, 
             application=DEFAULT_APPLICATION,
-            recs_client=recs_client, 
-            emb_client=embedding_client
+            qdrant_client=qdrant_client
         )
 
         if not was_removed:
@@ -220,7 +209,7 @@ async def remove_dataset(
             UserId=user_subject,
             Action="remove_dataset",
             DatasetId=entity_id,
-            Timestamp=datetime.utcnow().isoformat() + "Z",
+            Timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         return {
@@ -278,7 +267,6 @@ async def check_existence(
     claims: dict = Depends(security.require_role(["dg_admin", "dg_dataset-curator", "dg_system"])),
 ):
     user_subject = claims.get("sub")
-    log = logger.bind(UserId=user_subject, DatasetCount=len(entity_ids))
     accounting_logger.info(
         "Existence Check Request Received",
         UserId=user_subject,
@@ -286,17 +274,16 @@ async def check_existence(
         Resource="dataset2dataset_recommender",
         Domain="datagems",
         DatasetCount=len(entity_ids),
-        Timestamp=datetime.utcnow().isoformat() + "Z",
+        Timestamp=datetime.now(timezone.utc).isoformat(),
     )
-    
-    # Basic validation
+
     if not entity_ids:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="List of entity_ids cannot be empty."
         )
 
-    # Perform batch check
-    existence_map = recs_client.check_existence_batch(DEFAULT_APPLICATION, entity_ids)
-    
+    # Perform batch check using QdrantStorageClient
+    existence_map = qdrant_client.check_existence_batch(DEFAULT_APPLICATION, entity_ids)
+
     return existence_map

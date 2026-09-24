@@ -6,7 +6,7 @@ from dataset_recsys.mathe_recommenders.question_embedding import (
     encode_question,
     score_question_similarity_for_material_ids,
 )
-from dataset_recsys.storage.embedding_client import EmbeddingClient
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 
 
@@ -15,7 +15,7 @@ def rank_video_pool_candidates(
     question: str,
     k: int,
     mathe_mirror_client: MatheMirrorClient,
-    embedding_client: EmbeddingClient | None = None,
+    qdrant_client: QdrantStorageClient | None = None,
     embedding_model: str = DEFAULT_MATHE_EMBEDDING_MODEL,
     question_embedding: list[float] | None = None,
 ) -> list[dict[str, Any]]:
@@ -40,7 +40,7 @@ def rank_video_pool_candidates(
         for index, material_id in enumerate(candidates_by_id)
     }
 
-    embedding_client = embedding_client or EmbeddingClient()
+    qdrant_client = qdrant_client or QdrantStorageClient()
     question_embedding = question_embedding or encode_question(
         question,
         embedding_model,
@@ -48,7 +48,7 @@ def rank_video_pool_candidates(
     similarities = score_question_similarity_for_material_ids(
         question_embedding,
         list(candidates_by_id),
-        embedding_client,
+        qdrant_client,
         application=MatheApplication.VIDEOS,
     )
 
@@ -73,7 +73,7 @@ def recommend_videos_for_question(
     question: str,
     k: int,
     mathe_mirror_client: MatheMirrorClient,
-    embedding_client: EmbeddingClient | None = None,
+    qdrant_client: QdrantStorageClient | None = None,
     question_embedding: list[float] | None = None,
 ) -> list[str]:
     """Return ranked MathE video platform IDs for a question."""
@@ -82,7 +82,7 @@ def recommend_videos_for_question(
         question=question,
         k=k,
         mathe_mirror_client=mathe_mirror_client,
-        embedding_client=embedding_client,
+        qdrant_client=qdrant_client,
         question_embedding=question_embedding,
     )
     return [candidate["material_id"] for candidate in candidates]

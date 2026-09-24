@@ -34,8 +34,8 @@ import torch
 from transformers import AutoModel, AutoTokenizer
 
 from dataset_recsys.ingestion.fetch_gems_datasets import run_ingestion
-from dataset_recsys.storage.recommendation_client import RecommendationClient
 from dataset_recsys.utils.bedrock import enrich_batch
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from dataset_recsys.utils.text_preprocessing import LightTextPreprocessor, build_embedding_text
 
 LLM_NAME = "claude-sonnet-4-6"
@@ -131,9 +131,9 @@ def build_recommendations(profiles, embeddings: np.ndarray, top_k: int = TOP_K):
 
     return recommendations
 
-def save_recommendations_to_redis(recommendations, application: str = APPLICATION_NAME):
-    client = RecommendationClient()
-    redis_payload = {
+def save_recommendations_to_qdrant(recommendations, application: str = APPLICATION_NAME):
+    client = QdrantStorageClient()
+    qdrant_payload = {
         item["id"]: {
             rec["id"]: rec["score"]
             for rec in item.get("recommendations", [])
@@ -142,7 +142,7 @@ def save_recommendations_to_redis(recommendations, application: str = APPLICATIO
         for item in recommendations
         if item.get("id")
     }
-    client.store_recommendations(application, redis_payload)
+    client.store_recommendations(application, qdrant_payload)
 
 if __name__ == "__main__":
     # Step 1: Run ingestion to extract dataset profiles from the portal response
@@ -183,10 +183,11 @@ if __name__ == "__main__":
     recommendations = build_recommendations(enriched_profiles, embeddings)
     save_json(recommendations, RECOMMENDATIONS_OUTPUT_PATH)
 
-    # Step 6: Store recommendations in Redis
-    save_recommendations_to_redis(recommendations, application=APPLICATION_NAME)
+
+    # Step 6: Store recommendations in Qdrant
+    save_recommendations_to_qdrant(recommendations, application=APPLICATION_NAME)
 
     # print(f"Saved embeddings with shape {embeddings.shape} to {EMBEDDINGS_OUTPUT_PATH}")
     # print(f"Saved embedding metadata to {EMBEDDINGS_METADATA_PATH}")
     # print(f"Saved recommendations to {RECOMMENDATIONS_OUTPUT_PATH}")
-    print(f"Stored recommendations in Redis under application '{APPLICATION_NAME}'")
+    print(f"Stored recommendations in Qdrant under application '{APPLICATION_NAME}'")

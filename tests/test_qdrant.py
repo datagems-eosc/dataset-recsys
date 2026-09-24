@@ -1,7 +1,7 @@
-from qdrant_client import QdrantClient, models
+from qdrant_client import QdrantStorageClient, models
 
 # Connect to Qdrant via local port-forward
-client = QdrantClient(host="localhost", port=6333)
+client = QdrantStorageClient(host="localhost", port=6333)
 collection_name = "dataset_embeddings"
 
 # 1. Check collection stats & total points

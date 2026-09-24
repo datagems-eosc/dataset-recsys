@@ -16,9 +16,8 @@ from dataset_recsys.utils.mathe_recsys_comparison import (
     AVAILABLE_STRATEGIES,
     compare_question_recommenders,
 )
-from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
-from dataset_recsys.storage.recommendation_client import RecommendationClient
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 
 
 DEFAULT_JSON_OUTPUT = Path("outputs/mathe_recsys_comparison.json")
@@ -141,8 +140,8 @@ def main() -> None:
     parser.add_argument("--json-output", type=Path, help="Full JSON output path. Batch default: outputs/mathe_recsys_comparison.json")
     parser.add_argument("--table-output", type=Path, help="CSV table output path. Batch default: outputs/mathe_recsys_comparison.csv")
     parser.add_argument("--env-file", default=".env")
-    parser.add_argument("--redis-host")
-    parser.add_argument("--redis-port")
+    parser.add_argument("--qdrant-host")
+    parser.add_argument("--qdrant-port")
     args = parser.parse_args()
 
     input_modes = sum(
@@ -154,18 +153,17 @@ def main() -> None:
 
     if load_dotenv:
         load_dotenv(args.env_file)
-    if args.redis_host:
-        os.environ["REDIS_HOST"] = args.redis_host
-    if args.redis_port:
-        os.environ["REDIS_PORT"] = str(args.redis_port)
+    if args.qdrant_host:
+        os.environ["QDRANT_HOST"] = args.qdrant_host
+    if args.qdrant_port:
+        os.environ["QDRANT_PORT"] = str(args.qdrant_port)
 
     batch_mode = args.questions_file is not None or args.topic_subtopic is not None
     json_output = args.json_output or (DEFAULT_JSON_OUTPUT if batch_mode else None)
     table_output = args.table_output or (DEFAULT_TABLE_OUTPUT if batch_mode else None)
 
     mathe_client = MatheMirrorClient()
-    recs_client = RecommendationClient()
-    embedding_client = EmbeddingClient()
+    qdrant_client = QdrantStorageClient()
 
     try:
         if batch_mode:
@@ -190,9 +188,8 @@ def main() -> None:
                     question_id=case["question_id"],
                     k=args.num_recommendations,
                     mathe_mirror_client=mathe_client,
-                    recommendation_client=recs_client,
+                    qdrant_client=qdrant_client,
                     question_text=case["question_text"],
-                    embedding_client=embedding_client,
                     strategies=args.approach,
                 )
                 report["results"].append({"input": case, "comparison": comparison})
@@ -205,14 +202,12 @@ def main() -> None:
                 question_id=args.question_id,
                 k=args.num_recommendations,
                 mathe_mirror_client=mathe_client,
-                recommendation_client=recs_client,
+                qdrant_client=qdrant_client,
                 question_text=args.question,
-                embedding_client=embedding_client,
                 strategies=args.approach,
             )
     finally:
         mathe_client.close()
-        embedding_client.close()
 
     if json_output:
         _write_json(report, json_output)

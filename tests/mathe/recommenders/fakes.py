@@ -66,3 +66,26 @@ class FakeEmbeddingClient:
             for entity_id in entity_ids
             if entity_id in scores_by_id
         ]
+
+class FakeQdrantClient:
+    def __init__(self):
+        self.calls = []
+        self.payloads = {
+            "6.pdf": {
+                "recommendations": {"8.pdf": 0.8, "7.pdf": 0.7, "5.pdf": 0.6}
+            }
+        }
+
+    def set_payload(self, *args, **kwargs):
+        self.calls.append(("set_payload", args, kwargs))
+
+    def retrieve(self, *args, **kwargs):
+        self.calls.append(("retrieve", args, kwargs))
+        ids = kwargs.get("ids", [])
+        results = []
+        for point_id in ids:
+            if point_id in self.payloads:
+                class PointRecord:
+                    payload = self.payloads[point_id]
+                results.append(PointRecord())
+        return results

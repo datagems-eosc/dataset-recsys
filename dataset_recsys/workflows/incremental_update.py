@@ -1,6 +1,5 @@
-from dataset_recsys.storage.embedding_client import EmbeddingClient
-from dataset_recsys.storage.recommendation_client import RecommendationClient
-from datetime import datetime
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
+from datetime import datetime, timezone
 from dataset_recsys.utils.bedrock import enrich_batch
 import os
 import requests
@@ -32,10 +31,19 @@ def get_access_token() -> str:
         
     return response.json()["access_token"]
 
-async def process_incremental_update(dataset_profile, application: str, enrichment_llm: str = "claude-sonnet-4-6", prompt_version: str = "catalog_summary_v1", embedding_model: str = "allenai/specter2_base", recs_client: RecommendationClient | None = None, emb_client: EmbeddingClient | None = None) -> bool:
+async def process_incremental_update(
+    dataset_profile,
+    application: str,
+    enrichment_llm: str = "claude-sonnet-4-6",
+    prompt_version: str = "catalog_summary_v1",
+    embedding_model: str = "allenai/specter2_base",
+    qdrant_client: QdrantStorageClient | None = None,
+) -> bool:
+    if qdrant_client is None:
+        qdrant_client = QdrantStorageClient()
 
     # 1. Existence Check
-    if emb_client.exists(dataset_profile.id):
+    if qdrant_client.exists(dataset_profile.id):
         return False
 
     # 2. LLM Enrichment
@@ -44,11 +52,12 @@ async def process_incremental_update(dataset_profile, application: str, enrichme
 
     # 3. Embedding Generation
     from dataset_recsys.embeddings import build_embedding_text, encode_texts
+
     text_input = build_embedding_text(enriched_profile)
     vector = encode_texts([text_input], model_name=embedding_model)[0].tolist()
-    
-    # 4. Storage in Vector DB
-    emb_client.upsert_single_embedding(
+
+    # 4. Storage in Qdrant Vector DB
+    qdrant_client.upsert_single_embedding(
         application=application,
         dataset_id=dataset_profile.id,
         embedding=vector,
@@ -57,33 +66,40 @@ async def process_incremental_update(dataset_profile, application: str, enrichme
             "llm": enrichment_llm,
             "prompt": prompt_version,
             "model": embedding_model,
-            "run_id": f"inc_{datetime.now().strftime('%Y%m%d')}"
-        }
+            "run_id": f"inc_{datetime.now(timezone.utc).strftime('%Y%m%d')}",
+        },
     )
-    
+
     # 5. NEW DATASET RECS (Outbound)
-    # Store the full ranked neighbor list; API endpoints decide how many to return.
-    neighbors = emb_client.find_similar(application, vector, top_k=None)
+    # Perform vector similarity search in Qdrant
+    neighbors = qdrant_client.find_similar(
+        application=application, 
+        query_vector=vector, 
+        top_k=100
+    )
 
     outbound_recs = {
-        row[0]: float(row[1]) 
-        for row in neighbors if row[0] != enriched_profile.id
+        res["dataset_id"]: float(res["score"])
+        for res in neighbors
+        if res["dataset_id"] != enriched_profile.id
     }
-    recs_client.update_single_entity_recs(application, enriched_profile.id, outbound_recs)
+    qdrant_client.update_single_entity_recs(
+        application=application, 
+        entity_id=enriched_profile.id, 
+        recommendations=outbound_recs
+    )
 
     # 6. NEIGHBOR UPDATES (Inbound)
-    # Recompute recommendations ONLY for the neighbors affected by the new dataset
+    # Inject the new dataset into each neighbor's Qdrant recommendation payload
     for neighbor_id, similarity_score in outbound_recs.items():
-        # Inject the new dataset into the neighbor's Redis ZSET
-        # Redis ZADD will automatically place it in the correct rank
-        recs_client.update_neighbor_recs(
+        qdrant_client.update_neighbor_recs(
             application=application,
             neighbor_id=neighbor_id,
             new_entity_id=enriched_profile.id,
             score=similarity_score,
             limit=None,
         )
-    
+
     return True
 
 if __name__ == "__main__":
@@ -97,16 +113,9 @@ if __name__ == "__main__":
     moma = MomaDataset(get_access_token())
     moma.get_from_external("07382b91-5bc5-42f9-8391-33adc2460c19")
     profile = moma.to_dataset_profile()
-    redis_host, redis_port, redis_db = "localhost", 6379, 0
-    recs_client = RecommendationClient(host=redis_host, port=redis_port, db=redis_db)
-    embedding_client = EmbeddingClient(
-        host="localhost",
-        port=5433,
-        dbname="postgres",
-        user="postgres",
-        password="postgres"
-    )
-    print("Redis OK:", recs_client.check_connection())
-    print("Embedding DB OK:", embedding_client.check_connection())    
+
+    qdrant_client = QdrantStorageClient(host="localhost", port=6333)
+    print("Qdrant DB Connection OK:", qdrant_client.check_connection())
+
     import asyncio
-    asyncio.run(process_incremental_update(profile, application=application, enrichment_llm=enrichment_llm, prompt_version=prompt_version, embedding_model=embedding_model, recs_client=recs_client, emb_client=embedding_client))
+    asyncio.run(process_incremental_update(profile, application=application, enrichment_llm=enrichment_llm, prompt_version=prompt_version, embedding_model=embedding_model, qdrant_client=qdrant_client))

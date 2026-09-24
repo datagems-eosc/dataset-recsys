@@ -13,9 +13,8 @@ from dataset_recsys.mathe_recommenders.question_embedding import (
     encode_question,
     score_question_similarity_for_material_ids,
 )
-from dataset_recsys.storage.embedding_client import EmbeddingClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
-from dataset_recsys.storage.recommendation_client import RecommendationClient
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 
 
 def _env_weight(name: str, default: str) -> float:
@@ -63,12 +62,12 @@ def _add_candidate(
 def _add_question_similarities(
     candidates: dict[str, dict[str, Any]],
     question_embedding: list[float],
-    embedding_client: EmbeddingClient,
+    qdrant_client: QdrantStorageClient,
 ) -> None:
     similarities = score_question_similarity_for_material_ids(
         question_embedding,
         list(candidates),
-        embedding_client,
+        qdrant_client,
         application=MatheApplication.DOCUMENTS,
     )
     for material_id, similarity in similarities.items():
@@ -111,8 +110,7 @@ def recommend_hybrid_candidates(
     question: str,
     k: int,
     mathe_mirror_client: MatheMirrorClient,
-    recommendation_client: RecommendationClient,
-    embedding_client: EmbeddingClient | None = None,
+    qdrant_client: QdrantStorageClient | None = None,
     metadata_weight: float = MATHE_HYBRID_METADATA_WEIGHT,
     material_ocr_weight: float = MATHE_HYBRID_MATERIAL_OCR_WEIGHT,
     question_weight: float = MATHE_HYBRID_QUESTION_WEIGHT,
@@ -133,7 +131,7 @@ def recommend_hybrid_candidates(
     if not question_metadata:
         return []
 
-    embedding_client = embedding_client or EmbeddingClient()
+    qdrant_client = qdrant_client or QdrantStorageClient()
     question_embedding = question_embedding or encode_question(question, embedding_model)
     metadata_seeds = recommend_document_seeds_for_question(
         question_id=question_id,
@@ -152,7 +150,7 @@ def recommend_hybrid_candidates(
         _add_question_similarities(
             candidates,
             question_embedding,
-            embedding_client,
+            qdrant_client,
         )
         return _rank_candidates(
             candidates,
@@ -168,10 +166,11 @@ def recommend_hybrid_candidates(
             candidates,
             seed_material_id(seed),
         )
-        neighbors = recommendation_client.get_recommendations_with_scores(
+        neighbors = qdrant_client.get_recommendations_with_scores(
             application=MatheApplication.DOCUMENTS,
             entity_id=seed_material_id(seed),
             limit=neighbors_per_seed,
+            collection_name=qdrant_client.COLLECTION_MATHE,
         )
         for neighbor_id, material_to_material_similarity in neighbors:
             _add_candidate(
@@ -180,11 +179,11 @@ def recommend_hybrid_candidates(
                 material_to_material_similarity=material_to_material_similarity,
             )
 
-    question_matches = embedding_client.find_similar(
+    question_matches = qdrant_client.find_similar(
         application=MatheApplication.DOCUMENTS,
         query_embedding=question_embedding,
         top_k=question_candidate_limit,
-        table=embedding_client.TABLE_MATHE,
+        collection_name=qdrant_client.COLLECTION_MATHE,
     )
     for material_id, _similarity in question_matches:
         _add_candidate(candidates, str(material_id).strip())
@@ -197,7 +196,7 @@ def recommend_hybrid_candidates(
     _add_question_similarities(
         candidates,
         question_embedding,
-        embedding_client,
+        qdrant_client,
     )
 
     return _rank_candidates(
@@ -214,8 +213,7 @@ def recommend_from_hybrid(
     question: str,
     k: int,
     mathe_mirror_client: MatheMirrorClient,
-    recommendation_client: RecommendationClient,
-    embedding_client: EmbeddingClient | None = None,
+    qdrant_client: QdrantStorageClient | None = None,
 ) -> list[str]:
     """
     Run hybrid MathE recommender.
@@ -235,7 +233,6 @@ def recommend_from_hybrid(
         question=question,
         k=k,
         mathe_mirror_client=mathe_mirror_client,
-        recommendation_client=recommendation_client,
-        embedding_client=embedding_client,
+        qdrant_client=qdrant_client,
     )
     return [str(candidate["material_id"]) for candidate in candidates]

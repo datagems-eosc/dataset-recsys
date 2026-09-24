@@ -8,7 +8,7 @@ from dataset_recsys.mathe_recommenders.question_embedding import (
     score_question_similarity_for_material_ids,
 )
 from dataset_recsys.mathe_recommenders.seed_scoring import compute_keyword_jaccard
-from dataset_recsys.storage.embedding_client import EmbeddingClient
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 
 
@@ -51,7 +51,7 @@ def rank_curricular_pool_candidates(
     question: str,
     k: int,
     mathe_mirror_client: MatheMirrorClient,
-    embedding_client: EmbeddingClient | None = None,
+    qdrant_client: QdrantStorageClient | None = None,
     keyword_weight: float = MATHE_CURRICULAR_KEYWORD_WEIGHT,
     embedding_model: str = DEFAULT_MATHE_EMBEDDING_MODEL,
     question_embedding: list[float] | None = None,
@@ -92,7 +92,7 @@ def rank_curricular_pool_candidates(
             "question_to_material_similarity": 0.0,
         }
 
-    embedding_client = embedding_client or EmbeddingClient()
+    qdrant_client = qdrant_client or QdrantStorageClient()
     question_embedding = question_embedding or encode_question(
         question,
         embedding_model,
@@ -100,7 +100,7 @@ def rank_curricular_pool_candidates(
     question_similarities = score_question_similarity_for_material_ids(
         question_embedding,
         list(candidates_by_material_id),
-        embedding_client,
+        qdrant_client,
         application=MatheApplication.DOCUMENTS,
     )
     for material_index_id, similarity in question_similarities.items():
@@ -121,7 +121,7 @@ def recommend_from_curricular_pool(
     question: str,
     k: int,
     mathe_mirror_client: MatheMirrorClient,
-    embedding_client: EmbeddingClient | None = None,
+    qdrant_client: QdrantStorageClient | None = None,
     question_embedding: list[float] | None = None,
 ) -> list[str]:
     """Return top-k document material IDs from the same topic/subtopic pool."""
@@ -130,7 +130,7 @@ def recommend_from_curricular_pool(
         question=question,
         k=k,
         mathe_mirror_client=mathe_mirror_client,
-        embedding_client=embedding_client,
+        qdrant_client=qdrant_client,
         question_embedding=question_embedding,
     )
     return [str(candidate["material_id"]) for candidate in candidates]

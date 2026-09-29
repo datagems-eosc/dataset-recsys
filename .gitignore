@@ -32,3 +32,4 @@ s3/*
 
 # Local provider submissions / evaluation references
 evaluation/mathe/mathe_provider_reference_submission/
+api_request_logs.db

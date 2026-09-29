@@ -35,8 +35,7 @@ async def health_check():
 
         return {
             "status": "ok",
-            "redis": "connected",
-            "vector_db": "connected",
+            "qdrant": is_qdrant_up,
         }
     except HTTPException:
         raise

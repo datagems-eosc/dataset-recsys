@@ -1,8 +1,8 @@
 import json
 import os
 import uuid
-from typing import Any, Dict, List, Optional
-from qdrant_client import QdrantStorageClient
+from typing import Any, Dict, List, Optional, Tuple
+from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
 
@@ -25,7 +25,7 @@ class QdrantStorageClient:
         self.port = int(port or os.getenv("QDRANT_PORT", "6333"))
         self.api_key = api_key or os.getenv("QDRANT_API_KEY", None)
 
-        self.client = QdrantStorageClient(
+        self.client = QdrantClient(
             host=self.host,
             port=self.port,
             api_key=self.api_key,
@@ -152,9 +152,13 @@ class QdrantStorageClient:
         target_collection = collection_name or table or self.COLLECTION_DATASET
         vector = query_embedding if query_embedding is not None else query_vector
 
-        results = self.client.search(
+        if vector is None:
+            raise ValueError("Either 'query_embedding' or 'query_vector' must be provided.")
+
+        # query_points returns a QueryResponse object
+        response = self.client.query_points(
             collection_name=target_collection,
-            query_vector=vector,
+            query=vector,
             query_filter=models.Filter(
                 must=[
                     models.FieldCondition(
@@ -164,15 +168,17 @@ class QdrantStorageClient:
                 ]
             ),
             limit=top_k,
+            with_payload=True,
         )
 
+        # Access the scored points via `response.points`
         return [
             {
-                "dataset_id": res.payload.get("dataset_id"),
+                "dataset_id": (res.payload or {}).get("dataset_id"),
                 "score": res.score,
                 "payload": res.payload,
             }
-            for res in results
+            for res in response.points
         ]
 
     def find_similar_by_ids(
@@ -182,7 +188,7 @@ class QdrantStorageClient:
         entity_ids: List[str],
         table: Optional[str] = None,
         collection_name: Optional[str] = None,
-    ):
+    ) -> List[Tuple[Optional[str], float]]:
         """Return query-vector similarities for the requested IDs."""
         if not entity_ids:
             return []
@@ -190,18 +196,26 @@ class QdrantStorageClient:
         target_collection = collection_name or table or self.COLLECTION_DATASET
         point_ids = [self._generate_point_id(eid) for eid in entity_ids]
 
-        results = self.client.search(
+        response = self.client.query_points(
             collection_name=target_collection,
-            query_vector=query_embedding,
+            query=query_embedding,  # Renamed from `query_vector` to `query`
             query_filter=models.Filter(
                 must=[
-                    models.FieldCondition(key="application", match=models.MatchValue(value=application)),
-                    models.HasIdCondition(has_id=point_ids)
+                    models.FieldCondition(
+                        key="application",
+                        match=models.MatchValue(value=application),
+                    ),
+                    models.HasIdCondition(has_id=point_ids),
                 ]
             ),
             limit=len(entity_ids),
+            with_payload=True,
         )
-        return [(res.payload.get("dataset_id"), res.score) for res in results]
+
+        return [
+            ((res.payload or {}).get("dataset_id"), res.score)
+            for res in response.points  # Access `.points` attribute
+        ]
 
     def delete_single_embedding(self, dataset_id: str, collection_name: str = COLLECTION_DATASET) -> int:
         """Delete a single embedding from the database."""

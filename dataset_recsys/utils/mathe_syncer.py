@@ -49,6 +49,11 @@ class MathE_Syncer:
         self.status_file = self._base_dir / "sync_status.json"
         self.cookie_file = self._base_dir / "cookies.txt"
         
+        # Verify whether all those directories exist, if not throw an error
+        for directory in [self._pdf_dir, self._docx_dir, self._ppt_dir, self._transcript_dir]:
+            if not directory.exists():
+                raise FileNotFoundError(f"Required directory does not exist: {directory}")
+        
         # Claude 4.5 Global Configuration
         self.model_id = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
         self.region = "eu-central-1"

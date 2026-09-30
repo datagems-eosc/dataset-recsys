@@ -3,6 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    nodejs \
     libreoffice-writer \
     libreoffice-impress \
     libreoffice-java-common \

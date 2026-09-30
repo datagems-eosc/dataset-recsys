@@ -528,6 +528,15 @@ class MathE_Syncer:
                     'preferredcodec': 'm4a',
                 }],
                 'quiet': True,
+                # Workarounds for YouTube 403 Forbidden & JS Cipher challenges
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android', 'ios', 'mweb', 'web'],
+                    }
+                },
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                }
             }
             if self.cookie_file.exists():
                 ydl_opts['cookiefile'] = str(self.cookie_file)

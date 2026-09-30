@@ -512,6 +512,20 @@ class MathE_Syncer:
     def _process_video_entry(self, entry: Dict, whisper_model: WhisperModel):
         video_id = entry["id"]
 
+        # 1. Check if the in-memory entry passed to this method is already completed
+        if has_completed_processing(entry):
+            print(f"-> Video {video_id} is already completed in syncer.db. Skipping transcription.")
+            return
+
+        # 2. Check direct database record in syncer.db
+        catalog_entry = self.catalog.get_entry(video_id)
+        if catalog_entry and has_completed_processing(catalog_entry):
+            print(f"-> Found completed record for video {video_id} in syncer.db. Restoring state...")
+            entry["claude_ocr_text"] = catalog_entry["claude_ocr_text"]
+            entry["status"] = "completed"
+            return
+
+        # 3. Check local transcript backup file on disk
         backup_text_file = self._transcript_dir / f"{video_id}.txt"
         backup_text = self._read_transcript_backup(video_id)
         if backup_text is not None:
@@ -520,6 +534,7 @@ class MathE_Syncer:
             entry["status"] = "completed"
             return
 
+        # 4. Perform fresh download & Whisper transcription if not found above
         local_audio_path = None
         try:
             youtube_url = f"https://www.youtube.com/watch?v={video_id}"

@@ -322,6 +322,15 @@ class MathESyncCatalog:
             ).fetchall()
         return [str(row["internal_pdf_path"]) for row in rows]
 
+    def get_entry(self, entry_id: str) -> dict[str, Any] | None:
+            """Fetch a single catalog entry by its unique ID."""
+            with self.connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM sync_entries WHERE id = ?",
+                    (entry_id,),
+                ).fetchone()
+            return dict(row) if row is not None else None
+
 
 __all__ = [
     "DocumentSyncSource",

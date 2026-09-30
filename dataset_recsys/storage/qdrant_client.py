@@ -38,20 +38,40 @@ class QdrantStorageClient:
     def ensure_collection(
         self,
         collection_name: str,
-        vector_size: int = 768,
+        vector_size: Optional[int] = None,
         distance: models.Distance = models.Distance.COSINE,
     ):
-        """Create collection if it does not already exist."""
+        """Create collection if missing, or recreate if vector dimension changed."""
         collections = [col.name for col in self.client.get_collections().collections]
+
+        if collection_name in collections and vector_size is not None:
+            info = self.client.get_collection(collection_name)
+            
+            # Extract current vector size safely
+            vectors_config = info.config.params.vectors
+            current_size = getattr(vectors_config, "size", None)
+
+            # If named vectors dict structure is used by Qdrant
+            if current_size is None and isinstance(vectors_config, dict):
+                first_vector = next(iter(vectors_config.values()), None)
+                current_size = getattr(first_vector, "size", None)
+
+            # Recreate collection if dimension changed (e.g., switching 768 <-> 1024)
+            if current_size is not None and current_size != vector_size:
+                self.client.delete_collection(collection_name)
+                collections.remove(collection_name)
+
         if collection_name not in collections:
+            # Fallback to 768 if vector_size was not specified on initial creation
+            target_size = vector_size or 768
             self.client.create_collection(
                 collection_name=collection_name,
                 vectors_config=models.VectorParams(
-                    size=vector_size,
+                    size=target_size,
                     distance=distance,
                 ),
             )
-            # Create payload index on application for fast filtered lookups
+            # Re-create payload index for fast application filtering
             self.client.create_payload_index(
                 collection_name=collection_name,
                 field_name="application",

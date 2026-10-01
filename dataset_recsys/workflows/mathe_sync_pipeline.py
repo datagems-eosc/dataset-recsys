@@ -139,6 +139,7 @@ def _replace_embedding_and_recommendation_collection(
         embeddings=collection_embeddings,
         embedding_inputs=embedding_inputs,
         embedding_model=DEFAULT_MATHE_EMBEDDING_MODEL,
+        collection_name=qdrant_client.COLLECTION_MATHE,
         run_id=run_id,
     )
     recommendations = rank_similar_entities(entity_ids, collection_embeddings)

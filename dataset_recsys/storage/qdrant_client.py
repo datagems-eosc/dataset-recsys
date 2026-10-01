@@ -31,6 +31,14 @@ class QdrantStorageClient:
             api_key=self.api_key,
         )
 
+    def _resolve_collection(self, application: str, explicit_collection: Optional[str] = None) -> str:
+        """Route MathE applications to COLLECTION_MATHE by default if unspecified."""
+        if explicit_collection:
+            return explicit_collection
+        if str(application).lower().startswith("mathe"):
+            return self.COLLECTION_MATHE
+        return self.COLLECTION_DATASET
+
     def _generate_point_id(self, entity_id: str) -> str:
         """Generate a deterministic UUID v5 from an arbitrary entity_id string."""
         return str(uuid.uuid5(uuid.NAMESPACE_DNS, entity_id))
@@ -98,7 +106,7 @@ class QdrantStorageClient:
         if len(embeddings) == 0:
             return 0
 
-        target_collection = collection_name or table or self.COLLECTION_DATASET
+        target_collection = self._resolve_collection(application, collection_name or table)
         vector_size = len(embeddings[0])
         self.ensure_collection(target_collection, vector_size=vector_size)
 

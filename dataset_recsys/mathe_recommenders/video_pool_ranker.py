@@ -45,12 +45,24 @@ def rank_video_pool_candidates(
         question,
         embedding_model,
     )
-    similarities = score_question_similarity_for_material_ids(
+    
+    # Pass both raw ID and ID with extension to Qdrant lookup
+    lookup_ids = []
+    for material_id in candidates_by_id:
+        lookup_ids.extend([material_id, f"{material_id}.txt"])
+
+    similarities_raw = score_question_similarity_for_material_ids(
         question_embedding,
-        list(candidates_by_id),
+        lookup_ids,
         qdrant_client,
         application=MatheApplication.VIDEOS,
     )
+
+    # Map results back to the clean platform material_id
+    similarities = {
+        mat_id: similarities_raw.get(mat_id, similarities_raw.get(f"{mat_id}.txt", 0.0))
+        for mat_id in candidates_by_id
+    }
 
     ranked_ids = sorted(
         similarities,

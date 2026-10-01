@@ -29,6 +29,8 @@ DEFAULT_MATHE_EMBEDDING_MODEL = os.getenv(
     "BAAI/bge-m3",
 )
 
+DOCUMENT_EXTENSIONS = (".pdf", ".docx", ".pptx")
+VIDEO_EXTENSIONS = (".txt",)
 
 class CompletedMaterial(TypedDict):
     """Completed sync entry used to build the MathE indexes."""
@@ -77,17 +79,16 @@ def _build_collection_indices(
     materials: list[CompletedMaterial],
 ) -> dict[MatheApplication, dict[str, int]]:
     """Map each permanent split-collection ID to its shared embedding row.
-    Documents are stored and compared only with documents.
-    Videos are stored and compared only with videos."""
+
+    Video entries (*.txt) are routed to MatheApplication.VIDEOS.
+    Document entries (*.pdf, *.docx, *.pptx) are routed to MatheApplication.DOCUMENTS.
+    """
     collection_indices: dict[MatheApplication, dict[str, int]] = {
         application: {} for application in MATHE_SPLIT_APPLICATIONS
     }
 
     for index, material in enumerate(materials):
         platform_material_id = material.get("platform_material_id")
-        # TODO: After the legacy index migration, require platform_material_id in
-        # the loader, change CompletedMaterial.platform_material_id to str, and
-        # remove this missing-ID compatibility branch.
         if not platform_material_id:
             logger.warning(
                 "Skipping %s from split MathE indexes because platform_material_id is missing",
@@ -95,11 +96,24 @@ def _build_collection_indices(
             )
             continue
 
-        application = (
-            MatheApplication.DOCUMENTS
-            if material["type"] == "document"
-            else MatheApplication.VIDEOS
-        )
+        sync_entry_id = material["sync_entry_id"].lower()
+        material_type = material.get("type", "").lower()
+
+        # Route by extension first, falling back to material type
+        if sync_entry_id.endswith(VIDEO_EXTENSIONS) or material_type == "video":
+            application = MatheApplication.VIDEOS
+        elif (
+            sync_entry_id.endswith(DOCUMENT_EXTENSIONS) or material_type == "document"
+        ):
+            application = MatheApplication.DOCUMENTS
+        else:
+            logger.warning(
+                "Skipping material %s due to unrecognized extension and type '%s'",
+                material["sync_entry_id"],
+                material_type,
+            )
+            continue
+
         if platform_material_id in collection_indices[application]:
             logger.warning(
                 "Duplicate MathE platform material %s in %s; keeping the last completed row",

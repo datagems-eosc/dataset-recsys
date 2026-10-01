@@ -35,7 +35,7 @@ accounting_logger = structlog.get_logger("accounting")
 
 router = APIRouter(prefix="/dataset-recsys/mathe", tags=["MathE Recommendation Service"])
 mathe_client: MatheMirrorClient | None = None
-
+qdrant_client: QdrantStorageClient | None = None
 
 def get_mathe_client() -> MatheMirrorClient:
     global mathe_client

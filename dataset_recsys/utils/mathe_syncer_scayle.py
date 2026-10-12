@@ -19,8 +19,7 @@ from dataset_recsys.storage.mathe_sync_catalog import (
 )
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 
-# NOTE: adjust this import to wherever scayle.py lives in your package.
-from scayle import OCR_LLM, ocr_file
+from dataset_recsys.utils.scayle import OCR_LLM, ocr_file
 
 logger = logging.getLogger(__name__)
 

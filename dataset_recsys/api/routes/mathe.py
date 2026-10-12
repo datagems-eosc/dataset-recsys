@@ -22,7 +22,7 @@ from dataset_recsys.mathe_recommenders.video_pool_ranker import (
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from dataset_recsys.utils.mathe_syncer import MathE_Syncer
-from dataset_recsys.workflows.mathe_sync_pipeline import run_mathe_pipeline
+from dataset_recsys.workflows.mathe_sync_pipeline import run_full_mathe_pipeline, run_incremental_mathe_pipeline
 from dataset_recsys.api.security import security
 
 MATHE_PATH = Path(os.getenv("MATHE_PATH", "s3/default"))
@@ -248,23 +248,54 @@ async def sync_data(
     token: str = Depends(security.oauth2_scheme),
 ):
     """
-    Triggers the sync, OCR, and recommendation refresh process.
-    Uses BackgroundTasks so the API returns immediately.
+    Triggers the incremental sync, OCR, and new material embedding process.
+    Processed/embedded materials are skipped; only new items are added and linked via Qdrant.
     """
     claims = claims if isinstance(claims, dict) else {}
     user_subject = claims.get("sub")
     accounting_logger.info(
-        "Sync Pipeline Triggered",
+        "Incremental Sync Triggered",
         Action="sync_data",
         Domain="mathe",
         UserId=user_subject,
         Timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     )    
     # Trigger the lifecycle as a background task
-    background_tasks.add_task(run_mathe_pipeline, syncer)
+    background_tasks.add_task(run_incremental_mathe_pipeline, syncer)
     
     return {
-        "message": "Sync, OCR, and recommendation refresh initiated.",
+        "message": "Incremental sync and recommendation update initiated.",
+        "status": "Accepted",
+        "details": (
+            "The system is reconciling MathE documents and videos, processing "
+            "pending content, and rebuilding recommendations in the background."
+        ),
+    }
+
+@router.post("/sync/rebuild")
+async def rebuild_catalog(
+    background_tasks: BackgroundTasks,
+    claims: dict = Depends(security.require_role(["user", "dg_user", "dg_system"])),
+    token: str = Depends(security.oauth2_scheme),
+):
+    """
+    Triggers the sync, OCR, and recommendation refresh process.
+    Uses BackgroundTasks so the API returns immediately.
+    """
+    claims = claims if isinstance(claims, dict) else {}
+    user_subject = claims.get("sub")
+    accounting_logger.info(
+        "Full Catalog Rebuild Triggered",
+        Action="rebuild_catalog",
+        Domain="mathe",
+        UserId=user_subject,
+        Timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    )    
+    # Trigger the lifecycle as a background task
+    background_tasks.add_task(run_full_mathe_pipeline, syncer)
+    
+    return {
+        "message": "Full catalog rebuild from scratch initiated.",
         "status": "Accepted",
         "details": (
             "The system is reconciling MathE documents and videos, processing "

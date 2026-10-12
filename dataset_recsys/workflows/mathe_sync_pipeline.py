@@ -11,7 +11,8 @@ from dataset_recsys.retrieval import rank_similar_entities
 from dataset_recsys.utils.mathe_index_migrations import (
     include_legacy_mathe_collection,
 )
-from dataset_recsys.utils.mathe_syncer import MathE_Syncer
+# from dataset_recsys.utils.mathe_syncer import MathE_Syncer
+from dataset_recsys.utils.mathe_syncer_scayle import MathE_Syncer
 from dataset_recsys.embeddings import encode_texts
 import numpy as np
 
@@ -74,6 +75,14 @@ def _get_completed_materials(
         
     return materials
 
+def _resolve_application(sync_entry_id: str, material_type: str) -> MatheApplication | None:
+    sync_id_lower = sync_entry_id.lower()
+    mat_type_lower = material_type.lower()
+    if sync_id_lower.endswith(VIDEO_EXTENSIONS) or mat_type_lower == "video":
+        return MatheApplication.VIDEOS
+    elif sync_id_lower.endswith(DOCUMENT_EXTENSIONS) or mat_type_lower == "document":
+        return MatheApplication.DOCUMENTS
+    return None
 
 def _build_collection_indices(
     materials: list[CompletedMaterial],
@@ -201,9 +210,8 @@ def _save_sync_status(syncer: MathE_Syncer, **updates: Any) -> dict[str, Any]:
 
     return current_status
 
-
-def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
-    """Reconcile, process, rebuild, and publish all MathE recommendations using Qdrant."""
+def run_full_mathe_pipeline(syncer: MathE_Syncer) -> dict:
+    """Full catalog rebuild pipeline from scratch (reprocesses and re-embeds everything)."""
     if getattr(syncer, "is_running", False):
         logger.warning("MathE refresh pipeline is already running")
         return {
@@ -216,7 +224,7 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
 
     syncer.is_running = True
     try:
-        logger.info("Starting MathE online refresh pipeline")
+        logger.info("Starting MathE full refresh pipeline")
         started_at = _utc_now()
         _save_sync_status(
             syncer,
@@ -241,6 +249,8 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
 
         qdrant_client = _build_qdrant_client()
         embeddings_created = 0
+        embeddings = np.empty((0, 0), dtype=float)
+
         if materials:
             texts = [material["text"] for material in materials]
             logger.info(
@@ -326,7 +336,7 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
             "application": MATHE_APPLICATION,
             "collections": collection_summaries,
         }
-        logger.info("Finished MathE online refresh pipeline: %s", summary)
+        logger.info("Finished full MathE catalog rebuild pipeline: %s", summary)
         return summary
     except Exception:
         failed_at = _utc_now()
@@ -336,10 +346,145 @@ def run_mathe_pipeline(syncer: MathE_Syncer) -> dict:
             last_sync_heartbeat_at=failed_at,
             last_sync_completed_at=failed_at,
         )
-        logger.exception("MathE online refresh pipeline failed")
+        logger.exception("MathE full catalog rebuild pipeline failed")
         raise
     finally:
         syncer.is_running = False
 
 
-__all__ = ["run_mathe_pipeline"]
+def run_incremental_mathe_pipeline(syncer: MathE_Syncer) -> dict:
+    """Incremental sync: processes new materials, embeds them, and updates Qdrant recommendations."""
+    if getattr(syncer, "is_running", False):
+        logger.warning("MathE refresh pipeline is already running")
+        return {
+            "status": "already_running",
+            "processed_materials": 0,
+            "embeddings_created": 0,
+            "qdrant_records_updated": 0,
+            "reason": "A MathE refresh pipeline is already running.",
+        }
+
+    syncer.is_running = True
+    try:
+        logger.info("Starting MathE online refresh pipeline")
+        started_at = _utc_now()
+        _save_sync_status(
+            syncer,
+            sync_status="running",
+            last_sync_started_at=started_at,
+            last_sync_heartbeat_at=started_at,
+            last_sync_completed_at=None,
+            embeddings_created=0,
+        )
+
+        logger.info("Reconciling MathE document and video sources")
+        syncer.reconcile_sources()
+        _save_sync_status(syncer, last_sync_heartbeat_at=_utc_now())
+
+        logger.info("Processing pending MathE documents and videos")
+        syncer.process_pending_materials()
+        _save_sync_status(syncer, last_sync_heartbeat_at=_utc_now())
+        logger.info("MathE sync and OCR complete, loading data for recommendation refresh")
+
+        materials = _get_completed_materials(syncer)
+        logger.info("Loaded %d completed materials from SQLite", len(materials))
+
+        qdrant_client = _build_qdrant_client()
+
+        new_materials = []
+        for mat in materials:
+            pid = mat.get("platform_material_id")
+            if not pid:
+                continue
+            # Check if the material already exists in Qdrant; if not, it's new and should be processed.
+            if not qdrant_client.exists(pid, collection_name=qdrant_client.COLLECTION_MATHE):
+                new_materials.append(mat)
+                logger.info("New material detected for embedding: %s", pid)
+
+        logger.info(f"Incremental sync found {len(new_materials)} new materials to embed out of {len(materials)} total completed.")
+
+        embeddings_created = 0
+        processed_count = 0
+        
+        for material in new_materials:
+            pid = material.get("platform_material_id")
+            app = _resolve_application(material["sync_entry_id"], material["type"])
+            if not app:
+                continue
+            logger.info("Processing new material: %s for application: %s", pid, app)
+            
+            encodings = encode_texts([material["text"]], model_name=DEFAULT_MATHE_EMBEDDING_MODEL)
+            vector = encodings[0]
+            embeddings_created += 1
+            
+            # Store the embedding in Qdrant
+            qdrant_client.store_embeddings(
+                application=app,
+                dataset_ids=[pid],
+                embeddings=[vector],
+                embedding_inputs=[material["text"]],
+                embedding_model=DEFAULT_MATHE_EMBEDDING_MODEL,
+                collection_name=qdrant_client.COLLECTION_MATHE,
+                run_id=started_at,
+            )
+            logger.info("Stored embedding for new material: %s in application: %s", pid, app)
+            
+            # Find similar items for recommendations via Qdrant ANN search
+            logger.info("Finding similar materials for %s", pid)
+            similar_results = qdrant_client.find_similar(
+                application=app,
+                query_vector=vector.tolist() if hasattr(vector, "tolist") else list(vector),
+                top_k=10,
+                collection_name=qdrant_client.COLLECTION_MATHE,
+            )     
+            logger.info("Found similar materials for %s: %s", pid, similar_results)
+
+            # Format recommendations {neighbor_id: score}
+            recs_map = {res["dataset_id"]: float(res["score"]) for res in similar_results if res["dataset_id"] != pid}
+            
+            # Store recommendations for the new material
+            qdrant_client.update_single_entity_recs(app, pid, recs_map, collection_name=qdrant_client.COLLECTION_MATHE)
+            logger.info("Updated recommendations for new material: %s in application: %s", pid, app)
+
+            # Inject the new material into its neighbors' recommendation lists
+            for neighbor_id, score in recs_map.items():
+                qdrant_client.update_neighbor_recs(
+                    application=app,
+                    neighbor_id=neighbor_id,
+                    new_entity_id=pid,
+                    score=score,
+                    limit=10,
+                    collection_name=qdrant_client.COLLECTION_MATHE,
+                )
+            logger.info("Updated neighbor recommendations for new material: %s in application: %s", pid, app)
+            processed_count += 1
+        completed_at = _utc_now()
+        _save_sync_status(
+            syncer,
+            sync_status="completed",
+            last_sync_heartbeat_at=completed_at,
+            last_sync_completed_at=completed_at,
+            embeddings_created=embeddings_created,
+        )
+        
+        return {
+            "status": "completed",
+            "mode": "incremental",
+            "processed_new_materials": processed_count,
+            "embeddings_created": embeddings_created,
+        }        
+        
+    except Exception:
+        failed_at = _utc_now()
+        _save_sync_status(
+            syncer,
+            sync_status="failed",
+            last_sync_heartbeat_at=failed_at,
+            last_sync_completed_at=failed_at,
+        )
+        logger.exception("Incremental MathE sync pipeline failed")
+        raise
+    finally:
+        syncer.is_running = False
+
+__all__ = ["run_full_mathe_pipeline"]

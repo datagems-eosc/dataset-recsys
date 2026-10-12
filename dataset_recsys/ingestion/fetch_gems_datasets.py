@@ -3,7 +3,6 @@ Fetch all datasets from DataGEMS DMM API and extract the sc:Dataset nodes
 into a flat list (optionally with projection).
 
 This script calls: GET https://app.datagems.eu/dmm/api/v1/dataset/search
-  with optional `properties=...` projection params.
 """
 
 from __future__ import annotations
@@ -18,10 +17,10 @@ import requests
 import os
 from dotenv import load_dotenv
 
-DMM_BASE_URL = os.getenv("DMM_BASE_URL", "https://example-dmm.com")  # Default to a placeholder if not set
+DMM_BASE_URL = os.getenv("DMM_BASE_URL", "https://datagems-dev.scayle.es/dmm")  # Default to a placeholder if not set
 BASE_URL = DMM_BASE_URL + "/api/v1"
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = REPO_ROOT / "data" / "gems_datasets_metadata" / "moma"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -68,42 +67,27 @@ def _is_dataset_node(node: Dict[str, Any]) -> bool:
 
 def fetch_search(
     token: str,
-    projection_fields: Optional[List[str]] = None, # if requesting specific fields to return, e.g. ["name", "description"]
+    projection_fields: Optional[List[str]] = None,
     status: Optional[List[str]] = None,
+    offset: int = 0,
+    count: int = 100,
     timeout: int = 30,
 ) -> Dict[str, Any]:
     """
-    Calls /dataset/search and returns the JSON payload.
-
-    Structure of the response:
-
-    datasets
-    ├─ graph_1
-    │   ├─ nodes
-    │   │   ├─ sc:Dataset        ← the dataset entity
-    │   │   ├─ cr:FileObject     ← files belonging to the dataset
-    │   │   ├─ cr:RecordSet      ← dataset schema / table
-    │   │   ├─ cr:Field          ← column definitions
-    │   │   └─ ?                 ← other node types
-    │   └─ edges                 ← relations between those nodes
-    ├─ graph_2
-    │   └─ ...
+    Calls /dataset/search and returns the complete JSON payload.
     """
     url = f"{BASE_URL}/dataset/search"
 
-    # The DataGEMS API allows requesting only specific dataset properties using
-    # repeated 'properties' parameters. For example:
-    # .../dataset/search?properties=name&properties=description
-    params: List[tuple[str, str]] = []
+    params: List[tuple[str, str]] = [
+        ("offset", str(offset)),
+        ("count", str(count)),
+    ]
+
     if projection_fields:
         for f in projection_fields:
             params.append(("properties", f))
 
     if status:
-        # Add dataset status filters to the request.
-        # The API allows filtering datasets by their dg:status value (e.g. "loaded", "ready").
-        # We append one "status" parameter per value so the final URL may look like:
-        # .../dataset/search?status=loaded&status=ready
         for s in status:
             params.append(("status", s))
 
@@ -172,13 +156,12 @@ def extract_dataset_profiles(payload: Dict[str, Any]) -> List[DatasetProfile]:
             if not _is_dataset_node(n):
                 continue
             ds_id = n.get("id") or (n.get("properties") or {}).get("id")
-            if not ds_id: # if dataset has no ID, skip it since we can't reference it
+            if not ds_id:
                 continue
             props = n.get("properties") or {}
 
             title = (props.get("name") or "").strip()
             headline_raw = (props.get("headline") or "").strip()
-            # If headline is missing or identical to title, we set it to empty string to avoid redundancy in the profile text.
             headline = "" if not headline_raw or headline_raw.lower() == title.lower() else headline_raw
 
             kw = props.get("keywords")
@@ -212,10 +195,31 @@ def extract_dataset_profiles(payload: Dict[str, Any]) -> List[DatasetProfile]:
 
 def run_ingestion(token: str) -> tuple[Dict[str, Any], List[DatasetProfile]]:
     """
-    Fetch DataGEMS data and return both the payload and the extracted dataset profiles.
+    Fetch all DataGEMS data without field projection and return full payload and profiles.
     """
+    all_datasets: List[Dict[str, Any]] = []
+    offset = 0
+    count = 100
+
     try:
-        raw_data = fetch_search(token)
+        while True:
+            # Do NOT pass projection_fields so the API returns all node properties and graph details
+            page_data = fetch_search(token, projection_fields=None, offset=offset, count=count)
+            graphs = page_data.get("datasets", [])
+            if not graphs:
+                break
+            all_datasets.extend(graphs)
+
+            total = page_data.get("total")
+            offset += len(graphs)
+
+            if total is not None and offset >= total:
+                break
+            if len(graphs) < count:
+                break
+
+        # Save the complete un-filtered dataset graph array
+        raw_data = {"datasets": all_datasets}
     except requests.HTTPError as e:
         print(f"HTTP error: {e}", file=sys.stderr)
         raise
@@ -238,17 +242,11 @@ def fetch_catalog() -> List[DatasetProfile]:
 if __name__ == "__main__":
     raw_data, profiles = run_ingestion(get_access_token())
 
+    # Write complete un-truncated raw response payload to JSON
     raw_path = OUTPUT_DIR / "datagems_datasets_raw.json"
     with open(raw_path, "w", encoding="utf-8") as f:
         json.dump(raw_data, f, ensure_ascii=False, indent=2)
-    print(f"Wrote raw dump: {raw_path}")
-
-    # # Summarize which dataset metadata fields exist and how often they appear.
-    # fields_summary = summarize_dataset_property_fields(raw_data)
-    # fields_path = OUTPUT_DIR / "datagems_dataset_fields_summary.json"
-    # with open(fields_path, "w", encoding="utf-8") as f:
-    #     json.dump(fields_summary, f, ensure_ascii=False, indent=2)
-    # print(f"Wrote dataset fields summary: {fields_path}")
+    print(f"Wrote complete raw dump: {raw_path}")
 
     profiles_path = OUTPUT_DIR / "datagems_dataset_profiles.json"
     with open(profiles_path, "w", encoding="utf-8") as f:

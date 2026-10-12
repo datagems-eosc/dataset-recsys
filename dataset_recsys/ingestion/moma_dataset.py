@@ -3,7 +3,7 @@ from fastapi import HTTPException
 import requests
 from dataset_recsys.ingestion.fetch_gems_datasets import DatasetProfile
 
-DMM_BASE_URL = os.getenv("DMM_BASE_URL", "https://example-dmm.com")  # Default to a placeholder if not set
+DMM_BASE_URL = os.getenv("DMM_BASE_URL", "https://datagems-dev.scayle.es/dmm")  # Default to a placeholder if not set
 MOMA_URL = DMM_BASE_URL + "/api/v1/dataset/search"
 
 class MomaDataset:

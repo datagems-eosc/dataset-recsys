@@ -81,7 +81,7 @@ async def _get_content_recommendations(
     token: str,
     content_type: str,
     recommender: Callable[..., list[str]],
-) -> MatheRecsResponse:
+) -> dict | MatheRecsResponse:
     start_time = time.time()
     user_subject = claims.get("sub")
     question_id = request.question_id.strip()
@@ -147,18 +147,16 @@ async def _get_content_recommendations(
             )
 
         recommended_material_ids = await run_in_threadpool(run_recommender)
+        # Gracefully return 200 OK with empty recommendations and status message
         if not recommended_material_ids:
-            log.warning(
-                "No %s recommendations found for question_id %s",
+            log.info(
+                "No %s recommendations found for question_id %s. Indicating no materials available.",
                 content_type,
                 question_id,
             )
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=(
-                    f"No {content_type} recommendations found for "
-                    f"question_id {question_id}"
-                ),
+            return MatheRecsResponse(
+                question_id=question_id,
+                recommendations=[],
             )
 
         recommendations = [

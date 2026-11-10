@@ -185,8 +185,9 @@ def recommend_hybrid_candidates(
         top_k=question_candidate_limit,
         collection_name=qdrant_client.COLLECTION_MATHE,
     )
-    for material_id, _similarity in question_matches:
-        _add_candidate(candidates, str(material_id).strip())
+    # QdrantStorageClient.find_similar returns one dict per match.
+    for match in question_matches:
+        _add_candidate(candidates, str(match["dataset_id"]).strip())
 
     add_metadata_scores(
         candidates,

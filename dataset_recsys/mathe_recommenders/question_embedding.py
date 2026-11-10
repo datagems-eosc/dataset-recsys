@@ -88,13 +88,14 @@ def recommend_from_question_embedding(
         collection_name=qdrant_client.COLLECTION_MATHE,
     )
 
+    # QdrantStorageClient.find_similar returns one dict per match.
     candidates = {
-        str(material_id).strip(): {
-            "material_id": str(material_id).strip(),
-            "question_to_material_similarity": float(similarity),
+        str(match["dataset_id"]).strip(): {
+            "material_id": str(match["dataset_id"]).strip(),
+            "question_to_material_similarity": float(match["score"]),
             "metadata_score": 0.0,
         }
-        for material_id, similarity in results
+        for match in results
     }
 
     material_metadata = mathe_mirror_client.get_document_material_metadata_by_ids(

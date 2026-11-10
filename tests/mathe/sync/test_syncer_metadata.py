@@ -684,3 +684,124 @@ def test_bedrock_document_ocr_sends_whole_pdf_to_configured_model(
     content = requests[0]["messages"][0]["content"]
     assert content[0]["document"]["source"]["bytes"] == b"%PDF-1.4 test"
     assert content[1] == {"text": mathe_syncer_module.BEDROCK_OCR_PROMPT}
+
+
+def _insert_pending_entry(syncer, entry_id, entry_type, pdf_path=None):
+    with syncer.catalog.connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO sync_entries (id, type, internal_pdf_path, status)
+            VALUES (?, ?, ?, 'pending')
+            """,
+            (entry_id, entry_type, pdf_path),
+        )
+
+
+def _entries_by_id(syncer):
+    return {entry["id"]: entry for entry in syncer.get_raw()}
+
+
+# Rows processed before the column existed have an unrecorded OCR model, so the
+# migration must add the column without guessing a value for them.
+def test_migration_adds_ocr_model_column_without_backfilling(tmp_path, monkeypatch):
+    db_path = tmp_path / "syncer.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(LEGACY_SYNC_SCHEMA)
+        conn.execute(
+            """
+            INSERT INTO sync_entries (id, type, claude_ocr_text, status)
+            VALUES ('221.pdf', 'document', 'old text', 'completed')
+            """
+        )
+
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+
+    entry = _entries_by_id(syncer)["221.pdf"]
+    assert "ocr_model" in entry
+    assert entry["ocr_model"] is None
+    assert entry["claude_ocr_text"] == "old text"
+    assert entry["status"] == "completed"
+
+    # Re-opening an already migrated catalog must not fail or change the row.
+    reopened = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    assert _entries_by_id(reopened)["221.pdf"] == entry
+
+
+@pytest.mark.parametrize(
+    ("ocr_backend", "expected_model"),
+    [
+        ("scayle", mathe_syncer_module.OCR_LLM),
+        ("bedrock", mathe_syncer_module.BEDROCK_OCR_MODEL_ID),
+    ],
+)
+def test_completed_document_records_the_ocr_model(
+    ocr_backend, expected_model, tmp_path, monkeypatch
+):
+    class FakeBedrock:
+        def converse(self, **kwargs):
+            return {"output": {"message": {"content": [{"text": "bedrock text"}]}}}
+
+    monkeypatch.setattr(
+        mathe_syncer_module.boto3, "client", lambda *args, **kwargs: FakeBedrock()
+    )
+    monkeypatch.setattr(
+        mathe_syncer_module, "ocr_file", lambda path, **kwargs: "scayle text"
+    )
+    syncer = mathe_syncer_module.MathE_Syncer(
+        base_dir=tmp_path, ocr_backend=ocr_backend
+    )
+    pdf_path = _document_entry(tmp_path)["internal_pdf_path"]
+    _insert_pending_entry(syncer, "221.pdf", "document", pdf_path)
+
+    syncer.process_pending_materials()
+
+    entry = _entries_by_id(syncer)["221.pdf"]
+    assert entry["status"] == "completed"
+    assert entry["claude_ocr_text"] == f"{ocr_backend} text"
+    assert entry["ocr_model"] == expected_model
+
+
+def test_failed_document_ocr_does_not_record_a_model(tmp_path, monkeypatch):
+    def failing_ocr_file(path, **kwargs):
+        raise RuntimeError("SCAYLE unavailable")
+
+    monkeypatch.setattr(mathe_syncer_module, "ocr_file", failing_ocr_file)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path, ocr_backend="scayle")
+    pdf_path = _document_entry(tmp_path)["internal_pdf_path"]
+    _insert_pending_entry(syncer, "221.pdf", "document", pdf_path)
+
+    syncer.process_pending_materials()
+
+    entry = _entries_by_id(syncer)["221.pdf"]
+    assert entry["status"] == "failed"
+    assert entry["claude_ocr_text"] == "OCR Failed: SCAYLE unavailable"
+    assert entry["ocr_model"] is None
+
+
+def test_video_transcript_does_not_record_an_ocr_model(tmp_path, monkeypatch):
+    def fake_process_video_entry(self, entry, whisper_model):
+        entry["claude_ocr_text"] = "transcript"
+        entry["status"] = "completed"
+
+    monkeypatch.setattr(mathe_syncer_module, "WhisperModel", lambda *a, **k: object())
+    monkeypatch.setattr(
+        mathe_syncer_module.MathE_Syncer,
+        "_process_video_entry",
+        fake_process_video_entry,
+    )
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path, ocr_backend="scayle")
+    _insert_pending_entry(syncer, "abcdefghijk", "video")
+
+    syncer.process_pending_materials()
+
+    entry = _entries_by_id(syncer)["abcdefghijk"]
+    assert entry["status"] == "completed"
+    assert entry["claude_ocr_text"] == "transcript"
+    assert entry["ocr_model"] is None
+
+
+def test_empty_catalog_table_lists_the_ocr_model_column(tmp_path):
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path, ocr_backend="scayle")
+
+    assert "ocr_model" in syncer.get().columns

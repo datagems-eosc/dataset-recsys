@@ -83,7 +83,8 @@ class MathESyncCatalog:
                     claude_ocr_text TEXT,
                     status TEXT NOT NULL DEFAULT 'pending',
                     platform_material_id TEXT,
-                    content_subtype TEXT
+                    content_subtype TEXT,
+                    ocr_model TEXT
                 )
                 """
             )
@@ -282,15 +283,22 @@ class MathESyncCatalog:
         entry_id: str,
         status: str,
         text: str | None,
+        ocr_model: str | None = None,
     ) -> None:
+        """Store one processing result.
+
+        ``ocr_model`` names the model that produced a document's OCR text. It
+        is always overwritten, so a failed run or a video transcript (which is
+        not OCR) leaves it NULL instead of keeping a stale model name.
+        """
         with self.connection() as conn:
             conn.execute(
                 """
                 UPDATE sync_entries
-                SET status = ?, claude_ocr_text = ?
+                SET status = ?, claude_ocr_text = ?, ocr_model = ?
                 WHERE id = ?
                 """,
-                (status, text, entry_id),
+                (status, text, ocr_model, entry_id),
             )
 
     def count_entries(self) -> int:

@@ -476,6 +476,7 @@ class MathE_Syncer:
                     "platform_material_id",
                     "content_subtype",
                     "claude_ocr_text",
+                    "ocr_model",
                     "status",
                     "material_id",
                     "source_type",
@@ -551,6 +552,9 @@ class MathE_Syncer:
             )
             print(f"Current status: {entry.get('status')}, OCR text length: {len(str(entry.get('claude_ocr_text') or ''))}")
 
+            # Only a successful document OCR records the model that produced
+            # the text; videos are transcribed, not OCR'd.
+            entry["ocr_model"] = None
             if entry.get("type") == "video":
                 self._process_video_entry(entry, whisper_model)
             else:
@@ -560,6 +564,7 @@ class MathE_Syncer:
                 entry_id=entry["id"],
                 status=entry["status"],
                 text=entry["claude_ocr_text"],
+                ocr_model=entry.get("ocr_model"),
             )
             
             print(f"Finished processing {entry['id']}. Status: {entry['status']}, OCR text length: {len(str(entry.get('claude_ocr_text') or ''))}")
@@ -709,6 +714,7 @@ class MathE_Syncer:
 
             # The column keeps its legacy name ("claude_ocr_text") to avoid a schema change.
             entry["claude_ocr_text"] = text
+            entry["ocr_model"] = self.ocr_model
             entry["status"] = "completed"
             print(
                 f"Successfully executed {self.ocr_backend} OCR ({self.ocr_model}) "
@@ -717,6 +723,7 @@ class MathE_Syncer:
         except Exception as e:
             print(f"Failed {self.ocr_backend} OCR processing for {entry['id']}: {e}")
             entry["claude_ocr_text"] = f"OCR Failed: {str(e)}"
+            entry["ocr_model"] = None
             entry["status"] = "failed"
 
     def _send_notification(self, msg: str):

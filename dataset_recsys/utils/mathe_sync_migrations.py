@@ -1,7 +1,8 @@
 """Transitional migrations for MathE's deployed SQLite sync catalog.
 
 Delete this module and its call from ``MathESyncCatalog._initialize`` after all
-deployed catalogs contain and have backfilled the Stage 1 content metadata.
+deployed catalogs contain and have backfilled the Stage 1 content metadata and
+contain the ``ocr_model`` provenance column.
 """
 
 import sqlite3
@@ -12,9 +13,15 @@ SYNC_ENTRY_METADATA_COLUMNS = {
     "content_subtype": "TEXT",
 }
 
+# Model that produced a document's OCR text. Rows processed before this column
+# existed keep NULL: their model was not recorded, so it is not guessed here.
+SYNC_ENTRY_PROVENANCE_COLUMNS = {
+    "ocr_model": "TEXT",
+}
+
 
 def migrate_sync_catalog(conn: sqlite3.Connection) -> None:
-    """Add Stage 1 columns and classify rows created by the legacy syncer."""
+    """Add missing columns and classify rows created by the legacy syncer."""
     _add_sync_entry_metadata_columns(conn)
     _backfill_sync_entry_metadata(conn)
 
@@ -24,7 +31,8 @@ def _add_sync_entry_metadata_columns(conn: sqlite3.Connection) -> None:
         row["name"]
         for row in conn.execute("PRAGMA table_info(sync_entries)").fetchall()
     }
-    for column_name, column_type in SYNC_ENTRY_METADATA_COLUMNS.items():
+    new_columns = {**SYNC_ENTRY_METADATA_COLUMNS, **SYNC_ENTRY_PROVENANCE_COLUMNS}
+    for column_name, column_type in new_columns.items():
         if column_name not in existing_columns:
             conn.execute(
                 f"ALTER TABLE sync_entries ADD COLUMN {column_name} {column_type}"
@@ -81,4 +89,8 @@ def _backfill_sync_entry_metadata(conn: sqlite3.Connection) -> None:
         )
 
 
-__all__ = ["SYNC_ENTRY_METADATA_COLUMNS", "migrate_sync_catalog"]
+__all__ = [
+    "SYNC_ENTRY_METADATA_COLUMNS",
+    "SYNC_ENTRY_PROVENANCE_COLUMNS",
+    "migrate_sync_catalog",
+]

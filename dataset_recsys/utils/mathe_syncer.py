@@ -49,11 +49,6 @@ class MathE_Syncer:
         self.status_file = self._base_dir / "sync_status.json"
         self.cookie_file = self._base_dir / "cookies.txt"
         
-        # Verify whether all those directories exist, if not throw an error
-        for directory in [self._pdf_dir, self._docx_dir, self._ppt_dir, self._transcript_dir]:
-            if not directory.exists():
-                raise FileNotFoundError(f"Required directory does not exist: {directory}")
-        
         # Claude 4.5 Global Configuration
         self.model_id = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
         self.region = "eu-central-1"
@@ -213,6 +208,29 @@ class MathE_Syncer:
             )
 
         return True
+
+    def require_source_directories(self) -> None:
+        """Fail a sync early when a MathE material directory is missing.
+
+        This runs when a sync starts, not in ``__init__``: the API creates the
+        syncer at import time, so raising there would stop the whole service
+        from starting.
+        """
+        missing = [
+            str(directory)
+            for directory in (
+                self._pdf_dir,
+                self._docx_dir,
+                self._ppt_dir,
+                self._transcript_dir,
+            )
+            if not directory.is_dir()
+        ]
+        if missing:
+            raise FileNotFoundError(
+                "MathE sync cannot start; required directories are missing: "
+                + ", ".join(missing)
+            )
 
     def reconcile_sources(self) -> None:
         """Discover current MathE sources and reconcile the local catalog."""

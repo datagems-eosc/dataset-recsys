@@ -24,6 +24,9 @@ class FakeSyncer:
         self.process_called = False
         self.status = {}
 
+    def require_source_directories(self):
+        pass
+
     def reconcile_sources(self):
         self.reconcile_called = True
 
@@ -722,3 +725,29 @@ def test_batch_processing_routes_video_type_to_transcription(monkeypatch, tmp_pa
     assert processed == [("abcdefghijk", whisper_model)]
     assert syncer.get_raw()[0]["type"] == "video"
     assert syncer.get_raw()[0]["claude_ocr_text"] == "new transcript"
+
+
+class MissingDirectoriesSyncer(FakeSyncer):
+    def require_source_directories(self):
+        raise FileNotFoundError("MathE sync cannot start")
+
+
+# A sync with unmounted material directories must stop before reconciliation,
+# so it can never treat missing folders as removed materials.
+@pytest.mark.parametrize(
+    "pipeline_name",
+    ["run_full_mathe_pipeline", "run_incremental_mathe_pipeline"],
+)
+def test_pipeline_fails_before_reconciliation_when_directories_are_missing(
+    pipeline_name, tmp_path
+):
+    fake_syncer = MissingDirectoriesSyncer(tmp_path / "unused.db")
+    run_pipeline = getattr(mathe_sync_pipeline, pipeline_name)
+
+    with pytest.raises(FileNotFoundError):
+        run_pipeline(fake_syncer)
+
+    assert fake_syncer.reconcile_called is False
+    assert fake_syncer.process_called is False
+    assert fake_syncer.is_running is False
+    assert fake_syncer.status["sync_status"] == "failed"

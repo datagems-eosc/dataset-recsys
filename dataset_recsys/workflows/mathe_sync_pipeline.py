@@ -235,6 +235,8 @@ def run_full_mathe_pipeline(syncer: MathE_Syncer) -> dict:
             embeddings_created=0,
         )
 
+        syncer.require_source_directories()
+
         logger.info("Reconciling MathE document and video sources")
         syncer.reconcile_sources()
         _save_sync_status(syncer, last_sync_heartbeat_at=_utc_now())
@@ -376,6 +378,8 @@ def run_incremental_mathe_pipeline(syncer: MathE_Syncer) -> dict:
             last_sync_completed_at=None,
             embeddings_created=0,
         )
+
+        syncer.require_source_directories()
 
         logger.info("Reconciling MathE document and video sources")
         syncer.reconcile_sources()

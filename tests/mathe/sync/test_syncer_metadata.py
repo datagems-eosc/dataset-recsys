@@ -499,3 +499,64 @@ def test_source_reconciliation_propagates_catalog_failure(tmp_path, monkeypatch)
 
     with pytest.raises(RuntimeError, match="catalog read failed"):
         syncer.reconcile_sources()
+
+
+SOURCE_DIRECTORY_NAMES = ("pdfs", "docxs", "pptxs", "transcripts")
+
+
+def _build_bedrock_syncer(tmp_path, monkeypatch):
+    _disable_bedrock(monkeypatch)
+    return mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+
+
+def _build_scayle_syncer(tmp_path, monkeypatch):
+    import dataset_recsys.utils.mathe_syncer_scayle as scayle_syncer_module
+
+    return scayle_syncer_module.MathE_Syncer(base_dir=tmp_path)
+
+
+SYNCER_BUILDERS = pytest.mark.parametrize(
+    "build_syncer",
+    [_build_bedrock_syncer, _build_scayle_syncer],
+    ids=["bedrock", "scayle"],
+)
+
+
+# The API builds the syncer at import time, so construction must not depend on
+# the material directories being mounted.
+@SYNCER_BUILDERS
+def test_syncer_can_be_created_without_source_directories(
+    build_syncer, tmp_path, monkeypatch
+):
+    syncer = build_syncer(tmp_path, monkeypatch)
+
+    assert not (tmp_path / "pdfs").exists()
+    assert syncer.get_raw() == []
+
+
+@SYNCER_BUILDERS
+def test_require_source_directories_lists_every_missing_directory(
+    build_syncer, tmp_path, monkeypatch
+):
+    (tmp_path / "pdfs").mkdir()
+    syncer = build_syncer(tmp_path, monkeypatch)
+
+    with pytest.raises(FileNotFoundError) as error:
+        syncer.require_source_directories()
+
+    message = str(error.value)
+    assert str(tmp_path / "docxs") in message
+    assert str(tmp_path / "pptxs") in message
+    assert str(tmp_path / "pdfs") not in message
+    assert str(tmp_path / "transcripts") not in message
+
+
+@SYNCER_BUILDERS
+def test_require_source_directories_passes_when_all_exist(
+    build_syncer, tmp_path, monkeypatch
+):
+    for name in SOURCE_DIRECTORY_NAMES:
+        (tmp_path / name).mkdir(exist_ok=True)
+    syncer = build_syncer(tmp_path, monkeypatch)
+
+    assert syncer.require_source_directories() is None

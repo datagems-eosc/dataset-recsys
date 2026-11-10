@@ -314,11 +314,12 @@ class MatheMirrorClient:
         self,
         question_id: int,
     ) -> list[Dict[str, Any]]:
-        """Retrieve videos in the same topic/subtopic pool as a question."""
+        """Retrieve videos, with their keywords, in a question's topic/subtopic pool."""
         query = """
-        SELECT DISTINCT
+        SELECT
             m.id AS material_id,
-            m.type AS platform_type
+            m.type AS platform_type,
+            ARRAY_REMOVE(ARRAY_AGG(DISTINCT k.name), NULL) AS keywords
         FROM platform__sna__questions q
         JOIN material_top_sub pool_mts
             ON q.topic = pool_mts.platformtopicid
@@ -330,7 +331,14 @@ class MatheMirrorClient:
             ON pool_mts.platformmaterialid = m.id
             AND m.type IN (1, 2)
             AND NULLIF(BTRIM(m.link), '') IS NOT NULL
+        LEFT JOIN platform_material_keyword mk
+            ON m.id = mk.platformmaterialid
+        LEFT JOIN platform__keywords k
+            ON mk.platformkeywordid = k.id
         WHERE q.id = %s
+        GROUP BY
+            m.id,
+            m.type
         ORDER BY
             m.id;
         """

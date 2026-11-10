@@ -128,16 +128,44 @@ reviews (`platform_materials.type` values `1` and `2`) assigned to the same
 topic and subtopic as the question. It embeds the question and scores only the
 platform material IDs in that pool against the `mathe_videos` collection.
 
-Videos without a published `mathe_videos` embedding are omitted because there
-is no transcript-based score with which to rank them. The response contains
-canonical `platform_materials.id` values. The document endpoints continue to
-query only `mathe_documents`, so neither endpoint can return the other content
-kind.
+Each video in the pool is ranked with the same formula as the document
+curricular pool ranker:
+
+```text
+final_score =
+    MATHE_VIDEO_KEYWORD_WEIGHT * keyword_jaccard
+    + (1 - MATHE_VIDEO_KEYWORD_WEIGHT) * max(question_to_video_similarity, 0)
+```
+
+`keyword_jaccard` is the overlap between the question's keywords and the
+video's keywords, computed exactly as for documents.
+`MATHE_VIDEO_KEYWORD_WEIGHT` defaults to `0.6`, the document ranker's default.
+That value has not been validated on video relevance labels.
+
+A video without a published `mathe_videos` embedding keeps a similarity of
+`0.0` and is ranked on its keyword overlap alone. A negative similarity counts
+as `0.0` in the sum.
+
+A video whose `final_score` is `0.0` has no ranking signal and is left out,
+because any position given to it would be arbitrary. The endpoint can therefore
+return fewer videos than requested, or none. As for documents, the two cases
+are `zero_score_no_embedding` and `zero_score_with_embedding`;
+`score_video_pool_candidates(...)` lists them for a question, and the ranker
+logs them at INFO level. Ties between ranked videos keep ascending platform
+material ID order.
+
+Because the ranker uses keyword overlap, keyword overlap must not be used as a
+proxy relevance label when evaluating video recommendations.
+
+The response contains canonical `platform_materials.id` values. The document
+endpoints continue to query only `mathe_documents`, so neither endpoint can
+return the other content kind.
 
 Before enabling the endpoint in an environment, run the Stage 2 refresh so the
 environment contains `mathe_videos` embeddings. If the collection is empty,
-the endpoint returns no recommendations rather than falling back to documents
-or the mixed legacy collection.
+only videos sharing a keyword with the question are returned, ranked by keyword
+overlap; the endpoint never falls back to documents or the mixed legacy
+collection.
 
 ## Post-Migration Cleanup
 

@@ -171,9 +171,15 @@ def test_get_videos_for_question_uses_video_only_hard_pool():
     client.get_videos_for_question(82)
 
     cursor = client.conn.cursor_instance
-    assert "SELECT DISTINCT" in cursor.executed_query
     assert "m.id AS material_id" in cursor.executed_query
     assert "m.type AS platform_type" in cursor.executed_query
+    assert (
+        "ARRAY_REMOVE(ARRAY_AGG(DISTINCT k.name), NULL) AS keywords"
+        in cursor.executed_query
+    )
+    assert "LEFT JOIN platform_material_keyword mk" in cursor.executed_query
+    assert "LEFT JOIN platform__keywords k" in cursor.executed_query
+    assert "GROUP BY" in cursor.executed_query
     assert "q.topic = pool_mts.platformtopicid" in cursor.executed_query
     assert "q.subtopic = pool_mts.platformsubtopicid" in cursor.executed_query
     assert "q.subtopic IS NULL AND pool_mts.platformsubtopicid IS NULL" in cursor.executed_query

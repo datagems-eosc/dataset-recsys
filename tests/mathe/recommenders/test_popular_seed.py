@@ -20,10 +20,11 @@ def test_recommend_from_popular_seed_uses_document_platform_ids():
     )
 
     assert recommendations == ["10", "11"]
-    assert qdrant_client.calls == [
+    assert qdrant_client.recommendation_calls == [
         {
             "application": "mathe_documents",
             "entity_id": "6",
             "limit": 2,
+            "collection_name": qdrant_client.COLLECTION_MATHE,
         }
     ]

@@ -3,7 +3,7 @@ from dataset_recsys.mathe_recommenders.video_pool_ranker import (
     recommend_videos_for_question,
 )
 
-from fakes import FakeQdrantClient, fake_mathe_client
+from fakes import FakeQdrantStorageClient, fake_mathe_client
 
 
 def test_rank_video_pool_uses_only_video_namespace_and_embedded_pool_members():
@@ -19,8 +19,8 @@ def test_rank_video_pool_uses_only_video_namespace_and_embedded_pool_members():
         ]
 
     mathe_client.get_videos_for_question = get_videos_for_question
-    qdrant_client = FakeQdrantClient(
-        [("901", 0.6), ("902", 0.9), ("999", 1.0)]
+    qdrant_client = FakeQdrantStorageClient(
+        similar_results=[("901", 0.6), ("902", 0.9), ("999", 1.0)]
     )
 
     candidates = rank_video_pool_candidates(
@@ -41,8 +41,8 @@ def test_rank_video_pool_uses_only_video_namespace_and_embedded_pool_members():
             "method": "find_similar_by_ids",
             "application": "mathe_videos",
             "query_embedding": [0.1, 0.2],
-            "entity_ids": ["901", "902", "903"],
-            "table": qdrant_client.TABLE_MATHE,
+            "entity_ids": ["901", "901.txt", "902", "902.txt", "903", "903.txt"],
+            "collection_name": qdrant_client.COLLECTION_MATHE,
         }
     ]
 
@@ -59,7 +59,7 @@ def test_recommend_videos_returns_ranked_platform_ids():
         question="Explain the chain rule.",
         k=1,
         mathe_mirror_client=mathe_client,
-        qdrant_client=FakeQdrantClient([("901", 0.6), ("902", 0.9)]),
+        qdrant_client=FakeQdrantStorageClient(similar_results=[("901", 0.6), ("902", 0.9)]),
         question_embedding=[0.1, 0.2],
     )
 
@@ -76,7 +76,7 @@ def test_rank_video_pool_returns_empty_without_pool_or_embeddings():
             question="Explain the chain rule.",
             k=3,
             mathe_mirror_client=mathe_client,
-            qdrant_client=FakeQdrantClient([]),
+            qdrant_client=FakeQdrantStorageClient(similar_results=[]),
             question_embedding=[0.1, 0.2],
         )
         == []
@@ -91,7 +91,7 @@ def test_rank_video_pool_returns_empty_without_pool_or_embeddings():
             question="Explain the chain rule.",
             k=3,
             mathe_mirror_client=mathe_client,
-            qdrant_client=FakeQdrantClient([]),
+            qdrant_client=FakeQdrantStorageClient(similar_results=[]),
             question_embedding=[0.1, 0.2],
         )
         == []

@@ -1,7 +1,14 @@
-from qdrant_client import QdrantStorageClient, models
+"""Manual smoke check against a running Qdrant instance.
+
+Not collected by pytest (the file name does not start with ``test_``).
+Run it by hand after port-forwarding Qdrant:
+
+    python tests/manual_qdrant_check.py
+"""
+from qdrant_client import QdrantClient, models
 
 # Connect to Qdrant via local port-forward
-client = QdrantStorageClient(host="localhost", port=6333)
+client = QdrantClient(host="localhost", port=6333)
 collection_name = "dataset_embeddings"
 
 # 1. Check collection stats & total points

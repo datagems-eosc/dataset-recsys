@@ -5,7 +5,7 @@ from dataset_recsys.mathe_recommenders.curricular_pool_ranker import (
     recommend_from_curricular_pool,
 )
 
-from fakes import FakeQdrantClient, fake_mathe_client
+from fakes import FakeQdrantStorageClient, fake_mathe_client
 
 
 def test_rank_curricular_pool_candidates_scores_only_the_same_pool():
@@ -30,8 +30,8 @@ def test_rank_curricular_pool_candidates_scores_only_the_same_pool():
             "keywords": [],
         },
     ]
-    qdrant_client = FakeQdrantClient(
-        [("100", 0.2), ("101", 0.9), ("900", 1.0)]
+    qdrant_client = FakeQdrantStorageClient(
+        similar_results=[("100", 0.2), ("101", 0.9), ("900", 1.0)]
     )
 
     candidates = rank_curricular_pool_candidates(
@@ -83,7 +83,7 @@ def test_rank_curricular_pool_candidates_keeps_missing_embeddings_at_zero():
             "keywords": ["product rule"],
         },
     ]
-    qdrant_client = FakeQdrantClient([("101", 0.8)])
+    qdrant_client = FakeQdrantStorageClient(similar_results=[("101", 0.8)])
 
     candidates = rank_curricular_pool_candidates(
         question_id=42,
@@ -124,7 +124,7 @@ def test_recommend_from_curricular_pool_returns_db_material_ids():
         question="Differentiate x.",
         k=1,
         mathe_mirror_client=mathe_client,
-        qdrant_client=FakeQdrantClient([("100", 0.9)]),
+        qdrant_client=FakeQdrantStorageClient(similar_results=[("100", 0.9)]),
         question_embedding=[0.1, 0.2],
     )
 

@@ -2,7 +2,7 @@ from pytest import approx
 
 from dataset_recsys.mathe_recommenders import question_embedding
 
-from fakes import FakeQdrantClient, fake_mathe_client
+from fakes import FakeQdrantStorageClient, fake_mathe_client
 
 
 def test_recommend_from_question_embedding_queries_mathe_vector_table(
@@ -14,8 +14,8 @@ def test_recommend_from_question_embedding_queries_mathe_vector_table(
         "encode_texts",
         lambda texts, model_name: [[0.1, 0.2, 0.3]],
     )
-    qdrant_client = FakeQdrantClient(
-        [("220", 0.91), ("222", 0.85)]
+    qdrant_client = FakeQdrantStorageClient(
+        similar_results=[("220", 0.91), ("222", 0.85)]
     )
     mathe_client.get_document_material_metadata_by_ids = lambda material_ids: [
         {
@@ -54,7 +54,7 @@ def test_recommend_from_question_embedding_queries_mathe_vector_table(
             "application": "mathe_documents",
             "query_embedding": [0.1, 0.2, 0.3],
             "top_k": 2,
-            "table": "mathe_embeddings",
+            "collection_name": "mathe_embeddings",
         }
     ]
 
@@ -66,8 +66,8 @@ def test_recommend_from_question_embedding_reranks_with_metadata(monkeypatch):
         "encode_texts",
         lambda texts, model_name: [[0.1, 0.2, 0.3]],
     )
-    qdrant_client = FakeQdrantClient(
-        [("1", 0.95), ("2", 0.8)]
+    qdrant_client = FakeQdrantStorageClient(
+        similar_results=[("1", 0.95), ("2", 0.8)]
     )
     mathe_client.get_document_material_metadata_by_ids = lambda material_ids: [
         {

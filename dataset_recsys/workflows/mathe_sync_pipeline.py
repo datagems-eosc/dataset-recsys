@@ -11,8 +11,7 @@ from dataset_recsys.retrieval import rank_similar_entities
 from dataset_recsys.utils.mathe_index_migrations import (
     include_legacy_mathe_collection,
 )
-# from dataset_recsys.utils.mathe_syncer import MathE_Syncer
-from dataset_recsys.utils.mathe_syncer_scayle import MathE_Syncer
+from dataset_recsys.utils.mathe_syncer import MathE_Syncer
 from dataset_recsys.embeddings import encode_texts
 import numpy as np
 

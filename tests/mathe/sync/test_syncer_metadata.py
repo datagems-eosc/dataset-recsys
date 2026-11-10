@@ -504,20 +504,20 @@ def test_source_reconciliation_propagates_catalog_failure(tmp_path, monkeypatch)
 SOURCE_DIRECTORY_NAMES = ("pdfs", "docxs", "pptxs", "transcripts")
 
 
-def _build_bedrock_syncer(tmp_path, monkeypatch):
-    _disable_bedrock(monkeypatch)
-    return mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+def _build_syncer(ocr_backend):
+    def build(tmp_path, monkeypatch):
+        _disable_bedrock(monkeypatch)
+        return mathe_syncer_module.MathE_Syncer(
+            base_dir=tmp_path,
+            ocr_backend=ocr_backend,
+        )
 
-
-def _build_scayle_syncer(tmp_path, monkeypatch):
-    import dataset_recsys.utils.mathe_syncer_scayle as scayle_syncer_module
-
-    return scayle_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    return build
 
 
 SYNCER_BUILDERS = pytest.mark.parametrize(
     "build_syncer",
-    [_build_bedrock_syncer, _build_scayle_syncer],
+    [_build_syncer("bedrock"), _build_syncer("scayle")],
     ids=["bedrock", "scayle"],
 )
 
@@ -560,3 +560,127 @@ def test_require_source_directories_passes_when_all_exist(
     syncer = build_syncer(tmp_path, monkeypatch)
 
     assert syncer.require_source_directories() is None
+
+
+def _fail_if_bedrock_client_is_created(monkeypatch):
+    def fail(*args, **kwargs):
+        raise AssertionError("The Bedrock client must not be created")
+
+    monkeypatch.setattr(mathe_syncer_module.boto3, "client", fail)
+
+
+def _document_entry(tmp_path):
+    pdf_path = tmp_path / "221.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 test")
+    return {"id": "221.pdf", "internal_pdf_path": str(pdf_path)}
+
+
+def test_syncer_uses_scayle_ocr_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("MATHE_OCR_BACKEND", raising=False)
+    _fail_if_bedrock_client_is_created(monkeypatch)
+
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+
+    assert syncer.ocr_backend == "scayle"
+    assert syncer.ocr_model == mathe_syncer_module.OCR_LLM
+    assert syncer.bedrock is None
+
+
+def test_syncer_reads_ocr_backend_from_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("MATHE_OCR_BACKEND", " Bedrock ")
+    _disable_bedrock(monkeypatch)
+
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+
+    assert syncer.ocr_backend == "bedrock"
+    assert syncer.ocr_model == mathe_syncer_module.BEDROCK_OCR_MODEL_ID
+    assert syncer.bedrock is not None
+
+
+def test_ocr_backend_argument_overrides_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("MATHE_OCR_BACKEND", "bedrock")
+    _fail_if_bedrock_client_is_created(monkeypatch)
+
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path, ocr_backend="scayle")
+
+    assert syncer.ocr_backend == "scayle"
+
+
+def test_syncer_rejects_unknown_ocr_backend(tmp_path, monkeypatch):
+    monkeypatch.setenv("MATHE_OCR_BACKEND", "tesseract")
+
+    with pytest.raises(ValueError, match="Unsupported MathE OCR backend 'tesseract'"):
+        mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+
+
+def test_scayle_document_ocr_skips_text_layer_and_uses_math_prompt(
+    tmp_path, monkeypatch
+):
+    calls = []
+
+    def fake_ocr_file(path, **kwargs):
+        calls.append({"path": path, **kwargs})
+        return "$x^2$"
+
+    monkeypatch.setattr(mathe_syncer_module, "ocr_file", fake_ocr_file)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path, ocr_backend="scayle")
+    entry = _document_entry(tmp_path)
+
+    syncer._process_document_entry(entry)
+
+    assert entry["status"] == "completed"
+    assert entry["claude_ocr_text"] == "$x^2$"
+    assert calls == [
+        {
+            "path": entry["internal_pdf_path"],
+            "llm": mathe_syncer_module.OCR_LLM,
+            "prefer_text_layer": False,
+            "prompt": mathe_syncer_module.SCAYLE_OCR_PROMPT,
+        }
+    ]
+
+
+def test_scayle_document_ocr_marks_empty_text_as_failed(tmp_path, monkeypatch):
+    monkeypatch.setattr(mathe_syncer_module, "ocr_file", lambda path, **kwargs: "  \n")
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path, ocr_backend="scayle")
+    entry = _document_entry(tmp_path)
+
+    syncer._process_document_entry(entry)
+
+    assert entry["status"] == "failed"
+    assert entry["claude_ocr_text"] == "OCR Failed: SCAYLE OCR returned empty text"
+
+
+def test_bedrock_document_ocr_sends_whole_pdf_to_configured_model(
+    tmp_path, monkeypatch
+):
+    requests = []
+
+    class FakeBedrock:
+        def converse(self, **kwargs):
+            requests.append(kwargs)
+            return {"output": {"message": {"content": [{"text": "$y^2$"}]}}}
+
+    monkeypatch.setattr(
+        mathe_syncer_module.boto3,
+        "client",
+        lambda *args, **kwargs: FakeBedrock(),
+    )
+    monkeypatch.setattr(
+        mathe_syncer_module,
+        "ocr_file",
+        lambda *args, **kwargs: pytest.fail("SCAYLE must not be called"),
+    )
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path, ocr_backend="bedrock")
+    entry = _document_entry(tmp_path)
+
+    syncer._process_document_entry(entry)
+
+    assert entry["status"] == "completed"
+    assert entry["claude_ocr_text"] == "$y^2$"
+    assert len(requests) == 1
+    assert requests[0]["modelId"] == mathe_syncer_module.BEDROCK_OCR_MODEL_ID
+    assert requests[0]["inferenceConfig"] == {"temperature": 0.0}
+    content = requests[0]["messages"][0]["content"]
+    assert content[0]["document"]["source"]["bytes"] == b"%PDF-1.4 test"
+    assert content[1] == {"text": mathe_syncer_module.BEDROCK_OCR_PROMPT}

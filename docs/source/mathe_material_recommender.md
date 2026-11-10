@@ -271,6 +271,27 @@ The reason for this weighting is that, after the hard topic/subtopic filter,
 keyword overlap is the remaining explicit curriculum signal. The question
 embedding then refines the order inside the same curricular pool.
 
+`keyword_jaccard` lies between 0 and 1. A cosine similarity can be negative,
+which has no meaning as a relevance contribution, so a negative similarity
+counts as `0.0` in the sum. The reported `question_to_material_similarity`
+keeps the measured value.
+
+A material whose `final_score` is `0.0` has no ranking signal, so it is left
+out of the result: any position given to it would be arbitrary. The ranker can
+therefore return fewer than the requested number of materials, or none. There
+are two such cases, both without a keyword shared with the question:
+
+```text
+zero_score_no_embedding     no stored mathe_documents embedding
+zero_score_with_embedding   an embedding whose similarity is zero or negative
+```
+
+These materials can be listed. `score_curricular_pool_candidates(...)` returns
+the whole pool for a question, with `final_score`, `has_embedding` and an
+`exclusion_reason` that is empty for ranked materials. The ranker also writes
+an INFO log line naming the left-out material IDs and their reasons whenever a
+request leaves any out.
+
 ### Step 8 - Return MathE Material IDs
 
 Candidates are keyed internally by the canonical MathE platform material ID,

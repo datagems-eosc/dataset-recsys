@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Any
 
@@ -21,22 +22,55 @@ MATHE_CURRICULAR_KEYWORD_WEIGHT = _env_weight(
     "0.6",
 )
 
+logger = logging.getLogger(__name__)
+
+# Why a pool material with a final score of zero is left out of the ranking.
+ZERO_SCORE_NO_EMBEDDING = "zero_score_no_embedding"
+ZERO_SCORE_WITH_EMBEDDING = "zero_score_with_embedding"
+
+
+def _score_candidates(
+    candidates: list[dict[str, Any]],
+    keyword_weight: float,
+) -> None:
+    """Set ``final_score`` and ``exclusion_reason`` on each pool candidate.
+
+    Keyword overlap lies in [0, 1]. A cosine similarity can be negative, which
+    carries no meaning as a relevance contribution, so it counts as 0.0 in the
+    weighted sum. The reported ``question_to_material_similarity`` keeps the
+    measured value.
+
+    A candidate whose final score is zero has no ranking signal: any position
+    given to it would be arbitrary. It is marked with the reason so it can be
+    left out of the ranking and reported.
+    """
+    question_weight = 1.0 - keyword_weight
+    for candidate in candidates:
+        similarity = float(candidate.get("question_to_material_similarity", 0.0))
+        candidate["final_score"] = (
+            keyword_weight * float(candidate.get("keyword_jaccard", 0.0))
+            + question_weight * max(similarity, 0.0)
+        )
+        if candidate["final_score"] > 0.0:
+            candidate["exclusion_reason"] = None
+        elif candidate.get("has_embedding"):
+            candidate["exclusion_reason"] = ZERO_SCORE_WITH_EMBEDDING
+        else:
+            candidate["exclusion_reason"] = ZERO_SCORE_NO_EMBEDDING
+
 
 def _rank_candidates(
     candidates: list[dict[str, Any]],
     k: int,
-    keyword_weight: float,
 ) -> list[dict[str, Any]]:
-    question_weight = 1.0 - keyword_weight
-    for candidate in candidates:
-        candidate["final_score"] = (
-            keyword_weight * float(candidate.get("keyword_jaccard", 0.0))
-            + question_weight
-            * float(candidate.get("question_to_material_similarity", 0.0))
-        )
-
+    """Return the top-k scored candidates, leaving out zero-score ones."""
+    ranked = [
+        candidate
+        for candidate in candidates
+        if candidate["exclusion_reason"] is None
+    ]
     return sorted(
-        candidates,
+        ranked,
         key=lambda candidate: (
             candidate["final_score"],
             candidate["question_to_material_similarity"],
@@ -46,10 +80,9 @@ def _rank_candidates(
     )[:k]
 
 
-def rank_curricular_pool_candidates(
+def score_curricular_pool_candidates(
     question_id: int,
     question: str,
-    k: int,
     mathe_mirror_client: MatheMirrorClient,
     qdrant_client: QdrantStorageClient | None = None,
     keyword_weight: float = MATHE_CURRICULAR_KEYWORD_WEIGHT,
@@ -57,14 +90,21 @@ def rank_curricular_pool_candidates(
     question_embedding: list[float] | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Rank document teaching materials restricted to the question's same topic/subtopic pool.
+    Score every document teaching material in the question's topic/subtopic pool.
 
     The pool is a hard curricular filter. Materials outside the same
-    topic/subtopic are never added. Ranking uses only keyword overlap and
+    topic/subtopic are never added. Scoring uses only keyword overlap and
     question-to-material similarity.
+
+    The whole pool is returned in pool order (ascending material ID), including
+    the materials that the ranking leaves out. Each candidate carries
+    ``has_embedding``, ``final_score`` and ``exclusion_reason``, which is
+    ``None`` for a ranked material and otherwise names why its score is zero.
+    Use this to report zero-score materials; use
+    ``rank_curricular_pool_candidates`` for recommendations.
     """
     question = question.strip()
-    if k <= 0 or not question:
+    if not question:
         return []
 
     question_metadata = mathe_mirror_client.get_question_metadata(question_id)
@@ -90,6 +130,7 @@ def rank_curricular_pool_candidates(
             "keyword_jaccard": keyword_jaccard,
             "metadata_score": keyword_jaccard,
             "question_to_material_similarity": 0.0,
+            "has_embedding": False,
         }
 
     qdrant_client = qdrant_client or QdrantStorageClient()
@@ -105,15 +146,68 @@ def rank_curricular_pool_candidates(
     )
     for material_index_id, similarity in question_similarities.items():
         if material_index_id in candidates_by_material_id:
-            candidates_by_material_id[material_index_id][
-                "question_to_material_similarity"
-            ] = similarity
+            candidate = candidates_by_material_id[material_index_id]
+            candidate["question_to_material_similarity"] = similarity
+            candidate["has_embedding"] = True
 
-    return _rank_candidates(
-        list(candidates_by_material_id.values()),
-        k,
-        keyword_weight,
+    candidates = list(candidates_by_material_id.values())
+    _score_candidates(candidates, keyword_weight)
+    return candidates
+
+
+def rank_curricular_pool_candidates(
+    question_id: int,
+    question: str,
+    k: int,
+    mathe_mirror_client: MatheMirrorClient,
+    qdrant_client: QdrantStorageClient | None = None,
+    keyword_weight: float = MATHE_CURRICULAR_KEYWORD_WEIGHT,
+    embedding_model: str = DEFAULT_MATHE_EMBEDDING_MODEL,
+    question_embedding: list[float] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Rank document teaching materials restricted to the question's same topic/subtopic pool.
+
+    Materials with a final score of zero are left out, so the result can be
+    shorter than ``k``. They are logged, and
+    ``score_curricular_pool_candidates`` returns them with the reason.
+    """
+    if k <= 0:
+        return []
+
+    candidates = score_curricular_pool_candidates(
+        question_id=question_id,
+        question=question,
+        mathe_mirror_client=mathe_mirror_client,
+        qdrant_client=qdrant_client,
+        keyword_weight=keyword_weight,
+        embedding_model=embedding_model,
+        question_embedding=question_embedding,
     )
+    _log_zero_score_candidates("document", question_id, candidates)
+    return _rank_candidates(candidates, k)
+
+
+def _log_zero_score_candidates(
+    content_kind: str,
+    question_id: int,
+    candidates: list[dict[str, Any]],
+) -> None:
+    excluded = {
+        candidate["material_id"]: candidate["exclusion_reason"]
+        for candidate in candidates
+        if candidate["exclusion_reason"] is not None
+    }
+    if excluded:
+        logger.info(
+            "MathE %s ranker left out %d of %d pool materials with a zero "
+            "score for question %s: %s",
+            content_kind,
+            len(excluded),
+            len(candidates),
+            question_id,
+            excluded,
+        )
 
 
 def recommend_from_curricular_pool(

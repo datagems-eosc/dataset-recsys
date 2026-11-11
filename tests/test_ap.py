@@ -1,30 +1,53 @@
+"""Integration test of the Analytical Pattern flow against a running test app.
+
+It needs the local test app from tests/internal_ap_flow.py (and the Qdrant it
+reads from) to be running:
+
+    uvicorn internal_ap_flow:app --app-dir tests
+
+When that app is not reachable the test is skipped, so the unit test run does
+not depend on it.
+"""
 import json
+from pathlib import Path
 from typing import Dict
 
 import httpx
 import pytest
 
 BASE_URL = "http://127.0.0.1:8000"
-AP_REQUEST_FILE = "ap_request.json"
+# Resolved next to this file, so the test can be run from any folder.
+AP_REQUEST_FILE = Path(__file__).resolve().parent / "ap_request.json"
 
-@pytest.fixture
-def sample_ap_request() -> Dict:
+
+def load_sample_ap_request() -> Dict:
     """Loads the Analytical Pattern request from the local JSON file."""
     with open(AP_REQUEST_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
-@pytest.mark.asyncio
-async def test_recommendation_ap_flow(sample_ap_request):
+
+@pytest.fixture
+def sample_ap_request() -> Dict:
+    return load_sample_ap_request()
+
+
+def test_recommendation_ap_flow(sample_ap_request):
     """
     Test the full AP flow:
     1. Send AP JSON to /dataset-recsys/recommend/ap
     2. Verify recommendation sc:Dataset nodes were added
     3. Verify the operator is linked to the results via ranked output edges
     """
-    async with httpx.AsyncClient(base_url=BASE_URL) as client:
+    with httpx.Client(base_url=BASE_URL) as client:
         # Call the endpoint
-        response = await client.post("/test/recommend/ap", json=sample_ap_request)
-        
+        try:
+            response = client.post("/test/recommend/ap", json=sample_ap_request)
+        except httpx.TransportError as error:
+            pytest.skip(
+                f"The AP test app is not reachable at {BASE_URL} ({error}); "
+                "start it with: uvicorn internal_ap_flow:app --app-dir tests"
+            )
+
         # Check HTTP status
         assert response.status_code == 200, f"Request failed: {response.text}"
         
@@ -52,5 +75,4 @@ async def test_recommendation_ap_flow(sample_ap_request):
 
 if __name__ == "__main__":
     # If running directly without pytest
-    import asyncio
-    asyncio.run(test_recommendation_ap_flow(sample_ap_request()))
+    test_recommendation_ap_flow(load_sample_ap_request())

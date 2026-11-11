@@ -7,11 +7,27 @@ Supported actions:
 - list stored entity IDs for one application
 - fetch recommendations for a specific entity
 - remove a dataset and its references from one application
+
+Run it as a module from the repository root:
+
+    python -m dataset_recsys.storage.manage_recommendations list-entities ds2ds
+
+Running the file by path also works when the package is installed.
 """
 import argparse
 import json
 import os
+import sys
+from pathlib import Path
 from typing import Optional
+
+# When this file is run by path, Python puts its folder first on sys.path. The
+# sibling module qdrant_client.py would then hide the installed "qdrant_client"
+# package and the import below would fail, so drop that folder from the path.
+_SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path[:] = [
+    entry for entry in sys.path if Path(entry or ".").resolve() != _SCRIPT_DIR
+]
 
 from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 

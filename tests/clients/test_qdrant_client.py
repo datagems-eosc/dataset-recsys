@@ -1,120 +1,288 @@
-from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
+"""Tests for QdrantStorageClient against Qdrant's in-memory mode.
+
+No Qdrant server is needed: ``QdrantClient(":memory:")`` runs the same client
+API inside the test process.
+"""
+
+import numpy as np
+import pytest
+from qdrant_client import QdrantClient
+
 from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 
-
-def fake_mathe_client():
-    return MatheMirrorClient.__new__(MatheMirrorClient)
-
-
-class FakeQdrantClient:
-    def __init__(self):
-        self.calls = []
-        self.payloads = {
-            "6.pdf": {
-                "recommendations": {"8.pdf": 0.8, "7.pdf": 0.7, "5.pdf": 0.6}
-            }
-        }
-
-    def set_payload(self, *args, **kwargs):
-        self.calls.append(("set_payload", args, kwargs))
-
-    def retrieve(self, *args, **kwargs):
-        self.calls.append(("retrieve", args, kwargs))
-        ids = kwargs.get("ids", [])
-        results = []
-        for point_id in ids:
-            if point_id in self.payloads:
-                class PointRecord:
-                    payload = self.payloads[point_id]
-                results.append(PointRecord())
-        return results
+DATASETS = QdrantStorageClient.COLLECTION_DATASET
+MATHE = QdrantStorageClient.COLLECTION_MATHE
 
 
-def test_normalize_recommendations_accepts_scored_pairs():
-    client = QdrantStorageClient.__new__(QdrantStorageClient)
+@pytest.fixture
+def client():
+    return QdrantStorageClient(client=QdrantClient(":memory:"))
 
-    normalized = client._normalize_recommendations(
-        [("8.pdf", 0.8), ("7.pdf", 0.0)]
+
+def _store(client, application, vectors, collection_name=None):
+    """Store one embedding per entity ID from an ``{id: vector}`` mapping."""
+    return client.store_embeddings(
+        application=application,
+        dataset_ids=list(vectors),
+        embeddings=np.array(list(vectors.values()), dtype=float),
+        embedding_inputs=[f"text of {entity_id}" for entity_id in vectors],
+        embedding_model="test-model",
+        collection_name=collection_name,
+        run_id="run-1",
     )
 
-    assert normalized == {"8.pdf": 0.8, "7.pdf": 0.0}
+
+def test_constructor_wraps_an_injected_client():
+    qdrant = QdrantClient(":memory:")
+
+    assert QdrantStorageClient(client=qdrant).client is qdrant
 
 
-# Backward compatibility: if only ordered IDs are provided,
-# assign descending rank-derived scores so Qdrant preserves the order.
-def test_normalize_recommendations_still_accepts_ranked_id_lists():
-    client = QdrantStorageClient.__new__(QdrantStorageClient)
-
-    normalized = client._normalize_recommendations(["8.pdf", "7.pdf"])
-
-    assert normalized == {"8.pdf": 2.0, "7.pdf": 1.0}
+# ---------------------------------------------------------------------------
+# Before the first rebuild Qdrant has no collections. Reads must report
+# "nothing stored" instead of failing, so the API does not return 500.
+# ---------------------------------------------------------------------------
 
 
-def test_normalize_recommendations_still_accepts_score_maps():
-    client = QdrantStorageClient.__new__(QdrantStorageClient)
-
-    normalized = client._normalize_recommendations({"8.pdf": 0.8, "7.pdf": 0.0})
-
-    assert normalized == {"8.pdf": 0.8, "7.pdf": 0.0}
-
-
-def test_normalize_recommendations_accepts_empty_inputs():
-    client = QdrantStorageClient.__new__(QdrantStorageClient)
-
-    assert client._normalize_recommendations([]) == {}
-    assert client._normalize_recommendations({}) == {}
+def test_reads_on_a_fresh_qdrant_report_nothing_stored(client):
+    assert client.exists("a") is False
+    assert client.get_entity_status("ds2ds", "a") == "NOT_FOUND"
+    assert client.check_existence_batch("ds2ds", ["a", "b"]) == {"a": False, "b": False}
+    assert client.get_recommendations_with_scores("ds2ds", "a") == []
+    assert client.list_entities("ds2ds") == []
+    assert client.find_similar("ds2ds", query_embedding=[1.0, 0.0]) == []
+    assert client.find_similar_by_ids("ds2ds", [1.0, 0.0], ["a"]) == []
+    assert client.find_entities_recommending("ds2ds", "a") == []
 
 
-# This test ensures that when the limit is None, the method does not attempt to trim recommendations.
-def test_update_neighbor_recs_does_not_trim_when_limit_is_none():
-    client = QdrantStorageClient.__new__(QdrantStorageClient)
-    client.client = FakeQdrantClient()
+def test_deletes_on_a_fresh_qdrant_do_nothing(client):
+    assert client.delete_single_embedding("a") == 0
+    assert client.delete_application("ds2ds") == 0
+    client.update_neighbor_recs("ds2ds", "a", "b", 0.5)
+    client.remove_from_neighbor_recs("ds2ds", "a", "b")
 
-    updated_payloads = []
-    client.set_recommendations_payload = lambda app, neighbor_id, recs: updated_payloads.append((neighbor_id, recs))
-    client.get_recommendations_with_scores = lambda app, neighbor_id: [("7.pdf", 0.7)]
 
-    client.update_neighbor_recs(
-        application="mathe",
-        neighbor_id="6.pdf",
-        new_entity_id="8.pdf",
-        score=0.8,
-        limit=None,
+# ---------------------------------------------------------------------------
+# Embeddings and similarity search
+# ---------------------------------------------------------------------------
+
+
+def test_store_embeddings_routes_by_application_and_reports_existence(client):
+    assert _store(client, "ds2ds", {"a": [1.0, 0.0]}) == 1
+    assert _store(client, "mathe_documents", {"221": [1.0, 0.0]}) == 1
+
+    assert client.exists("a") is True
+    assert client.exists("221") is False
+    assert client.exists("221", collection_name=MATHE) is True
+    assert client.check_existence_batch("ds2ds", ["a", "missing"]) == {
+        "a": True,
+        "missing": False,
+    }
+
+
+def test_store_embeddings_with_no_rows_stores_nothing(client):
+    assert _store(client, "ds2ds", {}) == 0
+    assert client.list_entities("ds2ds") == []
+
+
+def test_find_similar_returns_best_first_dicts_within_one_application(client):
+    _store(
+        client,
+        "mathe_documents",
+        {"1": [1.0, 0.0], "2": [0.6, 0.8], "3": [0.0, 1.0]},
+        collection_name=MATHE,
+    )
+    _store(client, "mathe_videos", {"900": [1.0, 0.0]}, collection_name=MATHE)
+
+    matches = client.find_similar(
+        "mathe_documents",
+        query_embedding=[1.0, 0.0],
+        top_k=2,
+        collection_name=MATHE,
     )
 
-    assert len(updated_payloads) == 1
-    neighbor_id, recs = updated_payloads[0]
-    assert neighbor_id == "6.pdf"
-    assert recs == {"8.pdf": 0.8, "7.pdf": 0.7}
+    assert [match["dataset_id"] for match in matches] == ["1", "2"]
+    assert matches[0]["score"] == pytest.approx(1.0)
+    assert matches[1]["score"] == pytest.approx(0.6)
+    assert matches[0]["payload"]["application"] == "mathe_documents"
 
 
-# This test ensures that when a limit is provided, get_recommendations restricts the results returned.
-def test_get_recommendations_can_limit_range():
-    client = QdrantStorageClient.__new__(QdrantStorageClient)
-    client.get_recommendations_with_scores = lambda application, entity_id, limit=None: [
-        ("8.pdf", 0.8),
-        ("7.pdf", 0.7),
-        ("5.pdf", 0.6),
-    ][:limit]
+def test_find_similar_accepts_query_vector_and_requires_a_vector(client):
+    _store(client, "ds2ds", {"a": [1.0, 0.0]})
 
-    recommendations = client.get_recommendations(
-        application="mathe",
-        entity_id="6.pdf",
-        limit=2,
+    assert [m["dataset_id"] for m in client.find_similar("ds2ds", query_vector=[1.0, 0.0])] == ["a"]
+    with pytest.raises(ValueError, match="query_embedding"):
+        client.find_similar("ds2ds")
+
+
+def test_find_similar_by_ids_scores_only_requested_stored_ids(client):
+    _store(
+        client,
+        "mathe_documents",
+        {"1": [1.0, 0.0], "2": [0.6, 0.8], "3": [0.0, 1.0]},
+        collection_name=MATHE,
+    )
+    _store(client, "mathe_videos", {"900": [1.0, 0.0]}, collection_name=MATHE)
+
+    scores = dict(
+        client.find_similar_by_ids(
+            "mathe_documents",
+            [1.0, 0.0],
+            ["2", "3", "900", "missing"],
+            collection_name=MATHE,
+        )
     )
 
-    assert recommendations == ["8.pdf", "7.pdf"]
+    # "1" was not requested, "900" belongs to another application and
+    # "missing" has no embedding, so none of them is scored.
+    assert set(scores) == {"2", "3"}
+    assert scores["2"] == pytest.approx(0.6)
+    assert scores["3"] == pytest.approx(0.0)
+    assert client.find_similar_by_ids("mathe_documents", [1.0, 0.0], [], collection_name=MATHE) == []
 
 
-# This test ensures recommendations with scores are correctly retrieved from Qdrant payloads.
-def test_get_recommendations_with_scores_returns_qdrant_scores():
-    client = QdrantStorageClient.__new__(QdrantStorageClient)
-    client.client = FakeQdrantClient()
+# ---------------------------------------------------------------------------
+# Stored recommendations
+# ---------------------------------------------------------------------------
 
-    recommendations = client.get_recommendations_with_scores(
-        application="mathe",
-        entity_id="6.pdf",
-        limit=2,
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        ({"a": {"b": 0.9, "c": 0.4}}, [("b", 0.9), ("c", 0.4)]),
+        ({"a": [("c", 0.4), ("b", 0.9)]}, [("b", 0.9), ("c", 0.4)]),
+        ({"a": [{"id": "b", "score": 0.9}, {"id": "c", "score": 0.4}]}, [("b", 0.9), ("c", 0.4)]),
+        # Ranked IDs without scores get descending rank scores, keeping the order.
+        ({"a": ["b", "c"]}, [("b", 2.0), ("c", 1.0)]),
+        (
+            [{"id": "a", "recommendations": [{"id": "b", "score": 0.9}, {"id": "c", "score": 0.4}]}],
+            [("b", 0.9), ("c", 0.4)],
+        ),
+    ],
+    ids=["score-map", "pairs", "dicts", "ranked-ids", "catalog-list"],
+)
+def test_store_recommendations_accepts_each_input_shape(client, stored, expected):
+    _store(client, "ds2ds", {"a": [1.0, 0.0], "b": [0.0, 1.0], "c": [0.6, 0.8]})
+
+    assert client.store_recommendations("ds2ds", stored) == 1
+
+    assert client.get_recommendations_with_scores("ds2ds", "a") == expected
+    assert client.get_recommendations("ds2ds", "a") == [rec_id for rec_id, _ in expected]
+
+
+def test_store_recommendations_with_no_data_stores_nothing(client):
+    assert client.store_recommendations("ds2ds", {}) == 0
+    assert client.store_recommendations("ds2ds", None) == 0
+
+
+def test_recommendation_reads_respect_limit(client):
+    _store(client, "ds2ds", {"a": [1.0, 0.0]})
+    client.store_recommendations("ds2ds", {"a": {"b": 0.9, "c": 0.4, "d": 0.1}})
+
+    assert client.get_recommendations("ds2ds", "a", limit=2) == ["b", "c"]
+    assert client.get_recommendations_with_scores("ds2ds", "a", limit=1) == [("b", 0.9)]
+    assert client.get_recommendations("ds2ds", "a", limit=0) == []
+    assert client.get_recommendations("ds2ds", "", limit=5) == []
+
+
+def test_entity_status_distinguishes_missing_empty_and_available(client):
+    _store(client, "ds2ds", {"a": [1.0, 0.0], "b": [0.0, 1.0]})
+    client.store_recommendations("ds2ds", {"a": {"b": 0.9}})
+
+    assert client.get_entity_status("ds2ds", "a") == "AVAILABLE"
+    assert client.get_entity_status("ds2ds", "b") == "NO_RECOMMENDATIONS"
+    assert client.get_entity_status("ds2ds", "missing") == "NOT_FOUND"
+    assert client.get_entity_status("ds2ds", "") == "NOT_FOUND"
+
+
+# The MathE seed expansion treats a material without stored neighbours as
+# having none, as the Redis client did, while a direct lookup of an unknown
+# entity is an error.
+def test_unknown_entity_has_no_scored_recommendations_but_direct_lookup_raises(client):
+    _store(client, "ds2ds", {"a": [1.0, 0.0]})
+
+    assert client.get_recommendations_with_scores("ds2ds", "missing") == []
+    assert client.get_recommendations("ds2ds", "a") == []
+    with pytest.raises(KeyError, match="missing"):
+        client.get_recommendations("ds2ds", "missing")
+
+
+def test_update_single_entity_recs_replaces_the_list(client):
+    _store(client, "ds2ds", {"a": [1.0, 0.0]})
+    client.store_recommendations("ds2ds", {"a": {"b": 0.9}})
+
+    client.update_single_entity_recs("ds2ds", "a", {"c": 0.7})
+
+    assert client.get_recommendations_with_scores("ds2ds", "a") == [("c", 0.7)]
+
+
+def test_update_neighbor_recs_inserts_in_score_order_and_trims_to_limit(client):
+    _store(client, "ds2ds", {"a": [1.0, 0.0]})
+    client.store_recommendations("ds2ds", {"a": {"b": 0.9, "c": 0.4}})
+
+    client.update_neighbor_recs("ds2ds", "a", "new", 0.6, limit=None)
+    assert client.get_recommendations("ds2ds", "a") == ["b", "new", "c"]
+
+    client.update_neighbor_recs("ds2ds", "a", "best", 0.95, limit=2)
+    assert client.get_recommendations("ds2ds", "a") == ["best", "b"]
+
+
+def test_remove_from_neighbor_recs_and_remove_single_entity_recs(client):
+    _store(client, "ds2ds", {"a": [1.0, 0.0]})
+    client.store_recommendations("ds2ds", {"a": {"b": 0.9, "c": 0.4}})
+
+    client.remove_from_neighbor_recs("ds2ds", "a", "b")
+    assert client.get_recommendations("ds2ds", "a") == ["c"]
+
+    client.remove_single_entity_recs("ds2ds", "a")
+    assert client.get_entity_status("ds2ds", "a") == "NO_RECOMMENDATIONS"
+
+
+def test_remove_dataset_deletes_the_point_and_references_to_it(client):
+    _store(client, "ds2ds", {"a": [1.0, 0.0], "b": [0.0, 1.0], "c": [0.6, 0.8]})
+    client.store_recommendations(
+        "ds2ds",
+        {"a": {"b": 0.9, "c": 0.4}, "b": {"a": 0.9}, "c": {"b": 0.8, "a": 0.4}},
     )
 
-    assert recommendations == [("8.pdf", 0.8), ("7.pdf", 0.7)]
+    assert client.find_entities_recommending("ds2ds", "b") == ["a", "c"]
+    client.remove_dataset("ds2ds", "b")
+
+    assert client.exists("b") is False
+    assert client.list_entities("ds2ds") == ["a", "c"]
+    assert client.get_recommendations("ds2ds", "a") == ["c"]
+    assert client.get_recommendations("ds2ds", "c") == ["a"]
+
+
+def test_delete_application_removes_only_that_application(client):
+    _store(client, "mathe_documents", {"1": [1.0, 0.0]}, collection_name=MATHE)
+    _store(client, "mathe_videos", {"900": [1.0, 0.0]}, collection_name=MATHE)
+
+    client.delete_application("mathe_documents", collection_name=MATHE)
+
+    assert client.list_entities("mathe_documents", MATHE) == []
+    assert client.list_entities("mathe_videos", MATHE) == ["900"]
+
+
+# ---------------------------------------------------------------------------
+# Listing
+# ---------------------------------------------------------------------------
+
+
+def test_list_entities_reads_every_page(client, monkeypatch):
+    monkeypatch.setattr(QdrantStorageClient, "SCROLL_PAGE_SIZE", 2)
+    entity_ids = [f"entity-{index}" for index in range(7)]
+    _store(client, "ds2ds", {entity_id: [1.0, float(index)] for index, entity_id in enumerate(entity_ids)})
+    _store(client, "other", {"elsewhere": [1.0, 0.0]})
+
+    assert client.list_entities("ds2ds") == sorted(entity_ids)
+
+
+def test_schema_overview_and_connection_check(client):
+    _store(client, "ds2ds", {"a": [1.0, 0.0]})
+
+    overview = client.get_schema_overview()
+    assert overview["collection_name"] == DATASETS
+    assert overview["vectors_config"]["size"] == 2
+    assert "error" in client.get_schema_overview("missing_collection")
+    assert client.check_connection() is True

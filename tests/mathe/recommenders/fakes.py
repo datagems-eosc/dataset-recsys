@@ -75,9 +75,10 @@ class FakeQdrantStorageClient:
     ``(id, score)`` pairs or as a ranked list of IDs. ``similar_results`` is the
     ranked ``(id, score)`` list a vector search would return.
 
-    Like the real client, ``find_similar`` returns dicts,
-    ``find_similar_by_ids`` returns ``(id, score)`` tuples, and looking up the
-    recommendations of an entity that has no stored point raises ``KeyError``.
+    Like the real client, ``find_similar`` returns dicts and
+    ``find_similar_by_ids`` returns ``(id, score)`` tuples. For an entity with
+    no stored point, ``get_recommendations_with_scores`` returns an empty list
+    and ``get_recommendations`` raises ``KeyError``.
     """
 
     COLLECTION_DATASET = "dataset_embeddings"
@@ -160,10 +161,8 @@ class FakeQdrantStorageClient:
         )
         if not entity_id or (limit is not None and limit <= 0):
             return []
-        if entity_id not in self.recommendations:
-            raise KeyError(f"Entity '{entity_id}' does not exist in backend.")
 
-        stored = self.recommendations[entity_id]
+        stored = self.recommendations.get(entity_id, [])
         scored = [
             (str(item[0]), float(item[1]))
             if isinstance(item, tuple)
@@ -180,6 +179,9 @@ class FakeQdrantStorageClient:
         limit=None,
         collection_name=COLLECTION_DATASET,
     ):
+        if entity_id and entity_id not in self.recommendations:
+            if limit is None or limit > 0:
+                raise KeyError(f"Entity '{entity_id}' does not exist in backend.")
         return [
             recommended_id
             for recommended_id, _score in self.get_recommendations_with_scores(

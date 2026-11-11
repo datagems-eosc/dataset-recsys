@@ -14,22 +14,51 @@ class QdrantStorageClient:
 
     COLLECTION_DATASET = "dataset_embeddings"
     COLLECTION_MATHE = "mathe_embeddings"
+    SCROLL_PAGE_SIZE = 1000
 
     def __init__(
         self,
         host: Optional[str] = None,
         port: Optional[int] = None,
         api_key: Optional[str] = None,
+        client: Optional[QdrantClient] = None,
     ):
+        """Connect to Qdrant, or wrap an existing ``client`` (used by tests)."""
         self.host = host or os.getenv("QDRANT_HOST", "localhost")
         self.port = int(port or os.getenv("QDRANT_PORT", "6333"))
         self.api_key = api_key or os.getenv("QDRANT_API_KEY", None)
 
-        self.client = QdrantClient(
+        self.client = client or QdrantClient(
             host=self.host,
             port=self.port,
             api_key=self.api_key,
         )
+        # Collections already seen to exist, so reads only ask Qdrant once.
+        self._known_collections: set[str] = set()
+
+    def _collection_exists(self, collection_name: str) -> bool:
+        """Return whether a collection exists, remembering positive answers.
+
+        Before the first rebuild Qdrant has no collections. Reads treat a
+        missing collection as "nothing stored" instead of failing.
+        """
+        if collection_name in self._known_collections:
+            return True
+        if self.client.collection_exists(collection_name):
+            self._known_collections.add(collection_name)
+            return True
+        return False
+
+    def _retrieve_point(self, collection_name: str, entity_id: str) -> Any | None:
+        """Return one entity's point with its payload, or None if not stored."""
+        if not self._collection_exists(collection_name):
+            return None
+        points = self.client.retrieve(
+            collection_name=collection_name,
+            ids=[self._generate_point_id(entity_id)],
+            with_payload=True,
+        )
+        return points[0] if points else None
 
     def _resolve_collection(self, application: str, explicit_collection: Optional[str] = None) -> str:
         """Route MathE applications to COLLECTION_MATHE by default if unspecified."""
@@ -68,6 +97,7 @@ class QdrantStorageClient:
             if current_size is not None and current_size != vector_size:
                 self.client.delete_collection(collection_name)
                 collections.remove(collection_name)
+                self._known_collections.discard(collection_name)
 
         if collection_name not in collections:
             # Fallback to 768 if vector_size was not specified on initial creation
@@ -163,9 +193,7 @@ class QdrantStorageClient:
 
     def exists(self, dataset_id: str, collection_name: str = COLLECTION_DATASET) -> bool:
         """Check if a dataset_id already has an embedding record."""
-        point_id = self._generate_point_id(dataset_id)
-        points = self.client.retrieve(collection_name=collection_name, ids=[point_id])
-        return len(points) > 0
+        return self._retrieve_point(collection_name, dataset_id) is not None
 
     def find_similar(
         self,
@@ -182,6 +210,8 @@ class QdrantStorageClient:
 
         if vector is None:
             raise ValueError("Either 'query_embedding' or 'query_vector' must be provided.")
+        if not self._collection_exists(target_collection):
+            return []
 
         # query_points returns a QueryResponse object
         response = self.client.query_points(
@@ -222,6 +252,8 @@ class QdrantStorageClient:
             return []
 
         target_collection = collection_name or table or self.COLLECTION_DATASET
+        if not self._collection_exists(target_collection):
+            return []
         point_ids = [self._generate_point_id(eid) for eid in entity_ids]
 
         response = self.client.query_points(
@@ -247,6 +279,8 @@ class QdrantStorageClient:
 
     def delete_single_embedding(self, dataset_id: str, collection_name: str = COLLECTION_DATASET) -> int:
         """Delete a single embedding from the database."""
+        if not self._collection_exists(collection_name):
+            return 0
         point_id = self._generate_point_id(dataset_id)
         res = self.client.delete(collection_name=collection_name, points_selector=[point_id])
         return 1 if res.status == models.UpdateStatus.COMPLETED else 0
@@ -254,6 +288,8 @@ class QdrantStorageClient:
     def delete_application(self, application: str, table: Optional[str] = None, collection_name: Optional[str] = None) -> int:
         """Delete all points and recommendations belonging to an application."""
         target_collection = collection_name or table or self.COLLECTION_DATASET
+        if not self._collection_exists(target_collection):
+            return 0
         res = self.client.delete(
             collection_name=target_collection,
             points_selector=models.Filter(must=[
@@ -350,12 +386,12 @@ class QdrantStorageClient:
     ):
         """Inject a new entity into an existing neighbor's recommendation list."""
         point_id = self._generate_point_id(neighbor_id)
-        points = self.client.retrieve(collection_name=collection_name, ids=[point_id], with_payload=True)
-        
-        if not points:
+        point = self._retrieve_point(collection_name, neighbor_id)
+
+        if point is None:
             return
 
-        current_recs = points[0].payload.get("recommendations", {}).get(application, [])
+        current_recs = point.payload.get("recommendations", {}).get(application, [])
         recs_map = {str(r["id"]): float(r["score"]) for r in current_recs}
         recs_map[str(new_entity_id)] = float(score)
 
@@ -382,12 +418,12 @@ class QdrantStorageClient:
     def remove_from_neighbor_recs(self, application: str, neighbor_id: str, target_id: str, collection_name: str = COLLECTION_DATASET):
         """Removes target_id from a specific neighbor's recommendation payload."""
         point_id = self._generate_point_id(neighbor_id)
-        points = self.client.retrieve(collection_name=collection_name, ids=[point_id], with_payload=True)
-        
-        if not points:
+        point = self._retrieve_point(collection_name, neighbor_id)
+
+        if point is None:
             return
 
-        current_recs = points[0].payload.get("recommendations", {}).get(application, [])
+        current_recs = point.payload.get("recommendations", {}).get(application, [])
         filtered = [r for r in current_recs if str(r["id"]) != str(target_id)]
         
         self.client.set_payload(
@@ -417,14 +453,35 @@ class QdrantStorageClient:
         if not entity_id:
             return "NOT_FOUND"
 
-        point_id = self._generate_point_id(entity_id)
-        points = self.client.retrieve(collection_name=collection_name, ids=[point_id], with_payload=True)
-        
-        if not points:
+        point = self._retrieve_point(collection_name, entity_id)
+        if point is None:
             return "NOT_FOUND"
-            
-        recs = points[0].payload.get("recommendations", {}).get(application, [])
+
+        recs = (point.payload or {}).get("recommendations", {}).get(application, [])
         return "AVAILABLE" if recs else "NO_RECOMMENDATIONS"
+
+    def _stored_recommendations(
+        self,
+        application: str,
+        entity_id: str,
+        collection_name: str,
+    ) -> Optional[List[tuple[str, float]]]:
+        """Return an entity's scored recommendations, best first.
+
+        Returns None when the entity has no stored point, and an empty list
+        when it is stored without recommendations for the application.
+        """
+        point = self._retrieve_point(collection_name, entity_id)
+        if point is None:
+            return None
+
+        recs_by_app = (point.payload or {}).get("recommendations", {})
+        app_recs = recs_by_app.get(application, [])
+        return sorted(
+            [(str(r["id"]), float(r["score"])) for r in app_recs],
+            key=lambda x: x[1],
+            reverse=True,
+        )
 
     def get_recommendations(
         self,
@@ -433,9 +490,18 @@ class QdrantStorageClient:
         limit: Optional[int] = None,
         collection_name: str = COLLECTION_DATASET,
     ) -> List[str]:
-        """Return recommended entity IDs for one entity (Redis parity)."""
-        recs_with_scores = self.get_recommendations_with_scores(application, entity_id, limit, collection_name)
-        return [rec_id for rec_id, _ in recs_with_scores]
+        """Return recommended entity IDs for one entity (Redis parity).
+
+        Raises ``KeyError`` when the entity is not stored at all. An entity
+        that is stored but has no recommendations returns an empty list.
+        """
+        if not entity_id or (limit is not None and limit <= 0):
+            return []
+
+        recs = self._stored_recommendations(application, entity_id, collection_name)
+        if recs is None:
+            raise KeyError(f"Entity '{entity_id}' does not exist in backend.")
+        return [rec_id for rec_id, _ in (recs[:limit] if limit else recs)]
 
     def get_recommendations_with_scores(
         self,
@@ -444,34 +510,44 @@ class QdrantStorageClient:
         limit: Optional[int] = None,
         collection_name: str = COLLECTION_DATASET,
     ) -> List[tuple[str, float]]:
-        """Return recommended entity IDs with their scores."""
+        """Return recommended entity IDs with their scores, best first.
+
+        Returns an empty list for an entity that is not stored (Redis parity):
+        callers such as the MathE seed expansion treat a material without
+        stored neighbours as having none.
+        """
         if not entity_id or (limit is not None and limit <= 0):
             return []
 
-        point_id = self._generate_point_id(entity_id)
-        points = self.client.retrieve(collection_name=collection_name, ids=[point_id], with_payload=True)
-
-        if not points or not points[0].payload:
-            raise KeyError(f"Entity '{entity_id}' does not exist in backend.")
-
-        recs_by_app = points[0].payload.get("recommendations", {})
-        app_recs = recs_by_app.get(application, [])
-
-        sorted_recs = sorted([(str(r["id"]), float(r["score"])) for r in app_recs], key=lambda x: x[1], reverse=True)
-        return sorted_recs[:limit] if limit else sorted_recs
+        recs = self._stored_recommendations(application, entity_id, collection_name) or []
+        return recs[:limit] if limit else recs
 
     def list_entities(self, application: str, collection_name: str = COLLECTION_DATASET) -> List[str]:
-        """List entity IDs currently stored for an application."""
-        records, _ = self.client.scroll(
-            collection_name=collection_name,
-            scroll_filter=models.Filter(must=[
-                models.FieldCondition(key="application", match=models.MatchValue(value=application))
-            ]),
-            limit=10000, 
-            with_payload=True,
-            with_vectors=False
-        )
-        return sorted([rec.payload.get("dataset_id") for rec in records if "dataset_id" in rec.payload])
+        """List every entity ID currently stored for an application."""
+        if not self._collection_exists(collection_name):
+            return []
+
+        entity_ids = []
+        offset = None
+        while True:
+            records, offset = self.client.scroll(
+                collection_name=collection_name,
+                scroll_filter=models.Filter(must=[
+                    models.FieldCondition(key="application", match=models.MatchValue(value=application))
+                ]),
+                limit=self.SCROLL_PAGE_SIZE,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            entity_ids.extend(
+                rec.payload["dataset_id"]
+                for rec in records
+                if rec.payload and "dataset_id" in rec.payload
+            )
+            if offset is None:
+                break
+        return sorted(entity_ids)
 
     def find_entities_recommending(self, application: str, target_entity_id: str, collection_name: str = COLLECTION_DATASET) -> List[str]:
         """Find which entities recommend a given target entity within an application."""
@@ -489,6 +565,8 @@ class QdrantStorageClient:
 
     def check_existence_batch(self, application: str, entity_ids: List[str], collection_name: str = COLLECTION_DATASET) -> Dict[str, bool]:
         """Checks if a list of entity_ids exist in the catalog."""
+        if not entity_ids or not self._collection_exists(collection_name):
+            return {eid: False for eid in entity_ids}
         point_ids = [self._generate_point_id(eid) for eid in entity_ids]
         points = self.client.retrieve(collection_name=collection_name, ids=point_ids)
         

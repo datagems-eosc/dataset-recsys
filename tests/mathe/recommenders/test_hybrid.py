@@ -209,8 +209,8 @@ def test_recommend_hybrid_candidates_handles_materials_without_embeddings(
         lambda texts, model_name: [[0.1, 0.2, 0.3]],
     )
     qdrant_client = FakeQdrantStorageClient(
-        recommendations={},
-        similar_results=[("100", 0.9), ("101", 0.8)],
+        recommendations={"100": [("101", 0.8)]},
+        similar_results=[("100", 0.9)],
     )
 
     candidates = hybrid.recommend_hybrid_candidates(

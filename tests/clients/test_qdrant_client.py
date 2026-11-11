@@ -141,6 +141,23 @@ def test_find_similar_by_ids_scores_only_requested_stored_ids(client):
     assert client.find_similar_by_ids("mathe_documents", [1.0, 0.0], [], collection_name=MATHE) == []
 
 
+# A collection also holds other applications' embeddings and recommendations,
+# so a write with the wrong vector size must be refused, not answered by
+# deleting and recreating the collection.
+def test_store_embeddings_refuses_a_different_vector_size_and_keeps_the_data(client):
+    _store(client, "mathe_documents", {"1": [1.0, 0.0]}, collection_name=MATHE)
+    _store(client, "mathe_videos", {"900": [0.0, 1.0]}, collection_name=MATHE)
+    client.store_recommendations("mathe_documents", {"1": {"2": 0.9}}, collection_name=MATHE)
+
+    with pytest.raises(ValueError, match="vectors of size 2.*size 3"):
+        _store(client, "mathe_videos", {"901": [1.0, 0.0, 0.0]}, collection_name=MATHE)
+
+    assert client.list_entities("mathe_documents", MATHE) == ["1"]
+    assert client.list_entities("mathe_videos", MATHE) == ["900"]
+    assert client.get_recommendations("mathe_documents", "1", collection_name=MATHE) == ["2"]
+    assert client.get_schema_overview(MATHE)["vectors_config"]["size"] == 2
+
+
 # ---------------------------------------------------------------------------
 # Stored recommendations
 # ---------------------------------------------------------------------------

@@ -78,7 +78,14 @@ class QdrantStorageClient:
         vector_size: Optional[int] = None,
         distance: models.Distance = models.Distance.COSINE,
     ):
-        """Create collection if missing, or recreate if vector dimension changed."""
+        """Create the collection if it is missing.
+
+        An existing collection is never deleted here. If its vector size
+        differs from ``vector_size``, the write is refused with a ValueError:
+        the collection also holds other applications' embeddings and
+        recommendations, so replacing it must be a deliberate step (drop the
+        collection, then run a full rebuild).
+        """
         collections = [col.name for col in self.client.get_collections().collections]
 
         if collection_name in collections and vector_size is not None:
@@ -93,11 +100,14 @@ class QdrantStorageClient:
                 first_vector = next(iter(vectors_config.values()), None)
                 current_size = getattr(first_vector, "size", None)
 
-            # Recreate collection if dimension changed (e.g., switching 768 <-> 1024)
             if current_size is not None and current_size != vector_size:
-                self.client.delete_collection(collection_name)
-                collections.remove(collection_name)
-                self._known_collections.discard(collection_name)
+                raise ValueError(
+                    f"Qdrant collection '{collection_name}' stores vectors of size "
+                    f"{current_size}, but embeddings of size {vector_size} were "
+                    "provided. Nothing was written. Check that the embeddings are "
+                    "sent to the right collection; to change the embedding model, "
+                    "drop the collection deliberately and run a full rebuild."
+                )
 
         if collection_name not in collections:
             # Fallback to 768 if vector_size was not specified on initial creation

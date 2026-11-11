@@ -71,11 +71,12 @@ async def process_incremental_update(
     )
 
     # 5. NEW DATASET RECS (Outbound)
-    # Perform vector similarity search in Qdrant
+    # Store the full ranked neighbor list; API endpoints decide how many to
+    # return, after filtering out datasets the user is not authorized to see.
     neighbors = qdrant_client.find_similar(
-        application=application, 
-        query_vector=vector, 
-        top_k=100
+        application=application,
+        query_vector=vector,
+        top_k=None,
     )
 
     outbound_recs = {

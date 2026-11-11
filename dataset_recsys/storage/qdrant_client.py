@@ -240,6 +240,8 @@ class QdrantStorageClient:
         collection_name: str = COLLECTION_DATASET,
     ) -> None:
         """Upsert a single vector and metadata (pgvector parity)."""
+        # The first entity may arrive before any rebuild created the collection.
+        self.ensure_collection(collection_name, vector_size=len(embedding))
         point_id = self._generate_point_id(dataset_id)
         payload = {
             "application": application,

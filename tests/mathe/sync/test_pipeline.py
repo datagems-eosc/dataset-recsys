@@ -531,6 +531,67 @@ def test_incremental_pipeline_with_nothing_new_changes_nothing(
     assert qdrant.list_entities("mathe_documents", MATHE) == ["6"]
 
 
+def _stored_rankings(qdrant, application):
+    return {
+        material_id: qdrant.get_recommendations_with_scores(
+            application, material_id, collection_name=MATHE
+        )
+        for material_id in qdrant.list_entities(application, MATHE)
+    }
+
+
+# Adding materials one sync at a time must end in the same index as a single
+# full rebuild of the same catalog: every material keeps its complete ranking.
+def test_incremental_syncs_store_the_same_rankings_as_a_full_rebuild(
+    tmp_path, monkeypatch
+):
+    import math
+
+    # Unevenly spaced directions, so no two neighbours are exactly equally
+    # similar to a material and the expected order is unambiguous.
+    document_ids = [str(100 + step) for step in range(14)]
+    angles = [5 * step + 1.7 * math.sqrt(step) for step in range(14)]
+    vectors = {
+        f"text {material_id}": [
+            math.cos(math.radians(angle)),
+            math.sin(math.radians(angle)),
+        ]
+        for material_id, angle in zip(document_ids, angles)
+    }
+    monkeypatch.setattr(mathe_sync_pipeline, "encode_texts", _encode_from(vectors, []))
+
+    def run(pipeline, db_path, storage):
+        monkeypatch.setattr(mathe_sync_pipeline, "_build_qdrant_client", lambda: storage)
+        pipeline(FakeSyncer(db_path))
+
+    incremental = QdrantStorageClient(client=QdrantClient(":memory:"))
+    incremental_db = tmp_path / "incremental.db"
+    _write_catalog(incremental_db, [])
+    for material_id in document_ids:
+        with sqlite3.connect(incremental_db) as conn:
+            conn.execute(
+                "INSERT INTO sync_entries VALUES (?, ?, ?, ?, ?)",
+                (f"./{material_id}.pdf", "document", f"text {material_id}", "completed", material_id),
+            )
+        run(mathe_sync_pipeline.run_incremental_mathe_pipeline, incremental_db, incremental)
+
+    full = QdrantStorageClient(client=QdrantClient(":memory:"))
+    run(mathe_sync_pipeline.run_full_mathe_pipeline, incremental_db, full)
+
+    incremental_rankings = _stored_rankings(incremental, "mathe_documents")
+    full_rankings = _stored_rankings(full, "mathe_documents")
+    assert set(incremental_rankings) == set(document_ids)
+    for material_id in document_ids:
+        # Thirteen neighbours each: more than the old cap of ten.
+        assert len(full_rankings[material_id]) == 13
+        assert [n for n, _ in incremental_rankings[material_id]] == [
+            n for n, _ in full_rankings[material_id]
+        ]
+        assert [score for _, score in incremental_rankings[material_id]] == pytest.approx(
+            [score for _, score in full_rankings[material_id]]
+        )
+
+
 # A material that left the catalog must stop being recommendable without
 # waiting for a full rebuild, and no other material may keep pointing at it.
 def test_incremental_pipeline_removes_materials_that_left_the_catalog(

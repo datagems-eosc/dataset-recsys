@@ -107,6 +107,21 @@ def test_find_similar_returns_best_first_dicts_within_one_application(client):
     assert matches[0]["payload"]["application"] == "mathe_documents"
 
 
+def test_find_similar_without_top_k_returns_the_complete_ranking(client):
+    vectors = {
+        f"entity-{index:02d}": [1.0, index / 10.0] for index in range(25)
+    }
+    _store(client, "ds2ds", vectors)
+    _store(client, "other", {"elsewhere": [1.0, 0.0]})
+
+    matches = client.find_similar("ds2ds", query_embedding=[1.0, 0.0], top_k=None)
+
+    assert [match["dataset_id"] for match in matches] == sorted(vectors)
+    assert client.count_entities("ds2ds") == 25
+    assert client.count_entities("ds2ds", collection_name="missing_collection") == 0
+    assert client.find_similar("empty-app", query_embedding=[1.0, 0.0], top_k=None) == []
+
+
 def test_find_similar_accepts_query_vector_and_requires_a_vector(client):
     _store(client, "ds2ds", {"a": [1.0, 0.0]})
 

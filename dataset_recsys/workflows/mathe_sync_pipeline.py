@@ -367,8 +367,9 @@ def run_incremental_mathe_pipeline(syncer: MathE_Syncer) -> dict:
     Compared with what is stored in Qdrant, the completed catalog entries are
     handled as follows:
 
-    - new material: embedded, given its nearest neighbours, and inserted into
-      those neighbours' recommendation lists;
+    - new material: embedded, given its full ranking of the other materials
+      of its content kind, and inserted into each of their lists, as a full
+      rebuild would store it;
     - material no longer in the catalog: deleted, together with every
       reference to it;
     - material already stored: left as it is, without re-embedding.
@@ -471,11 +472,12 @@ def run_incremental_mathe_pipeline(syncer: MathE_Syncer) -> dict:
                     run_id=started_at,
                 )
 
-                # Find similar items for recommendations via Qdrant ANN search
+                # Rank every other material of this content kind, exactly, so
+                # the stored list matches what a full rebuild would compute.
                 similar_results = qdrant_client.find_similar(
                     application=app,
                     query_vector=vector.tolist() if hasattr(vector, "tolist") else list(vector),
-                    top_k=10,
+                    top_k=None,
                     collection_name=collection,
                 )
 
@@ -493,7 +495,7 @@ def run_incremental_mathe_pipeline(syncer: MathE_Syncer) -> dict:
                         neighbor_id=neighbor_id,
                         new_entity_id=pid,
                         score=score,
-                        limit=10,
+                        limit=None,
                         collection_name=collection,
                     )
 

@@ -264,11 +264,17 @@ class QdrantStorageClient:
         application: str,
         query_embedding: Optional[List[float]] = None,
         query_vector: Optional[List[float]] = None,
-        top_k: int = 10,
+        top_k: Optional[int] = 10,
         table: Optional[str] = None,
         collection_name: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Perform ANN search filtered by application namespace."""
+        """Search an application namespace for the entities most similar to a vector.
+
+        With an integer ``top_k`` this is an approximate nearest-neighbour
+        search. ``top_k=None`` returns the complete ranking of every entity in
+        the application, computed exactly, which is what the incremental
+        updates store so that they match a full rebuild.
+        """
         target_collection = collection_name or table or self.COLLECTION_DATASET
         vector = query_embedding if query_embedding is not None else query_vector
 
@@ -276,6 +282,13 @@ class QdrantStorageClient:
             raise ValueError("Either 'query_embedding' or 'query_vector' must be provided.")
         if not self._collection_exists(target_collection):
             return []
+
+        search_params = None
+        if top_k is None:
+            top_k = self.count_entities(application, target_collection)
+            if top_k == 0:
+                return []
+            search_params = models.SearchParams(exact=True)
 
         # query_points returns a QueryResponse object
         response = self.client.query_points(
@@ -291,6 +304,7 @@ class QdrantStorageClient:
             ),
             limit=top_k,
             with_payload=True,
+            search_params=search_params,
         )
 
         # Access the scored points via `response.points`
@@ -302,6 +316,18 @@ class QdrantStorageClient:
             }
             for res in response.points
         ]
+
+    def count_entities(self, application: str, collection_name: str = COLLECTION_DATASET) -> int:
+        """Count the entities stored for an application."""
+        if not self._collection_exists(collection_name):
+            return 0
+        return self.client.count(
+            collection_name=collection_name,
+            count_filter=models.Filter(must=[
+                models.FieldCondition(key="application", match=models.MatchValue(value=application))
+            ]),
+            exact=True,
+        ).count
 
     def find_similar_by_ids(
         self,

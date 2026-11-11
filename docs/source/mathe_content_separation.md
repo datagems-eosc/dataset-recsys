@@ -79,7 +79,6 @@ The refresh pipeline encodes each completed OCR document or video transcript
 once and reuses the vector when publishing these collections:
 
 ```text
-mathe            legacy processing IDs; retained during migration
 mathe_documents  document platform_material_id values only
 mathe_videos     video platform_material_id values only
 ```
@@ -87,17 +86,17 @@ mathe_videos     video platform_material_id values only
 Nearest-neighbor recommendations are computed independently for each
 collection. Document IDs can therefore never appear in a `mathe_videos` list,
 and video IDs can never appear in a `mathe_documents` list. Empty split
-collections are cleared in pgvector and Redis so results from an earlier run do
-not remain stale.
+collections are cleared so results from an earlier run do not remain stale.
 
-A completed legacy video with no `platform_material_id` remains available in
-the transitional `mathe` collection but is not published to `mathe_videos`.
-The next successful PostgreSQL discovery pass supplies its MathE ID and subtype.
+A completed video with no `platform_material_id` is not published to
+`mathe_videos`. The next successful PostgreSQL discovery pass supplies its
+MathE ID and subtype.
 
-The legacy collection construction and processing-ID normalization live in
-`mathe_index_migrations.py`. Once all consumers use a split namespace, that
-module and its single pipeline hook can be deleted without changing permanent
-document/video index generation.
+The mixed `mathe` collection, keyed by legacy processing IDs such as `6.pdf`
+or `<video_id>.txt`, is retired. No recommender reads it and it is no longer
+published. A full rebuild deletes the entries an earlier version stored there;
+that one cleanup step in `mathe_sync_pipeline.py` can be removed once every
+deployed index has been rebuilt.
 
 ## Stage 3: Explicit Document API
 
@@ -174,10 +173,9 @@ complete only after both deployed data and API consumers have migrated:
 
 - delete `mathe_sync_migrations.py` and its syncer hook after every SQLite
   catalog has the Stage 1 fields and backfill;
-- delete `mathe_index_migrations.py` and its pipeline hook after no consumer
-  reads the mixed `mathe` collection;
+- remove the retired-namespace cleanup step from the full rebuild after every
+  deployed index has been rebuilt once (the mixed `mathe` collection, its
+  module and `MatheApplication.LEGACY` are already gone);
 - require non-null `platform_material_id` values in the split-index loader;
-- remove the legacy `MatheApplication.LEGACY` value, pipeline summary value,
-  and transitional embedding application reassignment;
 - remove `/dataset-recsys/mathe/recommend` only after every API client uses
   `/dataset-recsys/mathe/recommend/documents`.

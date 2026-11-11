@@ -258,14 +258,8 @@ def test_full_pipeline_builds_separate_document_and_video_indexes(
         "status": "completed",
         "processed_materials": 4,
         "embeddings_created": 4,
-        "qdrant_records_updated": 8,
-        "application": "mathe",
+        "qdrant_records_updated": 4,
         "collections": {
-            "mathe": {
-                "processed_materials": 4,
-                "embeddings_stored": 4,
-                "qdrant_records_updated": 4,
-            },
             "mathe_documents": {
                 "processed_materials": 2,
                 "embeddings_stored": 2,
@@ -288,14 +282,7 @@ def test_full_pipeline_builds_separate_document_and_video_indexes(
         "review transcript",
     ]
 
-    # Each namespace holds only its own IDs: legacy processing IDs in "mathe",
-    # platform material IDs in the split document and video namespaces.
-    assert qdrant.list_entities("mathe", MATHE) == [
-        "6.pdf",
-        "7.docx",
-        "abcdefghijk.txt",
-        "zyxwvutsrqp.txt",
-    ]
+    # Each namespace holds only the platform material IDs of its content kind.
     assert qdrant.list_entities("mathe_documents", MATHE) == ["6", "7"]
     assert qdrant.list_entities("mathe_videos", MATHE) == ["901", "902"]
 
@@ -304,9 +291,8 @@ def test_full_pipeline_builds_separate_document_and_video_indexes(
     assert qdrant.get_recommendations("mathe_documents", "7", collection_name=MATHE) == ["6"]
     assert qdrant.get_recommendations("mathe_videos", "901", collection_name=MATHE) == ["902"]
     assert qdrant.get_recommendations("mathe_videos", "902", collection_name=MATHE) == ["901"]
-    assert set(
-        qdrant.get_recommendations("mathe", "6.pdf", collection_name=MATHE)
-    ) == {"7.docx", "abcdefghijk.txt", "zyxwvutsrqp.txt"}
+    # The retired mixed namespace is not published.
+    assert qdrant.list_entities("mathe", MATHE) == []
 
 
 def test_split_indexes_skip_unresolved_platform_ids_and_clear_empty_collection(qdrant):
@@ -393,7 +379,6 @@ def test_pipeline_does_not_start_a_duplicate_run(pipeline_name, tmp_path):
 def test_full_pipeline_clears_collections_for_empty_catalog(tmp_path, qdrant):
     db_path = tmp_path / "syncer.db"
     _write_catalog(db_path, [])
-    _store_materials(qdrant, MatheApplication.LEGACY, {"6.pdf": [1.0, 0.0]})
     _store_materials(qdrant, MatheApplication.DOCUMENTS, {"6": [1.0, 0.0]})
     _store_materials(qdrant, MatheApplication.VIDEOS, {"901": [0.0, 1.0]})
 
@@ -403,8 +388,26 @@ def test_full_pipeline_clears_collections_for_empty_catalog(tmp_path, qdrant):
     assert summary["processed_materials"] == 0
     assert summary["embeddings_created"] == 0
     # A successful empty catalog is authoritative: nothing stays recommendable.
-    for application in ("mathe", "mathe_documents", "mathe_videos"):
+    for application in ("mathe_documents", "mathe_videos"):
         assert qdrant.list_entities(application, MATHE) == []
+
+
+# An index built by an earlier version still holds the retired mixed "mathe"
+# namespace. A full rebuild removes it and leaves the split namespaces intact.
+def test_full_pipeline_deletes_the_retired_legacy_namespace(
+    tmp_path, monkeypatch, qdrant
+):
+    db_path = tmp_path / "syncer.db"
+    _write_catalog(db_path, [("./6.pdf", "document", "matrices", "completed", "6")])
+    monkeypatch.setattr(
+        mathe_sync_pipeline, "encode_texts", _encode_from({"matrices": [1.0, 0.0]}, [])
+    )
+    _store_materials(qdrant, "mathe", {"6.pdf": [1.0, 0.0], "abcdefghijk.txt": [0.0, 1.0]})
+
+    mathe_sync_pipeline.run_full_mathe_pipeline(FakeSyncer(db_path))
+
+    assert qdrant.list_entities("mathe", MATHE) == []
+    assert qdrant.list_entities("mathe_documents", MATHE) == ["6"]
 
 
 # ---------------------------------------------------------------------------
@@ -460,8 +463,6 @@ def test_incremental_pipeline_indexes_new_materials_per_content_kind(
     assert qdrant.get_recommendations("mathe_documents", "7", collection_name=MATHE) == ["6"]
     # The only video has no other video to be recommended with.
     assert qdrant.get_recommendations("mathe_videos", "901", collection_name=MATHE) == []
-    # The incremental pipeline does not publish the legacy mixed namespace.
-    assert qdrant.list_entities("mathe", MATHE) == []
 
 
 def test_incremental_pipeline_embeds_only_materials_not_yet_indexed(

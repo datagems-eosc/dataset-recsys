@@ -4,9 +4,8 @@ from enum import StrEnum
 
 
 class MatheApplication(StrEnum):
-    """Logical pgvector and Redis application namespaces."""
+    """Logical Qdrant application namespaces, one per MathE content kind."""
 
-    LEGACY = "mathe"
     DOCUMENTS = "mathe_documents"
     VIDEOS = "mathe_videos"
 

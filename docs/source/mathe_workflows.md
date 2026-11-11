@@ -169,13 +169,13 @@ deleted after all deployed catalogs have been upgraded.
   current batch processing loop.
 
 Only completed entries with non-empty `claude_ocr_text` are used by the refresh
-pipeline. Each text is embedded once. The pipeline retains the legacy `mathe`
-collection during migration and also publishes strict `mathe_documents` and
-`mathe_videos` pgvector/Redis collections. The split collections use
+pipeline. Each text is embedded once. The pipeline publishes strict
+`mathe_documents` and `mathe_videos` collections. They use
 `platform_material_id` keys and compute neighbors independently, so their
 recommendation lists cannot cross the document/video boundary. A completed
-legacy video without a resolved platform ID remains in `mathe` but is skipped
-from `mathe_videos` until PostgreSQL discovery enriches it.
+video without a resolved platform ID is skipped from `mathe_videos` until
+PostgreSQL discovery enriches it. The mixed legacy `mathe` collection is
+retired and no longer published.
 
 For videos, the syncer also writes transcript backups to:
 

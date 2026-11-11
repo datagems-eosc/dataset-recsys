@@ -8,18 +8,18 @@ from typing import Any, TypedDict
 from dataset_recsys.mathe_recommenders.constants import MatheApplication
 from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from dataset_recsys.retrieval import rank_similar_entities
-from dataset_recsys.utils.mathe_index_migrations import (
-    include_legacy_mathe_collection,
-)
 from dataset_recsys.utils.mathe_syncer import MathE_Syncer
 from dataset_recsys.embeddings import encode_texts
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# TODO: Remove this compatibility summary value together with legacy index
-# publication after every consumer uses a split application namespace.
-MATHE_APPLICATION = MatheApplication.LEGACY
+# The mixed "mathe" namespace (legacy processing IDs such as "6.pdf") is
+# retired: nothing reads it, and it is no longer published. A full rebuild
+# deletes what an earlier version stored there.
+# TRANSITIONAL: remove this constant and its delete call in
+# run_full_mathe_pipeline after every deployed index has been rebuilt once.
+RETIRED_LEGACY_APPLICATION = "mathe"
 MATHE_SPLIT_APPLICATIONS = (
     MatheApplication.DOCUMENTS,
     MatheApplication.VIDEOS,
@@ -297,10 +297,16 @@ def run_full_mathe_pipeline(syncer: MathE_Syncer) -> dict:
             embeddings = np.empty((0, 0), dtype=float)
 
         collection_indices = _build_collection_indices(materials)
-        collection_indices = include_legacy_mathe_collection(
-            collection_indices,
-            materials,
+        retired_legacy_entries = qdrant_client.delete_entities_not_in(
+            RETIRED_LEGACY_APPLICATION,
+            [],
+            collection_name=qdrant_client.COLLECTION_MATHE,
         )
+        if retired_legacy_entries:
+            logger.info(
+                "Deleted %d entries of the retired legacy MathE namespace",
+                retired_legacy_entries,
+            )
         collection_summaries = {}
         for application, entity_indices in collection_indices.items():
             logger.info(
@@ -337,7 +343,6 @@ def run_full_mathe_pipeline(syncer: MathE_Syncer) -> dict:
             "processed_materials": len(materials),
             "embeddings_created": embeddings_created,
             "qdrant_records_updated": qdrant_records_updated,
-            "application": MATHE_APPLICATION,
             "collections": collection_summaries,
         }
         logger.info("Finished full MathE catalog rebuild pipeline: %s", summary)
@@ -369,8 +374,7 @@ def run_incremental_mathe_pipeline(syncer: MathE_Syncer) -> dict:
     - material already stored: left as it is, without re-embedding.
 
     A stored material is not embedded again when its text changes; that needs
-    a full rebuild. A full rebuild also recomputes every neighbour list and
-    updates the legacy ``mathe`` namespace, which this pipeline does not.
+    a full rebuild.
     """
     if getattr(syncer, "is_running", False):
         logger.warning("MathE refresh pipeline is already running")

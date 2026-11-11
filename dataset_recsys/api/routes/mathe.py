@@ -246,8 +246,10 @@ async def sync_data(
     token: str = Depends(security.oauth2_scheme),
 ):
     """
-    Triggers the incremental sync, OCR, and new material embedding process.
-    Processed/embedded materials are skipped; only new items are added and linked via Qdrant.
+    Triggers the incremental sync, OCR, and embedding process.
+    New materials are embedded and linked, and materials no longer in the
+    catalog are removed. Materials already stored are skipped; use
+    /sync/rebuild to re-embed everything.
     """
     claims = claims if isinstance(claims, dict) else {}
     user_subject = claims.get("sub")

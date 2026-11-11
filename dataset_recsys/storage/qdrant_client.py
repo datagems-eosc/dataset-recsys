@@ -586,12 +586,17 @@ class QdrantStorageClient:
         recs = self._stored_recommendations(application, entity_id, collection_name) or []
         return recs[:limit] if limit else recs
 
-    def list_entities(self, application: str, collection_name: str = COLLECTION_DATASET) -> List[str]:
-        """List every entity ID currently stored for an application."""
+    def _scroll_application(
+        self,
+        application: str,
+        collection_name: str,
+        payload_fields: List[str],
+    ) -> List[Dict[str, Any]]:
+        """Return the requested payload fields of every entity of an application."""
         if not self._collection_exists(collection_name):
             return []
 
-        entity_ids = []
+        payloads = []
         offset = None
         while True:
             records, offset = self.client.scroll(
@@ -601,17 +606,20 @@ class QdrantStorageClient:
                 ]),
                 limit=self.SCROLL_PAGE_SIZE,
                 offset=offset,
-                with_payload=True,
+                with_payload=models.PayloadSelectorInclude(include=payload_fields),
                 with_vectors=False,
             )
-            entity_ids.extend(
-                rec.payload["dataset_id"]
-                for rec in records
-                if rec.payload and "dataset_id" in rec.payload
-            )
+            payloads.extend(rec.payload for rec in records if rec.payload)
             if offset is None:
                 break
-        return sorted(entity_ids)
+        return payloads
+
+    def list_entities(self, application: str, collection_name: str = COLLECTION_DATASET) -> List[str]:
+        """List every entity ID currently stored for an application."""
+        payloads = self._scroll_application(application, collection_name, ["dataset_id"])
+        return sorted(
+            payload["dataset_id"] for payload in payloads if "dataset_id" in payload
+        )
 
     def find_entities_recommending(self, application: str, target_entity_id: str, collection_name: str = COLLECTION_DATASET) -> List[str]:
         """Find which entities recommend a given target entity within an application."""

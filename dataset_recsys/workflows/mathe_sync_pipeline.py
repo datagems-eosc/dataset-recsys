@@ -357,7 +357,21 @@ def run_full_mathe_pipeline(syncer: MathE_Syncer) -> dict:
 
 
 def run_incremental_mathe_pipeline(syncer: MathE_Syncer) -> dict:
-    """Incremental sync: processes new materials, embeds them, and updates Qdrant recommendations."""
+    """Incremental sync of the split MathE document and video collections.
+
+    Compared with what is stored in Qdrant, the completed catalog entries are
+    handled as follows:
+
+    - new material: embedded, given its nearest neighbours, and inserted into
+      those neighbours' recommendation lists;
+    - material no longer in the catalog: deleted, together with every
+      reference to it;
+    - material already stored: left as it is, without re-embedding.
+
+    A stored material is not embedded again when its text changes; that needs
+    a full rebuild. A full rebuild also recomputes every neighbour list and
+    updates the legacy ``mathe`` namespace, which this pipeline does not.
+    """
     if getattr(syncer, "is_running", False):
         logger.warning("MathE refresh pipeline is already running")
         return {
@@ -396,74 +410,91 @@ def run_incremental_mathe_pipeline(syncer: MathE_Syncer) -> dict:
         logger.info("Loaded %d completed materials from SQLite", len(materials))
 
         qdrant_client = _build_qdrant_client()
+        collection = qdrant_client.COLLECTION_MATHE
 
-        new_materials = []
-        for mat in materials:
-            pid = mat.get("platform_material_id")
+        # The completed catalog entries are authoritative for the split
+        # collections, as in the full rebuild. Group them by content kind.
+        catalog: dict[MatheApplication, dict[str, CompletedMaterial]] = {
+            application: {} for application in MATHE_SPLIT_APPLICATIONS
+        }
+        for material in materials:
+            pid = material.get("platform_material_id")
             if not pid:
                 continue
-            # Check if the material already exists in Qdrant; if not, it's new and should be processed.
-            if not qdrant_client.exists(pid, collection_name=qdrant_client.COLLECTION_MATHE):
-                new_materials.append(mat)
-                logger.info("New material detected for embedding: %s", pid)
-
-        logger.info(f"Incremental sync found {len(new_materials)} new materials to embed out of {len(materials)} total completed.")
-
-        embeddings_created = 0
-        processed_count = 0
-        
-        for material in new_materials:
-            pid = material.get("platform_material_id")
             app = _resolve_application(material["sync_entry_id"], material["type"])
             if not app:
                 continue
-            logger.info("Processing new material: %s for application: %s", pid, app)
-            
-            encodings = encode_texts([material["text"]], model_name=DEFAULT_MATHE_EMBEDDING_MODEL)
-            vector = encodings[0]
-            embeddings_created += 1
-            
-            # Store the embedding in Qdrant
-            qdrant_client.store_embeddings(
-                application=app,
-                dataset_ids=[pid],
-                embeddings=[vector],
-                embedding_inputs=[material["text"]],
-                embedding_model=DEFAULT_MATHE_EMBEDDING_MODEL,
-                collection_name=qdrant_client.COLLECTION_MATHE,
-                run_id=started_at,
+            catalog[app][pid] = material
+
+        embeddings_created = 0
+        processed_count = 0
+        removed_count = 0
+
+        for app, current in catalog.items():
+            stored_ids = set(qdrant_client.list_entities(app, collection))
+
+            # 1. Materials that left the catalog: delete them and every
+            #    reference to them in other materials' recommendation lists.
+            removed_ids = sorted(stored_ids - set(current))
+            for pid in removed_ids:
+                qdrant_client.remove_dataset(app, pid, collection_name=collection)
+                removed_count += 1
+                logger.info("Removed material %s from %s: no longer in the catalog", pid, app)
+
+            new_ids = [pid for pid in current if pid not in stored_ids]
+            logger.info(
+                "Incremental sync for %s: %d new, %d removed, %d total completed",
+                app,
+                len(new_ids),
+                len(removed_ids),
+                len(current),
             )
-            logger.info("Stored embedding for new material: %s in application: %s", pid, app)
-            
-            # Find similar items for recommendations via Qdrant ANN search
-            logger.info("Finding similar materials for %s", pid)
-            similar_results = qdrant_client.find_similar(
-                application=app,
-                query_vector=vector.tolist() if hasattr(vector, "tolist") else list(vector),
-                top_k=10,
-                collection_name=qdrant_client.COLLECTION_MATHE,
-            )     
-            logger.info("Found similar materials for %s: %s", pid, similar_results)
 
-            # Format recommendations {neighbor_id: score}
-            recs_map = {res["dataset_id"]: float(res["score"]) for res in similar_results if res["dataset_id"] != pid}
-            
-            # Store recommendations for the new material
-            qdrant_client.update_single_entity_recs(app, pid, recs_map, collection_name=qdrant_client.COLLECTION_MATHE)
-            logger.info("Updated recommendations for new material: %s in application: %s", pid, app)
+            # 2. Embed new materials and link them to their neighbours.
+            for pid in new_ids:
+                material = current[pid]
+                encodings = encode_texts([material["text"]], model_name=DEFAULT_MATHE_EMBEDDING_MODEL)
+                vector = encodings[0]
+                embeddings_created += 1
 
-            # Inject the new material into its neighbors' recommendation lists
-            for neighbor_id, score in recs_map.items():
-                qdrant_client.update_neighbor_recs(
+                qdrant_client.store_embeddings(
                     application=app,
-                    neighbor_id=neighbor_id,
-                    new_entity_id=pid,
-                    score=score,
-                    limit=10,
-                    collection_name=qdrant_client.COLLECTION_MATHE,
+                    dataset_ids=[pid],
+                    embeddings=[vector],
+                    embedding_inputs=[material["text"]],
+                    embedding_model=DEFAULT_MATHE_EMBEDDING_MODEL,
+                    collection_name=collection,
+                    run_id=started_at,
                 )
-            logger.info("Updated neighbor recommendations for new material: %s in application: %s", pid, app)
-            processed_count += 1
+
+                # Find similar items for recommendations via Qdrant ANN search
+                similar_results = qdrant_client.find_similar(
+                    application=app,
+                    query_vector=vector.tolist() if hasattr(vector, "tolist") else list(vector),
+                    top_k=10,
+                    collection_name=collection,
+                )
+
+                # Format recommendations {neighbor_id: score}
+                recs_map = {res["dataset_id"]: float(res["score"]) for res in similar_results if res["dataset_id"] != pid}
+                logger.info("Neighbours of material %s in %s: %s", pid, app, sorted(recs_map))
+
+                # Store recommendations for the new material
+                qdrant_client.update_single_entity_recs(app, pid, recs_map, collection_name=collection)
+
+                # Inject the new material into its neighbors' recommendation lists
+                for neighbor_id, score in recs_map.items():
+                    qdrant_client.update_neighbor_recs(
+                        application=app,
+                        neighbor_id=neighbor_id,
+                        new_entity_id=pid,
+                        score=score,
+                        limit=10,
+                        collection_name=collection,
+                    )
+
+                processed_count += 1
+
         completed_at = _utc_now()
         _save_sync_status(
             syncer,
@@ -477,8 +508,9 @@ def run_incremental_mathe_pipeline(syncer: MathE_Syncer) -> dict:
             "status": "completed",
             "mode": "incremental",
             "processed_new_materials": processed_count,
+            "removed_materials": removed_count,
             "embeddings_created": embeddings_created,
-        }        
+        }
         
     except Exception:
         failed_at = _utc_now()

@@ -443,6 +443,7 @@ def test_incremental_pipeline_indexes_new_materials_per_content_kind(
         "status": "completed",
         "mode": "incremental",
         "processed_new_materials": 3,
+        "removed_materials": 0,
         "embeddings_created": 3,
     }
     assert fake_syncer.reconcile_called is True
@@ -523,14 +524,15 @@ def test_incremental_pipeline_with_nothing_new_changes_nothing(
     summary = mathe_sync_pipeline.run_incremental_mathe_pipeline(FakeSyncer(db_path))
 
     assert summary["processed_new_materials"] == 0
+    assert summary["removed_materials"] == 0
     assert summary["embeddings_created"] == 0
     assert encoded_texts == []
     assert qdrant.list_entities("mathe_documents", MATHE) == ["6"]
 
 
-# KNOWN GAP: the incremental pipeline only adds. A material that left the
-# catalog stays indexed until the next full rebuild removes it.
-def test_incremental_pipeline_keeps_removed_materials_until_a_full_rebuild(
+# A material that left the catalog must stop being recommendable without
+# waiting for a full rebuild, and no other material may keep pointing at it.
+def test_incremental_pipeline_removes_materials_that_left_the_catalog(
     tmp_path, monkeypatch, qdrant
 ):
     db_path = tmp_path / "syncer.db"
@@ -539,25 +541,83 @@ def test_incremental_pipeline_keeps_removed_materials_until_a_full_rebuild(
         [
             ("./6.pdf", "document", "matrices", "completed", "6"),
             ("./7.docx", "document", "derivatives", "completed", "7"),
+            ("abcdefghijk", "video", "lesson", "completed", "901"),
         ],
     )
+    encoded_texts = []
     monkeypatch.setattr(
         mathe_sync_pipeline,
         "encode_texts",
-        _encode_from({"matrices": [1.0, 0.0], "derivatives": [0.6, 0.8]}, []),
+        _encode_from(
+            {"matrices": [1.0, 0.0], "derivatives": [0.6, 0.8], "lesson": [0.0, 1.0]},
+            encoded_texts,
+        ),
+    )
+    mathe_sync_pipeline.run_incremental_mathe_pipeline(FakeSyncer(db_path))
+    assert qdrant.get_recommendations("mathe_documents", "6", collection_name=MATHE) == ["7"]
+    encoded_texts.clear()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM sync_entries WHERE id = './7.docx'")
+    summary = mathe_sync_pipeline.run_incremental_mathe_pipeline(FakeSyncer(db_path))
+
+    assert summary["removed_materials"] == 1
+    assert summary["processed_new_materials"] == 0
+    assert summary["embeddings_created"] == 0
+    assert encoded_texts == []
+    assert qdrant.list_entities("mathe_documents", MATHE) == ["6"]
+    assert qdrant.get_recommendations("mathe_documents", "6", collection_name=MATHE) == []
+    # The other content kind is untouched.
+    assert qdrant.list_entities("mathe_videos", MATHE) == ["901"]
+
+
+# A material that is no longer completed (for example a requeued transcript)
+# is not in the completed catalog, so it leaves the index like a removed one.
+def test_incremental_pipeline_removes_materials_that_are_no_longer_completed(
+    tmp_path, monkeypatch, qdrant
+):
+    db_path = tmp_path / "syncer.db"
+    _write_catalog(db_path, [("abcdefghijk", "video", "lesson", "completed", "901")])
+    monkeypatch.setattr(
+        mathe_sync_pipeline, "encode_texts", _encode_from({"lesson": [0.0, 1.0]}, [])
     )
     mathe_sync_pipeline.run_incremental_mathe_pipeline(FakeSyncer(db_path))
 
     with sqlite3.connect(db_path) as conn:
-        conn.execute("DELETE FROM sync_entries WHERE id = './7.docx'")
-    mathe_sync_pipeline.run_incremental_mathe_pipeline(FakeSyncer(db_path))
+        conn.execute("UPDATE sync_entries SET status = 'pending', claude_ocr_text = NULL")
+    summary = mathe_sync_pipeline.run_incremental_mathe_pipeline(FakeSyncer(db_path))
 
-    assert qdrant.list_entities("mathe_documents", MATHE) == ["6", "7"]
+    assert summary["removed_materials"] == 1
+    assert qdrant.list_entities("mathe_videos", MATHE) == []
+
+
+# A stored material is not embedded again when its text changes; only a full
+# rebuild does that.
+def test_incremental_pipeline_does_not_reembed_a_stored_material(
+    tmp_path, monkeypatch, qdrant
+):
+    db_path = tmp_path / "syncer.db"
+    _write_catalog(db_path, [("./6.pdf", "document", "matrices", "completed", "6")])
+    encoded_texts = []
+    monkeypatch.setattr(
+        mathe_sync_pipeline,
+        "encode_texts",
+        _encode_from({"matrices": [1.0, 0.0], "chain rule": [0.0, 1.0]}, encoded_texts),
+    )
+    mathe_sync_pipeline.run_incremental_mathe_pipeline(FakeSyncer(db_path))
+    encoded_texts.clear()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE sync_entries SET claude_ocr_text = 'chain rule'")
+    summary = mathe_sync_pipeline.run_incremental_mathe_pipeline(FakeSyncer(db_path))
+
+    assert summary["processed_new_materials"] == 0
+    assert summary["removed_materials"] == 0
+    assert encoded_texts == []
 
     mathe_sync_pipeline.run_full_mathe_pipeline(FakeSyncer(db_path))
 
-    assert qdrant.list_entities("mathe_documents", MATHE) == ["6"]
-    assert qdrant.get_recommendations("mathe_documents", "6", collection_name=MATHE) == []
+    assert encoded_texts == ["chain rule"]
 
 
 # These tests check that the MathE sync API endpoints are wired correctly:

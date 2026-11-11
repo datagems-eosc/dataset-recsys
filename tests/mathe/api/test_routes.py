@@ -7,7 +7,7 @@ from dataset_recsys.api.routes import mathe
 def test_video_recommend_endpoint_uses_video_pool_ranker(monkeypatch):
     calls = {}
     fake_mathe_client = object()
-    fake_embedding_client = object()
+    fake_qdrant_client = object()
 
     async def fake_authorized_entity_ids(token):
         calls["token"] = token
@@ -26,7 +26,7 @@ def test_video_recommend_endpoint_uses_video_pool_ranker(monkeypatch):
         fake_authorized_entity_ids,
     )
     monkeypatch.setattr(mathe, "get_mathe_client", lambda: fake_mathe_client)
-    monkeypatch.setattr(mathe, "get_embedding_client", lambda: fake_embedding_client)
+    monkeypatch.setattr(mathe, "get_qdrant_client", lambda: fake_qdrant_client)
     monkeypatch.setattr(
         mathe,
         "recommend_videos_for_question",
@@ -56,7 +56,7 @@ def test_video_recommend_endpoint_uses_video_pool_ranker(monkeypatch):
         "question": "Explain the chain rule.",
         "k": 2,
         "mathe_mirror_client": fake_mathe_client,
-        "embedding_client": fake_embedding_client,
+        "qdrant_client": fake_qdrant_client,
     }
     assert response.question_id == "272"
     assert [recommendation.material_id for recommendation in response.recommendations] == [
@@ -96,7 +96,7 @@ def test_recommendation_ranking_does_not_block_event_loop(monkeypatch):
         fake_authorized_entity_ids,
     )
     monkeypatch.setattr(mathe, "get_mathe_client", lambda: object())
-    monkeypatch.setattr(mathe, "get_embedding_client", lambda: object())
+    monkeypatch.setattr(mathe, "get_qdrant_client", lambda: object())
 
     async def run_request():
         task = asyncio.create_task(

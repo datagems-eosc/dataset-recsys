@@ -35,7 +35,7 @@ async def health_check():
 
         return {
             "status": "ok",
-            "qdrant": is_qdrant_up,
+            "qdrant": "connected",
         }
     except HTTPException:
         raise

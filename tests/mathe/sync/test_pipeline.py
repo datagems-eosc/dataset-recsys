@@ -10,7 +10,10 @@ import numpy as np
 import pandas as pd
 import pytest
 from fastapi import BackgroundTasks
+from qdrant_client import QdrantClient
 
+from dataset_recsys.mathe_recommenders.constants import MatheApplication
+from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from dataset_recsys.workflows import mathe_sync_pipeline
 from dataset_recsys.api.routes import mathe
 
@@ -82,29 +85,66 @@ class FakeSyncer:
 
         return df.replace("", pd.NA)
 
-class FakeQdrantStorageClient:
-    stored_embeddings = []
-    stored_recommendations = []
-    deleted = []
+MATHE = QdrantStorageClient.COLLECTION_MATHE
+PIPELINES = pytest.mark.parametrize(
+    "pipeline_name",
+    ["run_full_mathe_pipeline", "run_incremental_mathe_pipeline"],
+)
 
-    def store_embeddings(self, **kwargs):
-        self.__class__.stored_embeddings.append(kwargs)
-        return len(kwargs["dataset_ids"])
 
-    def store_recommendations(self, application, data):
-        self.__class__.stored_recommendations.append(
-            {"application": application, "data": data}
+@pytest.fixture
+def qdrant(monkeypatch):
+    """The real storage client on Qdrant's in-memory mode, used by the pipeline."""
+    client = QdrantStorageClient(client=QdrantClient(":memory:"))
+    monkeypatch.setattr(mathe_sync_pipeline, "_build_qdrant_client", lambda: client)
+    return client
+
+
+def _store_materials(qdrant, application, vectors):
+    qdrant.store_embeddings(
+        application=application,
+        dataset_ids=list(vectors),
+        embeddings=np.array(list(vectors.values()), dtype=float),
+        embedding_inputs=[f"text {material_id}" for material_id in vectors],
+        embedding_model="test-model",
+        collection_name=MATHE,
+    )
+
+
+def _write_catalog(db_path, rows):
+    """Create a sync catalog from (id, type, text, status, platform_id) rows."""
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sync_entries (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                claude_ocr_text TEXT,
+                status TEXT NOT NULL,
+                platform_material_id TEXT
+            )
+            """
         )
-        return len(data)
+        conn.executemany(
+            "INSERT INTO sync_entries VALUES (?, ?, ?, ?, ?)",
+            rows,
+        )
 
-    def delete_application(self, application):
-        self.__class__.deleted.append({"application": application})
-        return 0
+
+def _encode_from(vectors_by_text, encoded_texts):
+    """Build an encode_texts stand-in that records what it was asked to embed."""
+
+    def fake_encode_texts(texts, model_name):
+        encoded_texts.extend(texts)
+        return np.array([vectors_by_text[text] for text in texts], dtype=float)
+
+    return fake_encode_texts
 
 
-def test_run_mathe_pipeline_builds_separate_document_and_video_indexes(
+def test_full_pipeline_builds_separate_document_and_video_indexes(
     tmp_path,
     monkeypatch,
+    qdrant,
 ):
     # 1. Establish path for SQLite database instead of JSON
     db_path = tmp_path / "syncer.db"
@@ -208,16 +248,8 @@ def test_run_mathe_pipeline_builds_separate_document_and_video_indexes(
         )
 
     monkeypatch.setattr(mathe_sync_pipeline, "encode_texts", fake_encode_texts)
-    monkeypatch.setattr(
-        mathe_sync_pipeline,
-        "_build_qdrant_client",
-        lambda: FakeQdrantStorageClient(),
-    )
 
-    FakeQdrantStorageClient.stored_embeddings = []
-    FakeQdrantStorageClient.stored_recommendations = []
-    FakeQdrantStorageClient.deleted = []
-    summary = mathe_sync_pipeline.run_mathe_pipeline(fake_syncer)
+    summary = mathe_sync_pipeline.run_full_mathe_pipeline(fake_syncer)
 
     assert fake_syncer.reconcile_called is True
     assert fake_syncer.process_called is True
@@ -256,50 +288,28 @@ def test_run_mathe_pipeline_builds_separate_document_and_video_indexes(
         "review transcript",
     ]
 
-    recommendations_by_application = {
-        str(call["application"]): call["data"]
-        for call in FakeQdrantStorageClient.stored_recommendations
-    }
-    assert set(recommendations_by_application) == {
-        "mathe",
-        "mathe_documents",
-        "mathe_videos",
-    }
-    assert set(recommendations_by_application["mathe"]) == {
-        "6.pdf",
-        "7.docx",
-        "abcdefghijk.txt",
-        "zyxwvutsrqp.txt",
-    }
-    assert set(recommendations_by_application["mathe_documents"]) == {"6", "7"}
-    assert set(recommendations_by_application["mathe_videos"]) == {"901", "902"}
-    assert {
-        neighbor_id
-        for neighbors in recommendations_by_application["mathe_documents"].values()
-        for neighbor_id, _score in neighbors
-    } <= {"6", "7"}
-    assert {
-        neighbor_id
-        for neighbors in recommendations_by_application["mathe_videos"].values()
-        for neighbor_id, _score in neighbors
-    } <= {"901", "902"}
-
-    embeddings_by_application = {
-        str(call["application"]): call
-        for call in FakeQdrantStorageClient.stored_embeddings
-    }
-    assert embeddings_by_application["mathe"]["dataset_ids"] == [
+    # Each namespace holds only its own IDs: legacy processing IDs in "mathe",
+    # platform material IDs in the split document and video namespaces.
+    assert qdrant.list_entities("mathe", MATHE) == [
         "6.pdf",
         "7.docx",
         "abcdefghijk.txt",
         "zyxwvutsrqp.txt",
     ]
-    assert embeddings_by_application["mathe_documents"]["dataset_ids"] == ["6", "7"]
-    assert embeddings_by_application["mathe_videos"]["dataset_ids"] == ["901", "902"]
-    assert FakeQdrantStorageClient.deleted == []
+    assert qdrant.list_entities("mathe_documents", MATHE) == ["6", "7"]
+    assert qdrant.list_entities("mathe_videos", MATHE) == ["901", "902"]
+
+    # Neighbours never cross the document/video boundary.
+    assert qdrant.get_recommendations("mathe_documents", "6", collection_name=MATHE) == ["7"]
+    assert qdrant.get_recommendations("mathe_documents", "7", collection_name=MATHE) == ["6"]
+    assert qdrant.get_recommendations("mathe_videos", "901", collection_name=MATHE) == ["902"]
+    assert qdrant.get_recommendations("mathe_videos", "902", collection_name=MATHE) == ["901"]
+    assert set(
+        qdrant.get_recommendations("mathe", "6.pdf", collection_name=MATHE)
+    ) == {"7.docx", "abcdefghijk.txt", "zyxwvutsrqp.txt"}
 
 
-def test_split_indexes_skip_unresolved_platform_ids_and_clear_empty_collection():
+def test_split_indexes_skip_unresolved_platform_ids_and_clear_empty_collection(qdrant):
     materials = [
         {
             "sync_entry_id": "6.pdf",
@@ -317,24 +327,23 @@ def test_split_indexes_skip_unresolved_platform_ids_and_clear_empty_collection()
     indices = mathe_sync_pipeline._build_collection_indices(materials)
 
     assert set(indices) == {
-        mathe_sync_pipeline.MatheApplication.DOCUMENTS,
-        mathe_sync_pipeline.MatheApplication.VIDEOS,
+        MatheApplication.DOCUMENTS,
+        MatheApplication.VIDEOS,
     }
-    assert set(indices[mathe_sync_pipeline.MatheApplication.DOCUMENTS]) == {"6"}
-    assert indices[mathe_sync_pipeline.MatheApplication.VIDEOS] == {}
+    assert set(indices[MatheApplication.DOCUMENTS]) == {"6"}
+    assert indices[MatheApplication.VIDEOS] == {}
 
-    qdrant_client = FakeQdrantStorageClient()
-    FakeQdrantStorageClient.deleted = []
-    FakeQdrantStorageClient.stored_recommendations = []
-    result = (
-        mathe_sync_pipeline._replace_embedding_and_recommendation_collection(
-            application=mathe_sync_pipeline.MatheApplication.VIDEOS,
-            entity_indices={},
-            materials=materials,
-            embeddings=np.array([[1.0, 0.0], [0.0, 1.0]]),
-            qdrant_client=qdrant_client,
-            run_id="stage-2-test",
-        )
+    # A video published by an earlier run must not stay once the namespace is empty.
+    _store_materials(qdrant, MatheApplication.VIDEOS, {"901": [1.0, 0.0]})
+    _store_materials(qdrant, MatheApplication.DOCUMENTS, {"6": [0.0, 1.0]})
+
+    result = mathe_sync_pipeline._replace_embedding_and_recommendation_collection(
+        application=MatheApplication.VIDEOS,
+        entity_indices={},
+        materials=materials,
+        embeddings=np.array([[1.0, 0.0], [0.0, 1.0]]),
+        qdrant_client=qdrant,
+        run_id="stage-2-test",
     )
 
     assert result == {
@@ -342,71 +351,17 @@ def test_split_indexes_skip_unresolved_platform_ids_and_clear_empty_collection()
         "embeddings_stored": 0,
         "qdrant_records_updated": 0,
     }
-    assert FakeQdrantStorageClient.deleted == [
-        {"application": "mathe_videos"}
-    ]
-    assert FakeQdrantStorageClient.stored_recommendations == [
-        {"application": "mathe_videos", "data": {}}
-    ]
-
-
-def test_split_indexes_skip_unresolved_platform_ids_and_clear_empty_collection():
-    materials = [
-        {
-            "sync_entry_id": "6.pdf",
-            "platform_material_id": "6",
-            "type": "document",
-            "text": "document text",
-        },
-        {
-            "sync_entry_id": "abcdefghijk",
-            "platform_material_id": None,
-            "type": "video",
-            "text": "legacy transcript",
-        },
-    ]
-    indices = mathe_sync_pipeline._build_collection_indices(materials)
-
-    assert set(indices) == {
-        mathe_sync_pipeline.MatheApplication.DOCUMENTS,
-        mathe_sync_pipeline.MatheApplication.VIDEOS,
-    }
-    assert set(indices[mathe_sync_pipeline.MatheApplication.DOCUMENTS]) == {"6"}
-    assert indices[mathe_sync_pipeline.MatheApplication.VIDEOS] == {}
-
-    qdrant_client = FakeQdrantStorageClient()
-    FakeQdrantStorageClient.deleted = []
-    FakeQdrantStorageClient.stored_recommendations = []
-    result = (
-        mathe_sync_pipeline._replace_embedding_and_recommendation_collection(
-            application=mathe_sync_pipeline.MatheApplication.VIDEOS,
-            entity_indices={},
-            materials=materials,
-            embeddings=np.array([[1.0, 0.0], [0.0, 1.0]]),
-            qdrant_client=qdrant_client,
-            run_id="stage-2-test",
-        )
-    )
-
-    assert result == {
-        "processed_materials": 0,
-        "embeddings_stored": 0,
-        "qdrant_records_updated": 0,
-    }
-    assert FakeQdrantStorageClient.deleted == [
-        {"application": "mathe_videos"}
-    ]
-    assert FakeQdrantStorageClient.stored_recommendations == [
-        {"application": "mathe_videos", "data": {}}
-    ]
+    assert qdrant.list_entities(MatheApplication.VIDEOS, MATHE) == []
+    assert qdrant.list_entities(MatheApplication.DOCUMENTS, MATHE) == ["6"]
 
 
 # A broken local catalog must fail safely instead of clearing published indexes.
-def test_run_mathe_pipeline_handles_missing_sync_database(tmp_path):
+@PIPELINES
+def test_pipeline_handles_missing_sync_database(pipeline_name, tmp_path):
     fake_syncer = FakeSyncer(tmp_path / "missing.db")
 
     with pytest.raises(sqlite3.OperationalError):
-        mathe_sync_pipeline.run_mathe_pipeline(fake_syncer)
+        getattr(mathe_sync_pipeline, pipeline_name)(fake_syncer)
 
     assert fake_syncer.reconcile_called is True
     assert fake_syncer.process_called is True
@@ -415,17 +370,18 @@ def test_run_mathe_pipeline_handles_missing_sync_database(tmp_path):
     assert fake_syncer.status["embeddings_created"] == 0
 
 
-def test_run_mathe_pipeline_does_not_start_a_duplicate_run(tmp_path):
+@PIPELINES
+def test_pipeline_does_not_start_a_duplicate_run(pipeline_name, tmp_path):
     fake_syncer = FakeSyncer(tmp_path / "unused.db")
     fake_syncer.is_running = True
 
-    summary = mathe_sync_pipeline.run_mathe_pipeline(fake_syncer)
+    summary = getattr(mathe_sync_pipeline, pipeline_name)(fake_syncer)
 
     assert summary == {
         "status": "already_running",
         "processed_materials": 0,
         "embeddings_created": 0,
-        "redis_keys_updated": 0,
+        "qdrant_records_updated": 0,
         "reason": "A MathE refresh pipeline is already running.",
     }
     assert fake_syncer.reconcile_called is False
@@ -434,57 +390,189 @@ def test_run_mathe_pipeline_does_not_start_a_duplicate_run(tmp_path):
     assert fake_syncer.is_running is True
 
 
-def test_run_mathe_pipeline_clears_collections_for_empty_catalog(
-    tmp_path,
-    monkeypatch,
-):
+def test_full_pipeline_clears_collections_for_empty_catalog(tmp_path, qdrant):
     db_path = tmp_path / "syncer.db"
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            CREATE TABLE sync_entries (
-                id TEXT PRIMARY KEY,
-                type TEXT NOT NULL,
-                claude_ocr_text TEXT,
-                status TEXT NOT NULL,
-                platform_material_id TEXT
-            )
-            """
-        )
+    _write_catalog(db_path, [])
+    _store_materials(qdrant, MatheApplication.LEGACY, {"6.pdf": [1.0, 0.0]})
+    _store_materials(qdrant, MatheApplication.DOCUMENTS, {"6": [1.0, 0.0]})
+    _store_materials(qdrant, MatheApplication.VIDEOS, {"901": [0.0, 1.0]})
 
-    fake_syncer = FakeSyncer(db_path)
-    monkeypatch.setattr(
-        mathe_sync_pipeline,
-        "_build_qdrant_client",
-        lambda: FakeQdrantStorageClient(),
-    )
-    FakeQdrantStorageClient.stored_embeddings = []
-    FakeQdrantStorageClient.stored_recommendations = []
-    FakeQdrantStorageClient.deleted = []
+    summary = mathe_sync_pipeline.run_full_mathe_pipeline(FakeSyncer(db_path))
 
-    summary = mathe_sync_pipeline.run_mathe_pipeline(fake_syncer)
-
-    expected_applications = {"mathe", "mathe_documents", "mathe_videos"}
     assert summary["status"] == "completed"
     assert summary["processed_materials"] == 0
     assert summary["embeddings_created"] == 0
-    assert {call["application"] for call in FakeQdrantStorageClient.deleted} == (
-        expected_applications
-    )
-    assert {
-        call["application"]
-        for call in FakeQdrantStorageClient.stored_recommendations
-    } == expected_applications
-    assert all(
-        not call["data"] for call in FakeQdrantStorageClient.stored_recommendations
-    )
-    assert FakeQdrantStorageClient.stored_embeddings == []
+    # A successful empty catalog is authoritative: nothing stays recommendable.
+    for application in ("mathe", "mathe_documents", "mathe_videos"):
+        assert qdrant.list_entities(application, MATHE) == []
 
-# This test checks that the MathE /sync API endpoint is wired correctly.
-# It verifies that when the endpoint is hit,
-# it triggers the background task to run the sync pipeline,
-# and returns the expected response.
-def test_sync_endpoint_schedules_mathe_pipeline(monkeypatch):
+
+# ---------------------------------------------------------------------------
+# Incremental pipeline
+# ---------------------------------------------------------------------------
+
+
+def test_incremental_pipeline_indexes_new_materials_per_content_kind(
+    tmp_path, monkeypatch, qdrant
+):
+    db_path = tmp_path / "syncer.db"
+    _write_catalog(
+        db_path,
+        [
+            ("./6.pdf", "document", "matrices", "completed", "6"),
+            ("./7.docx", "document", "derivatives", "completed", "7"),
+            ("abcdefghijk", "video", "lesson", "completed", "901"),
+            ("./8.pdf", "document", "pending text", "pending", "8"),
+            ("zyxwvutsrqp", "video", "no platform id", "completed", None),
+        ],
+    )
+    encoded_texts = []
+    monkeypatch.setattr(
+        mathe_sync_pipeline,
+        "encode_texts",
+        _encode_from(
+            {"matrices": [1.0, 0.0], "derivatives": [0.6, 0.8], "lesson": [0.0, 1.0]},
+            encoded_texts,
+        ),
+    )
+    fake_syncer = FakeSyncer(db_path)
+
+    summary = mathe_sync_pipeline.run_incremental_mathe_pipeline(fake_syncer)
+
+    assert summary == {
+        "status": "completed",
+        "mode": "incremental",
+        "processed_new_materials": 3,
+        "embeddings_created": 3,
+    }
+    assert fake_syncer.reconcile_called is True
+    assert fake_syncer.process_called is True
+    assert fake_syncer.is_running is False
+    assert fake_syncer.status["sync_status"] == "completed"
+    assert fake_syncer.status["embeddings_created"] == 3
+    # Pending entries and entries without a platform ID are not embedded.
+    assert sorted(encoded_texts) == ["derivatives", "lesson", "matrices"]
+
+    assert qdrant.list_entities("mathe_documents", MATHE) == ["6", "7"]
+    assert qdrant.list_entities("mathe_videos", MATHE) == ["901"]
+    assert qdrant.get_recommendations("mathe_documents", "6", collection_name=MATHE) == ["7"]
+    assert qdrant.get_recommendations("mathe_documents", "7", collection_name=MATHE) == ["6"]
+    # The only video has no other video to be recommended with.
+    assert qdrant.get_recommendations("mathe_videos", "901", collection_name=MATHE) == []
+    # The incremental pipeline does not publish the legacy mixed namespace.
+    assert qdrant.list_entities("mathe", MATHE) == []
+
+
+def test_incremental_pipeline_embeds_only_materials_not_yet_indexed(
+    tmp_path, monkeypatch, qdrant
+):
+    db_path = tmp_path / "syncer.db"
+    _write_catalog(
+        db_path,
+        [
+            ("./6.pdf", "document", "matrices", "completed", "6"),
+            ("./7.docx", "document", "derivatives", "completed", "7"),
+        ],
+    )
+    vectors = {
+        "matrices": [1.0, 0.0],
+        "derivatives": [0.0, 1.0],
+        "matrix inverses": [0.8, 0.6],
+    }
+    encoded_texts = []
+    monkeypatch.setattr(
+        mathe_sync_pipeline, "encode_texts", _encode_from(vectors, encoded_texts)
+    )
+    mathe_sync_pipeline.run_incremental_mathe_pipeline(FakeSyncer(db_path))
+    encoded_texts.clear()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO sync_entries VALUES (?, ?, ?, ?, ?)",
+            ("./9.pdf", "document", "matrix inverses", "completed", "9"),
+        )
+    summary = mathe_sync_pipeline.run_incremental_mathe_pipeline(FakeSyncer(db_path))
+
+    assert summary["processed_new_materials"] == 1
+    assert summary["embeddings_created"] == 1
+    assert encoded_texts == ["matrix inverses"]
+    assert qdrant.list_entities("mathe_documents", MATHE) == ["6", "7", "9"]
+    # The new material gets its neighbours, best first ...
+    assert qdrant.get_recommendations_with_scores(
+        "mathe_documents", "9", collection_name=MATHE
+    ) == [("6", pytest.approx(0.8)), ("7", pytest.approx(0.6))]
+    # ... and is inserted into each neighbour's list at the right rank.
+    assert qdrant.get_recommendations("mathe_documents", "6", collection_name=MATHE) == ["9", "7"]
+    assert qdrant.get_recommendations("mathe_documents", "7", collection_name=MATHE) == ["9", "6"]
+
+
+def test_incremental_pipeline_with_nothing_new_changes_nothing(
+    tmp_path, monkeypatch, qdrant
+):
+    db_path = tmp_path / "syncer.db"
+    _write_catalog(db_path, [("./6.pdf", "document", "matrices", "completed", "6")])
+    encoded_texts = []
+    monkeypatch.setattr(
+        mathe_sync_pipeline,
+        "encode_texts",
+        _encode_from({"matrices": [1.0, 0.0]}, encoded_texts),
+    )
+    mathe_sync_pipeline.run_incremental_mathe_pipeline(FakeSyncer(db_path))
+    encoded_texts.clear()
+
+    summary = mathe_sync_pipeline.run_incremental_mathe_pipeline(FakeSyncer(db_path))
+
+    assert summary["processed_new_materials"] == 0
+    assert summary["embeddings_created"] == 0
+    assert encoded_texts == []
+    assert qdrant.list_entities("mathe_documents", MATHE) == ["6"]
+
+
+# KNOWN GAP: the incremental pipeline only adds. A material that left the
+# catalog stays indexed until the next full rebuild removes it.
+def test_incremental_pipeline_keeps_removed_materials_until_a_full_rebuild(
+    tmp_path, monkeypatch, qdrant
+):
+    db_path = tmp_path / "syncer.db"
+    _write_catalog(
+        db_path,
+        [
+            ("./6.pdf", "document", "matrices", "completed", "6"),
+            ("./7.docx", "document", "derivatives", "completed", "7"),
+        ],
+    )
+    monkeypatch.setattr(
+        mathe_sync_pipeline,
+        "encode_texts",
+        _encode_from({"matrices": [1.0, 0.0], "derivatives": [0.6, 0.8]}, []),
+    )
+    mathe_sync_pipeline.run_incremental_mathe_pipeline(FakeSyncer(db_path))
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM sync_entries WHERE id = './7.docx'")
+    mathe_sync_pipeline.run_incremental_mathe_pipeline(FakeSyncer(db_path))
+
+    assert qdrant.list_entities("mathe_documents", MATHE) == ["6", "7"]
+
+    mathe_sync_pipeline.run_full_mathe_pipeline(FakeSyncer(db_path))
+
+    assert qdrant.list_entities("mathe_documents", MATHE) == ["6"]
+    assert qdrant.get_recommendations("mathe_documents", "6", collection_name=MATHE) == []
+
+
+# These tests check that the MathE sync API endpoints are wired correctly:
+# /sync schedules the incremental pipeline and /sync/rebuild the full one,
+# each as a background task.
+@pytest.mark.parametrize(
+    ("endpoint_name", "pipeline_name"),
+    [
+        ("sync_data", "run_incremental_mathe_pipeline"),
+        ("rebuild_catalog", "run_full_mathe_pipeline"),
+    ],
+)
+def test_sync_endpoints_schedule_their_mathe_pipeline(
+    endpoint_name, pipeline_name, monkeypatch
+):
 
     fake_logger = types.SimpleNamespace(
         bind=lambda **kwargs: fake_logger,
@@ -509,17 +597,28 @@ def test_sync_endpoint_schedules_mathe_pipeline(monkeypatch):
     )
 
     background_tasks = BackgroundTasks()
-    response = asyncio.run(mathe.sync_data(background_tasks))
+    response = asyncio.run(getattr(mathe, endpoint_name)(background_tasks))
 
     assert response["status"] == "Accepted"
-    assert background_tasks.tasks
-    assert background_tasks.tasks[0].func is mathe.run_mathe_pipeline
+    assert len(background_tasks.tasks) == 1
+    assert background_tasks.tasks[0].func is getattr(mathe, pipeline_name)
+    assert background_tasks.tasks[0].args == (mathe.syncer,)
+
+
+def test_sync_routes_are_registered():
+    routes_by_path = {route.path: route for route in mathe.router.routes}
+
+    assert routes_by_path["/dataset-recsys/mathe/sync"].endpoint is mathe.sync_data
+    assert (
+        routes_by_path["/dataset-recsys/mathe/sync/rebuild"].endpoint
+        is mathe.rebuild_catalog
+    )
 
 
 def test_document_recommend_endpoint_uses_curricular_pool_ranker(monkeypatch):
     calls = {}
     fake_mathe_client = object()
-    fake_embedding_client = object()
+    fake_qdrant_client = object()
 
     async def fake_authorized_entity_ids(token):
         calls["token"] = token
@@ -535,7 +634,7 @@ def test_document_recommend_endpoint_uses_curricular_pool_ranker(monkeypatch):
         fake_authorized_entity_ids,
     )
     monkeypatch.setattr(mathe, "get_mathe_client", lambda: fake_mathe_client)
-    monkeypatch.setattr(mathe, "get_embedding_client", lambda: fake_embedding_client)
+    monkeypatch.setattr(mathe, "get_qdrant_client", lambda: fake_qdrant_client)
     monkeypatch.setattr(
         mathe,
         "recommend_from_curricular_pool",
@@ -560,7 +659,7 @@ def test_document_recommend_endpoint_uses_curricular_pool_ranker(monkeypatch):
         "question": "Differentiate $y = (2x^3 - 5x)^5$.",
         "k": 2,
         "mathe_mirror_client": fake_mathe_client,
-        "embedding_client": fake_embedding_client,
+        "qdrant_client": fake_qdrant_client,
     }
     assert response.question_id == "272"
     assert [rec.material_id for rec in response.recommendations] == ["818", "900"]

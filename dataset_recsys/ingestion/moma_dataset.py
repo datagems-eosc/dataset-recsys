@@ -1,10 +1,14 @@
-import os
 from fastapi import HTTPException
 import requests
-from dataset_recsys.ingestion.fetch_gems_datasets import DatasetProfile
+from dataset_recsys.ingestion.fetch_gems_datasets import (
+    DatasetProfile,
+    get_dmm_base_url,
+)
 
-DMM_BASE_URL = os.getenv("DMM_BASE_URL", "https://datagems-dev.scayle.es/dmm")  # Default to a placeholder if not set
-MOMA_URL = DMM_BASE_URL + "/api/v1/dataset/search"
+
+def moma_search_url() -> str:
+    """Dataset search endpoint of the DMM instance set by DMM_BASE_URL."""
+    return get_dmm_base_url() + "/api/v1/dataset/search"
 
 class MomaDataset:
     def __init__(self, user_token: str):
@@ -12,9 +16,10 @@ class MomaDataset:
         self.user_token = user_token
 
     def _moma_get(
-        self, endpoint: str = MOMA_URL, params: dict | None = None
+        self, endpoint: str | None = None, params: dict | None = None
     ) -> dict:
         """Generalized GET request to MOMA with user token attached."""
+        endpoint = endpoint or moma_search_url()
         try:
             resp = requests.get(
                 endpoint,
@@ -55,12 +60,12 @@ class MomaDataset:
             ]
 
         data = self._moma_get(
-            MOMA_URL, params={"nodeIds": [id], "properties": properties}
+            params={"nodeIds": [id], "properties": properties}
         )
         return data["datasets"][0]["nodes"][0]["properties"]
 
     def get_all_external_ids(self):
-        data = self._moma_get(MOMA_URL, params={"properties": ["name"]})
+        data = self._moma_get(params={"properties": ["name"]})
         return [x["nodes"][0]["id"] for x in data["datasets"]]
 
     def to_dataset_profile(self) -> DatasetProfile:

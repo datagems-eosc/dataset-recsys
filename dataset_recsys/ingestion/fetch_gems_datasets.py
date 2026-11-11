@@ -17,15 +17,31 @@ import requests
 import os
 from dotenv import load_dotenv
 
-DMM_BASE_URL = os.getenv("DMM_BASE_URL", "https://datagems-dev.scayle.es/dmm")  # Default to a placeholder if not set
-BASE_URL = DMM_BASE_URL + "/api/v1"
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = REPO_ROOT / "data" / "gems_datasets_metadata" / "moma"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # For local testing we do load environment variables from a .env file, but in production these should be set in the environment directly (e.g. via Kubernetes secrets or similar).
 load_dotenv()
+
+def get_dmm_base_url() -> str:
+    """Return the base URL of the DMM instance this environment reads.
+
+    DMM_BASE_URL decides which dataset catalog the recommender is built from.
+    There is deliberately no default: with one, an environment that forgot the
+    setting would read another environment's catalog and still finish
+    successfully. A missing setting stops the catalog fetch with an error.
+    """
+    base_url = (os.getenv("DMM_BASE_URL") or "").strip().rstrip("/")
+    if not base_url:
+        raise RuntimeError(
+            "DMM_BASE_URL is not set. Set it to the DMM instance whose dataset "
+            "catalog this environment must read (for example "
+            "https://<host>/dmm). No default is used, so an environment cannot "
+            "read another environment's catalog by mistake."
+        )
+    return base_url
+
 
 def get_access_token() -> str:
     """
@@ -76,7 +92,7 @@ def fetch_search(
     """
     Calls /dataset/search and returns the complete JSON payload.
     """
-    url = f"{BASE_URL}/dataset/search"
+    url = f"{get_dmm_base_url()}/api/v1/dataset/search"
 
     params: List[tuple[str, str]] = [
         ("offset", str(offset)),
@@ -236,10 +252,13 @@ def run_ingestion(token: str) -> tuple[Dict[str, Any], List[DatasetProfile]]:
     return raw_data, profiles
 
 def fetch_catalog() -> List[DatasetProfile]:
+    # Fail on a missing DMM_BASE_URL before requesting a token or any data.
+    get_dmm_base_url()
     _, profiles = run_ingestion(get_access_token())
     return profiles 
 
 if __name__ == "__main__":
+    get_dmm_base_url()
     raw_data, profiles = run_ingestion(get_access_token())
 
     # Write complete un-truncated raw response payload to JSON

@@ -17,7 +17,7 @@ def get_qdrant_client() -> QdrantStorageClient:
 @router.get(
     "/health",
     summary="Health check",
-    description="Check if the API, Redis, and vector database are responsive.",
+    description="Check if the API and its Qdrant database are responsive.",
     tags=["Service Health"],
 )
 async def health_check():

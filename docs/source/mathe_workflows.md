@@ -59,6 +59,34 @@ The separate `/dataset-recsys/mathe/recommend/videos` endpoint builds the same
 hard topic/subtopic pool using only video types `1` and `2`, then scores those
 platform material IDs against `mathe_videos`.
 
+## Sync Endpoints
+
+Two endpoints start the workflow as a background task and return immediately.
+Both accept the `user`, `dg_user` and `dg_system` roles.
+
+```text
+POST /dataset-recsys/mathe/sync
+POST /dataset-recsys/mathe/sync/rebuild
+```
+
+`/sync` runs the incremental pipeline. After discovery and OCR it compares the
+completed catalog with the stored `mathe_documents` and `mathe_videos`
+collections: new materials are embedded and linked to the other materials of
+their content kind, and materials no longer in the catalog are removed
+together with every reference to them. A material that is already stored is
+not embedded again, even if its text changed.
+
+`/sync/rebuild` runs the full pipeline. It embeds every completed material
+again and replaces both collections, so it also picks up changed text.
+
+Both pipelines store the complete neighbor ranking for each material, so an
+index built by incremental syncs matches one built by a full rebuild of the
+same catalog. `GET /dataset-recsys/mathe/status` reports the progress of
+either run.
+
+The recommendation endpoints answer `200` with an empty `recommendations` list
+when there is nothing to recommend; they do not return `404`.
+
 ## Material Inputs
 
 The syncer can prepare text from several material sources:

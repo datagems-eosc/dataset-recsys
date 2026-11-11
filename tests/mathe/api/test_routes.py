@@ -125,3 +125,39 @@ def test_recommendation_ranking_does_not_block_event_loop(monkeypatch):
     response = asyncio.run(run_request())
 
     assert [item.material_id for item in response.recommendations] == ["901"]
+
+
+# "Nothing to recommend" is a valid answer, not an error: both content kinds
+# reply 200 with an empty list instead of 404.
+def test_recommend_endpoints_return_an_empty_list_when_nothing_is_recommended(
+    monkeypatch,
+):
+    async def fake_authorized_entity_ids(token):
+        return {mathe.MATHE_DATASET_ID: "dg_ds-browse"}
+
+    monkeypatch.setattr(
+        mathe.security,
+        "get_authorized_entity_ids",
+        fake_authorized_entity_ids,
+    )
+    monkeypatch.setattr(mathe, "get_mathe_client", lambda: object())
+    monkeypatch.setattr(mathe, "get_qdrant_client", lambda: object())
+    monkeypatch.setattr(mathe, "recommend_from_curricular_pool", lambda **kwargs: [])
+    monkeypatch.setattr(mathe, "recommend_videos_for_question", lambda **kwargs: [])
+
+    for endpoint in (mathe.get_document_recommendations, mathe.get_video_recommendations):
+        response = asyncio.run(
+            endpoint(
+                request=mathe.MatheRecsRequest(
+                    question_id="272",
+                    question="Explain the chain rule.",
+                    n=3,
+                ),
+                claims={"sub": "user-1"},
+                token="token-1",
+            )
+        )
+
+        assert isinstance(response, mathe.MatheRecsResponse)
+        assert response.question_id == "272"
+        assert response.recommendations == []

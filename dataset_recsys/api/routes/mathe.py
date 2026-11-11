@@ -201,6 +201,11 @@ Backward-compatible alias of `/dataset-recsys/mathe/recommend/documents`.
     summary="Get document material recommendations for a math question",
     description="""
 Given a MathE question ID, return a list of recommended document teaching materials.
+
+When there is nothing to recommend, the response is `200` with an empty
+`recommendations` list. This covers an unknown question ID, a question whose
+topic and subtopic have no eligible materials, and a pool in which no material
+has a ranking signal.
     """,
 )
 async def get_document_recommendations(
@@ -223,6 +228,11 @@ async def get_document_recommendations(
     summary="Get video recommendations for a math question",
     description="""
 Given a MathE question ID, return video lessons and reviews from its curricular pool.
+
+When there is nothing to recommend, the response is `200` with an empty
+`recommendations` list. This covers an unknown question ID, a question whose
+topic and subtopic have no eligible videos, and a pool in which no video has a
+ranking signal.
     """,
 )
 async def get_video_recommendations(
@@ -279,7 +289,9 @@ async def rebuild_catalog(
     token: str = Depends(security.oauth2_scheme),
 ):
     """
-    Triggers the sync, OCR, and recommendation refresh process.
+    Triggers a full rebuild: sync, OCR of pending materials, and re-embedding
+    of every completed material, replacing the stored document and video
+    collections. Use /sync for the cheaper incremental update.
     Uses BackgroundTasks so the API returns immediately.
     """
     claims = claims if isinstance(claims, dict) else {}

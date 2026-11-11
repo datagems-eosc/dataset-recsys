@@ -141,6 +141,75 @@ def test_find_similar_by_ids_scores_only_requested_stored_ids(client):
     assert client.find_similar_by_ids("mathe_documents", [1.0, 0.0], [], collection_name=MATHE) == []
 
 
+# A full rebuild is authoritative: entities removed from the catalog must not
+# stay stored and recommendable.
+def test_store_embeddings_with_replace_removes_entities_missing_from_the_new_set(client):
+    _store(
+        client,
+        "mathe_documents",
+        {"221": [1.0, 0.0], "222": [0.6, 0.8], "223": [0.0, 1.0]},
+        collection_name=MATHE,
+    )
+    _store(client, "mathe_videos", {"900": [1.0, 0.0]}, collection_name=MATHE)
+    client.store_recommendations(
+        "mathe_documents",
+        {"221": {"222": 0.6, "223": 0.1}, "223": {"222": 0.8}},
+        collection_name=MATHE,
+    )
+
+    stored = client.store_embeddings(
+        application="mathe_documents",
+        dataset_ids=["221", "222"],
+        embeddings=np.array([[1.0, 0.0], [0.6, 0.8]]),
+        embedding_inputs=["a", "b"],
+        embedding_model="test-model",
+        collection_name=MATHE,
+        replace=True,
+    )
+
+    assert stored == 2
+    assert client.list_entities("mathe_documents", MATHE) == ["221", "222"]
+    assert client.exists("223", collection_name=MATHE) is False
+    assert client.get_recommendations_with_scores("mathe_documents", "223", collection_name=MATHE) == []
+    # The other application in the same collection is untouched.
+    assert client.list_entities("mathe_videos", MATHE) == ["900"]
+
+
+def test_store_embeddings_without_replace_keeps_other_entities(client):
+    _store(client, "ds2ds", {"a": [1.0, 0.0], "b": [0.0, 1.0]})
+
+    _store(client, "ds2ds", {"c": [0.6, 0.8]})
+
+    assert client.list_entities("ds2ds") == ["a", "b", "c"]
+
+
+def test_empty_batch_with_replace_deletes_nothing(client):
+    _store(client, "ds2ds", {"a": [1.0, 0.0]})
+
+    stored = client.store_embeddings(
+        application="ds2ds",
+        dataset_ids=[],
+        embeddings=np.empty((0, 2)),
+        embedding_inputs=[],
+        embedding_model="test-model",
+        replace=True,
+    )
+
+    assert stored == 0
+    assert client.list_entities("ds2ds") == ["a"]
+
+
+def test_delete_entities_not_in_reports_how_many_were_removed(client):
+    _store(client, "ds2ds", {"a": [1.0, 0.0], "b": [0.0, 1.0], "c": [0.6, 0.8]})
+    _store(client, "other", {"z": [1.0, 0.0]})
+
+    assert client.delete_entities_not_in("ds2ds", ["a"]) == 2
+    assert client.delete_entities_not_in("ds2ds", ["a"]) == 0
+    assert client.list_entities("ds2ds") == ["a"]
+    assert client.list_entities("other") == ["z"]
+    assert client.delete_entities_not_in("ds2ds", ["a"], collection_name="missing") == 0
+
+
 # A collection also holds other applications' embeddings and recommendations,
 # so a write with the wrong vector size must be refused, not answered by
 # deleting and recreating the collection.

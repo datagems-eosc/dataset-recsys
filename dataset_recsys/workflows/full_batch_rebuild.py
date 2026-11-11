@@ -285,6 +285,9 @@ def run_full_batch_rebuild(
             enrichment_llm=enrichment_llm,
             prompt_version=prompt_version,
             run_id=run_id,
+            # A full rebuild is authoritative: drop this application's
+            # datasets that are no longer in the catalog.
+            replace=True,
         )
         print(f"[TEST] Stored {len(dataset_ids)} embeddings in PostgreSQL and Qdrant (run_id={run_id})")   
 
@@ -392,6 +395,9 @@ if __name__ == "__main__":
             enrichment_llm=enrichment_llm,
             prompt_version=prompt_version,
             run_id=run_id,
+            # A full rebuild is authoritative: drop this application's
+            # datasets that are no longer in the catalog.
+            replace=True,
         )
         print(f"[TEST] Stored {len(dataset_ids)} embeddings in PostgreSQL and Qdrant (run_id={run_id})")
 

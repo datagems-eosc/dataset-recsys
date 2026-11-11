@@ -163,6 +163,9 @@ def _replace_embedding_and_recommendation_collection(
         embedding_model=DEFAULT_MATHE_EMBEDDING_MODEL,
         collection_name=qdrant_client.COLLECTION_MATHE,
         run_id=run_id,
+        # A full rebuild is authoritative: drop this application's materials
+        # that are no longer in the catalog.
+        replace=True,
     )
     recommendations = rank_similar_entities(entity_ids, collection_embeddings)
     qdrant_records_updated = qdrant_client.store_recommendations(

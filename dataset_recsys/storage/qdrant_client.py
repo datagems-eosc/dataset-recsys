@@ -140,9 +140,20 @@ class QdrantStorageClient:
         table: Optional[str] = None,  # pgvector parity
         collection_name: Optional[str] = None,
         run_id: Optional[str] = None,
+        replace: bool = False,
         **kwargs,
     ) -> int:
-        """Upsert vector embeddings with metadata into Qdrant."""
+        """Upsert vector embeddings with metadata into Qdrant.
+
+        By default this only adds or overwrites the given entities. A full
+        rebuild passes ``replace=True``: after the new embeddings are written,
+        the application's entities that are not in ``dataset_ids`` are deleted,
+        so entities removed from the catalog do not stay recommendable. Other
+        applications in the collection are never touched.
+
+        An empty batch writes and deletes nothing, even with ``replace=True``;
+        call ``delete_application`` to clear an application on purpose.
+        """
         if len(embeddings) == 0:
             return 0
 
@@ -174,7 +185,50 @@ class QdrantStorageClient:
             )
 
         self.client.upsert(collection_name=target_collection, points=points)
+        if replace:
+            self.delete_entities_not_in(application, dataset_ids, target_collection)
         return len(points)
+
+    def delete_entities_not_in(
+        self,
+        application: str,
+        keep_entity_ids: List[str],
+        collection_name: str = COLLECTION_DATASET,
+    ) -> int:
+        """Delete an application's entities whose IDs are not in ``keep_entity_ids``.
+
+        Returns the number of entities removed.
+        """
+        if not self._collection_exists(collection_name):
+            return 0
+
+        conditions: Dict[str, Any] = {
+            "must": [
+                models.FieldCondition(
+                    key="application",
+                    match=models.MatchValue(value=application),
+                )
+            ]
+        }
+        if keep_entity_ids:
+            conditions["must_not"] = [
+                models.HasIdCondition(
+                    has_id=[self._generate_point_id(eid) for eid in keep_entity_ids]
+                )
+            ]
+        stale_filter = models.Filter(**conditions)
+
+        stale_count = self.client.count(
+            collection_name=collection_name,
+            count_filter=stale_filter,
+            exact=True,
+        ).count
+        if stale_count:
+            self.client.delete(
+                collection_name=collection_name,
+                points_selector=stale_filter,
+            )
+        return stale_count
 
     def upsert_single_embedding(
         self, 

@@ -751,3 +751,46 @@ def test_pipeline_fails_before_reconciliation_when_directories_are_missing(
     assert fake_syncer.process_called is False
     assert fake_syncer.is_running is False
     assert fake_syncer.status["sync_status"] == "failed"
+
+
+# A full MathE rebuild is authoritative: a material removed from the catalog
+# must disappear from its collection, while the other content kind is untouched.
+def test_full_rebuild_removes_materials_that_left_the_catalog():
+    from qdrant_client import QdrantClient
+
+    from dataset_recsys.mathe_recommenders.constants import MatheApplication
+    from dataset_recsys.storage.qdrant_client import QdrantStorageClient
+
+    qdrant = QdrantStorageClient(client=QdrantClient(":memory:"))
+    mathe = qdrant.COLLECTION_MATHE
+
+    def publish(application, material_ids, embeddings):
+        materials = [
+            {"sync_entry_id": material_id, "text": f"text {material_id}"}
+            for material_id in material_ids
+        ]
+        return mathe_sync_pipeline._replace_embedding_and_recommendation_collection(
+            application=application,
+            entity_indices={mid: index for index, mid in enumerate(material_ids)},
+            materials=materials,
+            embeddings=np.array(embeddings, dtype=float),
+            qdrant_client=qdrant,
+            run_id="run",
+        )
+
+    publish(MatheApplication.VIDEOS, ["900", "901"], [[1.0, 0.0], [0.0, 1.0]])
+    publish(
+        MatheApplication.DOCUMENTS,
+        ["221", "222", "223"],
+        [[1.0, 0.0], [0.6, 0.8], [0.0, 1.0]],
+    )
+    assert qdrant.list_entities(MatheApplication.DOCUMENTS, mathe) == ["221", "222", "223"]
+
+    summary = publish(MatheApplication.DOCUMENTS, ["221", "222"], [[1.0, 0.0], [0.6, 0.8]])
+
+    assert summary["processed_materials"] == 2
+    assert qdrant.list_entities(MatheApplication.DOCUMENTS, mathe) == ["221", "222"]
+    assert qdrant.get_recommendations(
+        MatheApplication.DOCUMENTS, "221", collection_name=mathe
+    ) == ["222"]
+    assert qdrant.list_entities(MatheApplication.VIDEOS, mathe) == ["900", "901"]

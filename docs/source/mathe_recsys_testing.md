@@ -4,16 +4,15 @@ Testing the deployed or local MathE API endpoint for a single question ID.
 
 ## Local API
 
-Start Redis port-forwarding:
-
-```bash
-kubectl port-forward svc/<REDIS_SERVICE_NAME> -n <NAMESPACE> 6380:6379
-```
+Start the [Qdrant port-forward](#local-qdrant-connection) if you need to connect
+to a Qdrant instance in Kubernetes.
 
 Start the local API from the repository root:
 
 ```bash
-poetry run python -c "import os; from dotenv import load_dotenv; load_dotenv('.env'); os.environ['REDIS_HOST']='localhost'; os.environ['REDIS_PORT']='6380'; os.environ['OIDC_AUDIENCE']='dataset-recsys-api'; import uvicorn; uvicorn.run('dataset_recsys.api.main:app', host='127.0.0.1', port=8001, reload=True)"
+QDRANT_HOST=127.0.0.1 QDRANT_PORT=6333 OIDC_AUDIENCE=dataset-recsys-api \
+  poetry run uvicorn dataset_recsys.api.main:app --env-file .env \
+  --host 127.0.0.1 --port 8001 --reload
 ```
 
 Create a token from the repository root:
@@ -88,6 +87,9 @@ curl -s -X POST "$API_BASE_URL/dataset-recsys/mathe/recommend/documents" \
     "n": 10
   }' | jq
 ```
+
+The deployed Swagger UI is at `/dataset-recsys/docs` on the same base URL.
+Use `GET /dataset-recsys/health` to check the API's Qdrant connection.
 
 The response returns MathE database material IDs:
 

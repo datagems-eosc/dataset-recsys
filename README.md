@@ -43,7 +43,25 @@ df = MathE().get()
 
 ---
 
-## Deploy Changes
+## Dev Deployment
+
+Tag the verified source commit to build an API image through the
+[Docker publish workflow](https://github.com/datagems-eosc/dataset-recsys/actions/workflows/docker-publish.yml).
+Update the image in the
+[dev deployment repository](https://github.com/datagems-eosc/dataset-recsys-deployment-dev)
+and roll it out to the dev API deployment. Keep the dev cluster's existing
+configuration and storage mounts when applying an image update.
+
+Set `DMM_BASE_URL` to the dev catalog before running dataset ingestion. For
+MathE document OCR, select `MATHE_OCR_BACKEND=bedrock` if dev uses its existing
+AWS configuration, or configure `SCAYLE_*` for the SCAYLE backend.
+
+After rollout, check `/dataset-recsys/health` for Qdrant connectivity and
+`/dataset-recsys/docs` for the API reference served by the new image. The
+[MathE testing guide](docs/source/mathe_recsys_testing.md) has recommendation
+requests for both content types.
+
+## Production Deployment
 
 ### 1. Prepare Your Code
 

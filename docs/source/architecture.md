@@ -143,9 +143,10 @@ never return a video, and the reverse.
 
 ## Design Principles
 
-- **Precompute, then serve.** Requests do not call a language model or run OCR.
-  The MathE endpoints embed one short question per request; everything else is
-  read from storage.
+- **Reuse stored embeddings and rankings.** Dataset requests read a precomputed
+  ranking from Qdrant. MathE requests read the eligible material pool from the
+  PostgreSQL mirror, embed the submitted question, and combine Qdrant similarity
+  scores with keyword overlap. Material embeddings are prepared during sync.
 - **Access control at serving time.** Rankings are computed over the whole
   catalog and filtered per user when they are returned, so one index serves
   users with different permissions.

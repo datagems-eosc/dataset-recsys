@@ -184,17 +184,6 @@ async def _get_content_recommendations(
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
-# TODO: Remove this compatibility route after every API client has migrated to
-# /dataset-recsys/mathe/recommend/documents.
-@router.post(
-    "/recommend",
-    response_model=MatheRecsResponse,
-    summary="Get document material recommendations",
-    description="""
-Backward-compatible alias of `/dataset-recsys/mathe/recommend/documents`.
-    """,
-    deprecated=True,
-)
 @router.post(
     "/recommend/documents",
     response_model=MatheRecsResponse,

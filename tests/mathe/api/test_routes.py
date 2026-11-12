@@ -65,16 +65,15 @@ def test_video_recommend_endpoint_uses_video_pool_ranker(monkeypatch):
     ]
 
 
-def test_video_route_is_separate_from_document_routes():
+def test_document_and_video_routes_are_separate_and_legacy_route_is_removed():
     routes_by_path = {route.path: route for route in mathe.router.routes}
 
     video_route = routes_by_path["/dataset-recsys/mathe/recommend/videos"]
     document_route = routes_by_path["/dataset-recsys/mathe/recommend/documents"]
-    legacy_route = routes_by_path["/dataset-recsys/mathe/recommend"]
 
     assert video_route.endpoint is mathe.get_video_recommendations
     assert document_route.endpoint is mathe.get_document_recommendations
-    assert legacy_route.endpoint is mathe.get_document_recommendations
+    assert "/dataset-recsys/mathe/recommend" not in routes_by_path
     assert video_route.endpoint is not document_route.endpoint
 
 

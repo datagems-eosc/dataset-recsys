@@ -21,21 +21,14 @@ An earlier mixed `mathe` collection has been retired; see Stage 2.
 
 ## API Contract
 
-The existing endpoint remains document-only and backward compatible:
-
-```text
-POST /dataset-recsys/mathe/recommend
-```
-
-The target explicit endpoints are:
+The endpoints are:
 
 ```text
 POST /dataset-recsys/mathe/recommend/documents
 POST /dataset-recsys/mathe/recommend/videos
 ```
 
-The existing endpoint is an alias of the document endpoint. A mixed
-document-and-video endpoint is intentionally out of scope.
+Each endpoint returns a single content type.
 
 ## Identity Contract
 
@@ -106,10 +99,8 @@ The document recommender is available at:
 POST /dataset-recsys/mathe/recommend/documents
 ```
 
-The existing `/dataset-recsys/mathe/recommend` route is a deprecated alias of
-the same handler, so existing clients continue receiving the same document-only
-response. Both routes use canonical `platform_materials.id` values and score
-question similarity against the `mathe_documents` embedding namespace.
+The endpoint uses canonical `platform_materials.id` values and scores question
+similarity against the `mathe_documents` embedding namespace.
 
 The request-time curricular pool remains restricted to MathE material type `3`
 and the supported PDF, DOCX, and PPTX formats.
@@ -176,6 +167,4 @@ complete only after both deployed data and API consumers have migrated:
 - remove the retired-namespace cleanup step from the full rebuild after every
   deployed index has been rebuilt once (the mixed `mathe` collection, its
   module and `MatheApplication.LEGACY` are already gone);
-- require non-null `platform_material_id` values in the split-index loader;
-- remove `/dataset-recsys/mathe/recommend` only after every API client uses
-  `/dataset-recsys/mathe/recommend/documents`.
+- require non-null `platform_material_id` values in the split-index loader.

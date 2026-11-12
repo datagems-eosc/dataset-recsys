@@ -102,8 +102,5 @@ The response returns MathE database material IDs:
 }
 ```
 
-`/dataset-recsys/mathe/recommend` remains available as a deprecated alias for
-clients that have not yet moved to the explicit document path.
-
 The document and video endpoints use different embedding namespaces and cannot
 return mixed recommendation lists.

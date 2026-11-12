@@ -76,11 +76,10 @@ embeddings are averaged. Within each content kind, every material is ranked
 against all others by cosine similarity, and the complete ranking is stored
 with the material.
 
-The explicit `/dataset-recsys/mathe/recommend/documents` endpoint builds its
+The `/dataset-recsys/mathe/recommend/documents` endpoint builds its
 request-time candidate pool from document teaching materials in the same
 topic/subtopic as the question and scores their canonical platform IDs against
-the `mathe_documents` embedding namespace. The existing
-`/dataset-recsys/mathe/recommend` route is a backward-compatible alias.
+the `mathe_documents` embedding namespace.
 
 The separate `/dataset-recsys/mathe/recommend/videos` endpoint builds the same
 hard topic/subtopic pool using only video types `1` and `2`, then scores those

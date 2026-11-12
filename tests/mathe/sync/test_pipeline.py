@@ -782,17 +782,6 @@ def test_document_recommend_endpoint_uses_curricular_pool_ranker(monkeypatch):
     assert [rec.material_id for rec in response.recommendations] == ["818", "900"]
 
 
-def test_legacy_and_explicit_document_routes_share_one_handler():
-    routes_by_path = {route.path: route for route in mathe.router.routes}
-
-    legacy_route = routes_by_path["/dataset-recsys/mathe/recommend"]
-    document_route = routes_by_path["/dataset-recsys/mathe/recommend/documents"]
-
-    assert legacy_route.endpoint is mathe.get_document_recommendations
-    assert document_route.endpoint is mathe.get_document_recommendations
-    assert legacy_route.deprecated is True
-    assert document_route.deprecated is not True
-
 # This test verifies that the /status endpoint of the MathE API correctly returns the synchronization metadata,
 # including the status of the sync, timestamps, and counts of materials in different OCR states.
 def test_status_endpoint_returns_sync_metadata_and_failed_material_ids(monkeypatch):

@@ -707,11 +707,6 @@ def test_sync_endpoints_schedule_their_mathe_pipeline(
         "structlog",
         types.SimpleNamespace(get_logger=lambda *args, **kwargs: fake_logger),
     )
-    monkeypatch.setitem(
-        sys.modules,
-        "redis",
-        types.SimpleNamespace(Redis=lambda *args, **kwargs: object()),
-    )
     monkeypatch.setattr(
         mathe_syncer_module.boto3,
         "client",

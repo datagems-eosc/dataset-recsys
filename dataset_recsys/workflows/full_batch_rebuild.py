@@ -289,7 +289,7 @@ def run_full_batch_rebuild(
             # datasets that are no longer in the catalog.
             replace=True,
         )
-        print(f"[TEST] Stored {len(dataset_ids)} embeddings in PostgreSQL and Qdrant (run_id={run_id})")   
+        print(f"[TEST] Stored {len(dataset_ids)} embeddings in Qdrant (run_id={run_id})")   
 
     def compute_recommendations_step(payload, catalog):
         embeddings = payload["embeddings"]
@@ -399,7 +399,7 @@ if __name__ == "__main__":
             # datasets that are no longer in the catalog.
             replace=True,
         )
-        print(f"[TEST] Stored {len(dataset_ids)} embeddings in PostgreSQL and Qdrant (run_id={run_id})")
+        print(f"[TEST] Stored {len(dataset_ids)} embeddings in Qdrant (run_id={run_id})")
 
     def compute_recommendations_step(payload, catalog):
         embeddings = payload["embeddings"]

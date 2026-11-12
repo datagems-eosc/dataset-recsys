@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional, Set, Dict
 
 import httpx
 import structlog
@@ -145,19 +145,39 @@ async def get_current_user_claims(token: str = Depends(oauth2_scheme)) -> dict:
         raise credentials_exception
 
 
+# Realm roles that authorize any action on any dataset. They bypass both the
+# per-endpoint role gate below and the per-dataset context-grant check.
+PRIVILEGED_DATASET_ROLES = {"dg_admin", "dg_system", "dg_dataset-curator"}
+
+
+def has_privileged_dataset_role(claims: dict) -> bool:
+    """True if the caller holds a realm role that bypasses per-dataset grant checks."""
+    user_roles = set(claims.get("realm_access", {}).get("roles", []))
+    return bool(user_roles & PRIVILEGED_DATASET_ROLES)
+
+
 def require_role(required_roles: List[str]):
     """
-    A FastAPI dependency that checks if the user has at least one of the required roles.
+    A FastAPI dependency that checks if the user has at least one of the required
+    roles, or any privileged role (admin / system / curator).
     """
 
     def role_checker(claims: dict = Depends(get_current_user_claims)) -> dict:
-        # this implementation  aims to check not only for user but for dg_user as well for the swagger
         user_roles = set(claims.get("realm_access", {}).get("roles", []))
 
-        # Check for any intersection between the user's roles and the required roles
+        # Accept privileged roles immediately before checking required roles
+        if user_roles & PRIVILEGED_DATASET_ROLES:
+            logger.info(
+                "Authorization granted via privileged role.",
+                UserId=claims.get("sub"),
+                ClientId=claims.get("clientid"),
+            )
+            return claims
+
         if not user_roles.intersection(required_roles):
+            accepted_roles = sorted(set(required_roles) | PRIVILEGED_DATASET_ROLES)
             log_context = {
-                "required_roles": required_roles,
+                "required_roles": accepted_roles,
                 "UserId": claims.get("sub"),
                 "user_roles": list(user_roles),
             }
@@ -171,26 +191,38 @@ def require_role(required_roles: List[str]):
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"User does not have any of the required roles: {', '.join(required_roles)}.",
+                detail=f"User does not have any of the required roles: {', '.join(accepted_roles)}.",
             )
 
-        # If the check passes, return the claims for use in the endpoint
         return claims
 
     return role_checker
 
-async def get_authorized_entity_ids(token: str) -> dict[str, str]:
+
+async def get_authorized_entity_ids(
+    claims: dict, token: str, action: str = "dg_ds-browse"
+) -> Optional[Dict[str, str]]:
     """
     Calls the DataGEMS Gateway to get the entity IDs a user can access.
-    Uses the incoming user token directly (no OBO exchange needed,
-    as the Gateway handles token exchange for downstream services).
+    Keeps the original return type: dict[str, str] (mapping targetId -> role).
+    
+    Returns None if the caller holds a privileged realm role, signalling
+    that downstream filtering can be entirely bypassed.
     """
+    if has_privileged_dataset_role(claims):
+        logger.info(
+            "Entity listing authorized via privileged role; skipping context-grant filter.",
+            action=action,
+            UserId=claims.get("sub"),
+        )
+        return None
+
     log = logger.bind()
 
     try:
         api_url = f"{settings.GATEWAY_API_URL}/api/principal/context-grants/query"
         headers = {"Authorization": f"Bearer {token}"}
-        payload = {"roles": ["dg_ds-browse"]}
+        payload = {"roles": [action]}
 
         log = log.bind(gateway_url=api_url, gateway_payload=payload)
 
@@ -199,10 +231,11 @@ async def get_authorized_entity_ids(token: str) -> dict[str, str]:
             response.raise_for_status()
 
             context_grants = response.json()
+            # Retain the original dictionary return mapping targetId -> role
             entity_ids = {
                 grant["targetId"]: grant["role"]
                 for grant in context_grants
-                if grant.get("targetType") == 0  # 0 indicates a entity
+                if grant.get("targetType") == 0  # 0 indicates an entity
                 and "targetId" in grant
                 and "role" in grant
             }

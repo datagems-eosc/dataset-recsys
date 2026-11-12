@@ -167,36 +167,34 @@ async def get_recommendations(
         
         authorized_entities = await security.get_authorized_entity_ids(claims, token)
         
-        log.warning(
-            "Fetched authorized entity IDs for user",
-            authorized_count=len(authorized_entities),
-            authorized_ids=list(authorized_entities.keys())  # Show a sample of authorized IDs for debugging
-        )
+        # If authorized_entities is None, the user holds a privileged role and bypasses per-dataset checks
+        if authorized_entities is None:
+            log.info(f"User {user_subject} authorized via privileged role; skipping entity-grant check for {lookup_id}")
+        else:
+            if lookup_id not in authorized_entities:
+                log.warning(f"User {user_subject} not authorized for source entity {lookup_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Insufficient permissions for the requested entity_id.",
+                )
 
-        if lookup_id not in authorized_entities.keys():
-            log.warning(f"User {user_subject} not authorized for source entity {lookup_id}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient permissions for the requested entity_id.",
-            )
+            user_role = authorized_entities[lookup_id]
+            if user_role != "dg_ds-browse":
+                log.warning(f"User {user_subject} has role '{user_role}' for entity {lookup_id}, which is not sufficient for recommendations.")
+                write_request_log_to_sqlite(
+                    user_id=user_subject,
+                    action="get_recommendations",
+                    entity_id=lookup_id,
+                    requested_n=request.n,
+                    status_code=403,
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"User role '{user_role}' is not sufficient for recommendations on entity_id '{lookup_id}'.",
+                )
 
-        user_role = authorized_entities[lookup_id]
-        if lookup_id in authorized_entities.keys() and user_role != "dg_ds-browse":
-            log.warning(f"User {user_subject} has role '{user_role}' for entity {lookup_id}, which is not sufficient for recommendations.")
-            write_request_log_to_sqlite(
-                user_id=user_subject,
-                action="get_recommendations",
-                entity_id=lookup_id,
-                requested_n=request.n,
-                status_code=403,
-                duration_ms=(time.time() - start_time) * 1000,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"User role '{user_role}' is not sufficient for recommendations on entity_id '{lookup_id}'.",
-            )
-
-        log.info(f"User {user_subject} authorized for {lookup_id} with role: {user_role}")
+            log.info(f"User {user_subject} authorized for {lookup_id} with role: {user_role}")
 
         if entity_status == "NO_RECOMMENDATIONS":
             log.info("Entity exists, but has no precomputed recommendations", entity_id=lookup_id)
@@ -220,8 +218,11 @@ async def get_recommendations(
             limit=None,
         )
 
-        # Filter against authorized sets first
-        authorized_recs = [item for item in raw_recs if item in authorized_entities.keys()]
+        # Filter against authorized sets if not privileged; keep all if authorized_entities is None
+        if authorized_entities is None:
+            authorized_recs = raw_recs
+        else:
+            authorized_recs = [item for item in raw_recs if item in authorized_entities]
 
         dropped_count = len(raw_recs) - len(authorized_recs)
         if dropped_count > 0:
@@ -231,8 +232,7 @@ async def get_recommendations(
                 authorized_count=len(authorized_recs)
             )
 
-
-        # Then slice to the requested 'n' and convert to Pydantic models
+        # Slice to the requested 'n' and convert to Pydantic models
         filtered_recs = [
             Recommendation(entity_id=item)
             for item in authorized_recs[:request.n]
@@ -249,7 +249,7 @@ async def get_recommendations(
             f"Returning {len(filtered_recs)} recs for {lookup_id} in {query_time:.3f}s"
         )
         
-        # Write the request log to SQLite
+        # Write the request log to SQLite with fixed duration calculation
         write_request_log_to_sqlite(
             user_id=user_subject,
             action="get_recommendations",

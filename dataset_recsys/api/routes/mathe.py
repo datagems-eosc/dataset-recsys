@@ -130,16 +130,25 @@ async def _get_content_recommendations(
             )
 
         authorized_entities = await security.get_authorized_entity_ids(claims, token)
-        if MATHE_DATASET_ID not in authorized_entities:
-            log.warning(
-                "User %s not authorized for MathE dataset %s",
+        
+        # Handle privileged role bypass (None) vs regular dictionary permission checks
+        if authorized_entities is None:
+            log.info(
+                "User %s authorized via privileged role; skipping entity-grant check for MathE dataset %s",
                 user_subject,
                 MATHE_DATASET_ID,
             )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient permissions to access MathE recommendations.",
-            )
+        else:
+            if MATHE_DATASET_ID not in authorized_entities:
+                log.warning(
+                    "User %s not authorized for MathE dataset %s",
+                    user_subject,
+                    MATHE_DATASET_ID,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Insufficient permissions to access MathE recommendations.",
+                )
 
         def run_recommender() -> list[str]:
             qdrant = get_qdrant_client()

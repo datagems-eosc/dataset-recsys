@@ -8,10 +8,10 @@ Put code here if it **handles where and how data is stored or retrieved**.
 
 Examples:
 
-* Clients that read/write recommendations from Redis
-* Clients that store/query embeddings in PostgreSQL + pgvector
+* The Qdrant client that stores embeddings and recommendation rankings
+* The read-only client for the MathE mirror database in PostgreSQL
 * The local MathE synchronization catalog stored in SQLite
-* Utilities that manage keys, indexes, schemas, or lookup operations
+* Utilities that manage stored recommendations
 
 ## MathE synchronization catalog
 
@@ -24,210 +24,111 @@ Filesystem discovery, document conversion, video transcription, and workflow
 orchestration remain outside the storage layer.
 
 
-## Redis Storage (Recommendations)
+## Qdrant storage (embeddings and recommendations)
 
-Recommendations are stored in Redis using an **application → entity → recommended entities** structure.
+`qdrant_client.py` contains `QdrantStorageClient`, the only component that
+talks to Qdrant. It stores one point per entity. A point holds the entity's
+embedding and, in its payload, the entity's stored ranking of related entities.
 
-### Key patterns
+### Collections and applications
 
-1. **Recommendation set for an entity**
+| Collection | Application | Entity | Vector size |
+|---|---|---|---|
+| `dataset_embeddings` | `ds2ds` | DataGEMS dataset | 768 (`allenai/specter2_base`) |
+| `mathe_embeddings` | `mathe_documents` | MathE document | 1024 (`BAAI/bge-m3`) |
+| `mathe_embeddings` | `mathe_videos` | MathE video | 1024 (`BAAI/bge-m3`) |
 
-Redis key:
+An application is a namespace inside a collection. Every search and every
+listing filters on it, so documents and videos share a collection without ever
+appearing in each other's results.
 
-```
-recs:{application}:{entity_id}
-```
+### Point structure
 
-Redis value:
+The point ID is a UUID derived deterministically from the entity ID, so the
+same entity always maps to the same point.
 
-A **Redis Set** containing the IDs of recommended entities.
-
-Example:
-
-```
-recs:mathe:6.pdf
-```
-
-Value:
-
-```
-{7.pdf, 9.pdf, 221.pdf, 52.pdf, ...}
-```
-
-Meaning:
-
-```
-For application "mathe", entity "6.pdf" has recommendations [7.pdf, 9.pdf, 221.pdf, ...]
-```
-
----
-
-2. **Application index of stored entities**
-
-Redis key:
-
-```
-recs:index:{application}
-```
-
-Redis value:
-
-A **Redis Set** containing all entity IDs for which recommendations exist in that application.
-
-Example:
-
-```
-recs:index:mathe
+```json
+{
+  "id": "<uuid5 of the entity ID>",
+  "vector": [0.012, -0.044, "..."],
+  "payload": {
+    "application": "mathe_documents",
+    "dataset_id": "221",
+    "embedding_input": "<the text that was embedded>",
+    "embedding_model": "BAAI/bge-m3",
+    "enrichment_llm": "none",
+    "prompt_version": "none",
+    "run_id": "2026-11-11T20:00:00Z",
+    "recommendations": {
+      "mathe_documents": [
+        {"id": "222", "score": 0.83},
+        {"id": "305", "score": 0.79}
+      ]
+    }
+  }
+}
 ```
 
-Value:
+`dataset_id` holds the entity ID for every application: a DataGEMS dataset ID,
+or a MathE platform material ID. `enrichment_llm` and `prompt_version` are set
+for datasets, whose embedded text includes a model-written summary.
 
-```
-{6.pdf, 65.pdf, 221.pdf, ...}
-```
+### Behaviour worth knowing
 
-Meaning:
+- **Reads on an empty index do not fail.** Before the first rebuild there are
+  no collections. Reads then report "nothing stored": status `NOT_FOUND`, empty
+  lists, `False` for existence.
+- **`store_embeddings(..., replace=True)` makes a rebuild authoritative.** After
+  writing the new embeddings it deletes the application's entities that are not
+  in the new set. Without `replace`, it only adds or overwrites. An empty batch
+  never deletes anything; use `delete_application` to clear on purpose.
+- **Storing an embedding resets that entity's recommendations.** Writing a
+  point replaces its payload, so rankings are stored after embeddings.
+- **A vector size mismatch is refused.** If embeddings of a different size are
+  sent to an existing collection, the client raises an error and writes
+  nothing. Changing the embedding model means dropping the collection
+  deliberately and running a full rebuild.
+- **`find_similar(top_k=None)` returns the complete ranking** of an application,
+  computed exactly. With an integer `top_k` the search is approximate.
+- **`get_recommendations` raises `KeyError` for an unknown entity;
+  `get_recommendations_with_scores` returns an empty list.** The first is used
+  where an unknown entity is an error, the second where a material without
+  stored neighbours simply has none.
 
-```
-All entities in the "mathe" application that have stored recommendations
-```
+### Main operations
 
-This index is used to:
+| Operation | Method |
+|---|---|
+| Store embeddings in bulk | `store_embeddings` |
+| Store one embedding | `upsert_single_embedding` |
+| Store rankings in bulk | `store_recommendations` |
+| Replace one entity's ranking | `update_single_entity_recs` |
+| Insert an entity into another entity's ranking | `update_neighbor_recs` |
+| Remove an entity and every reference to it | `remove_dataset` |
+| Rank entities against a query vector | `find_similar` |
+| Score a given set of entities against a query vector | `find_similar_by_ids` |
+| Read an entity's ranking | `get_recommendations`, `get_recommendations_with_scores` |
+| Check what is stored | `exists`, `check_existence_batch`, `get_entity_status`, `list_entities`, `count_entities` |
 
-- list all entities for an application
-- delete all recommendations for an application
-- perform reverse lookups
+### Command-line helper
 
----
+`manage_recommendations.py` lists, reads, ingests and deletes stored
+recommendations. Run it as a module from the repository root:
 
-### Example full structure
-
-Example Redis keys for the **MathE recommender**:
-
-```
-recs:mathe:ds2ds
-recs:mathe:6.pdf
-recs:mathe:65.pdf
-recs:mathe:221.pdf
-```
-
-Example Redis keys for the **Datagems recommender**:
-
-```
-recs:index:ds2ds
-recs:ds2ds:meteo_era5land
-recs:ds2ds:wikipedia
-```
-
----
-
-### Conceptual model
-
-The system implements an **entity-to-entity recommender**:
-
-```
-application
-    └── entity_id
-            └── recommended_entity_ids
-```
-
-Examples:
-
-MathE materials:
-
-```
-6.pdf → {7.pdf, 9.pdf, 221.pdf}
+```bash
+python -m dataset_recsys.storage.manage_recommendations list-entities ds2ds
+python -m dataset_recsys.storage.manage_recommendations get ds2ds <dataset_id> --limit 5
 ```
 
-Datagems:
+It connects to the Qdrant instance given by `QDRANT_HOST` and `QDRANT_PORT`.
 
-```
-meteo_era5land → {weather_stations_climpact, wikipedia}
-```
+### Tests
 
-This design allows the same storage layer to support multiple applications (e.g., MathE materials, datasets, or other entity collections).
+`tests/clients/test_qdrant_client.py` runs the client against Qdrant's
+in-memory mode, so it needs no server.
 
----
+## MathE mirror database (PostgreSQL)
 
-# PostgreSQL + pgvector Storage (Embeddings)
-
-Embeddings are stored in PostgreSQL using the **pgvector extension**, enriched with metadata for reproducibility and traceability.
-
----
-
-## Table schema
-
-Table:
-
-```
-{schema}.dataset_embeddings
-```
-
-Columns:
-
-| Column          | Type         | Description                               |
-| --------------- | ------------ | ----------------------------------------- |
-| application     | TEXT         | Logical grouping (e.g. ds2ds, mathe)      |
-| dataset_id      | TEXT (PK)    | Unique identifier of the dataset          |
-| embedding       | VECTOR(1536) | Embedding vector                          |
-| embedding_input | TEXT         | Input text used to generate the embedding |
-| embedding_model | TEXT         | Model used to generate embeddings         |
-| enrichment_llm  | TEXT         | LLM used for enrichment (optional)        |
-| prompt_version  | TEXT         | Prompt version used (optional)            |
-| run_id          | TEXT         | Workflow run identifier                   |
-| created_at      | TIMESTAMP    | Last update timestamp                     |
-
-Primary key:
-
-```
-PRIMARY KEY (dataset_id)
-```
-
----
-
-## Conceptual model
-
-```
-application
-    └── dataset_id
-            ├── embedding (vector)
-            ├── embedding_input (text)
-            ├── embedding_model
-            ├── enrichment_llm
-            ├── prompt_version
-            └── run_id
-```
-
----
-
-## Storage behavior
-
-* Embeddings are written **in bulk**
-* Existing embeddings for an application are **deleted before insert**
-* Upserts are handled via:
-
-```
-ON CONFLICT (dataset_id)
-```
-
-* Metadata is always updated together with the embedding
-
----
-
-## Similarity search
-
-Similarity queries use pgvector distance:
-
-```
-embedding <-> query_embedding
-```
-
-Example:
-
-```
-SELECT dataset_id, embedding <-> %s AS distance
-FROM dataset_embeddings
-WHERE application = %s
-ORDER BY embedding <-> %s
-LIMIT %s;
-```
+`mathe_mirror_client.py` reads question and material metadata (topic, subtopic,
+keywords, material type) from the MathE mirror database. The recommender only
+reads from it.

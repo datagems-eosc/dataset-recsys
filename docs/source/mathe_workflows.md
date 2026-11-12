@@ -1,31 +1,31 @@
 # MathE Workflows
 
-This page describes the workflows that are specific to the MathE use case.
+This page describes how MathE teaching materials are turned into a searchable
+index: discovery, text extraction, embedding, and publication to Qdrant. How a
+question is then matched to materials is described in
+[MathE Material Recommender](mathe_material_recommender.md).
 
 ## Sync, Extraction, and Refresh
-
-The MathE sync workflow prepares educational materials before rebuilding the
-MathE embedding and Redis recommendation stores.
 
 ```mermaid
 %%{init: {'flowchart': {'nodeSpacing': 22, 'rankSpacing': 22, 'curve': 'linear'}, 'themeVariables': {'fontSize': '12px', 'lineColor': '#9E9E9E', 'edgeLabelBackground':'#ffffff', 'primaryBorderColor':'#BDBDBD', 'clusterBorder':'#E0E0E0', 'lineWidth':'0\.9px'}}}%%
 flowchart TB
     A[MathE Sync API Trigger] --> B[Discover Material Inputs]
     B --> C[Native PDFs]
-    B --> D[DOCX / PPTX]
+    B --> D["DOCX / PPTX"]
     B --> E[YouTube Videos]
     D --> F[Convert to PDF with LibreOffice]
-    C --> G[Claude OCR]
+    C --> G[Document OCR with a Vision Language Model]
     F --> G
     E --> H[Download Audio with yt-dlp]
     H --> I[Transcribe with faster-whisper]
     G --> J[Write Extracted Text to syncer.db]
     I --> J
     I --> K[Cache Transcript TXT]
-    J --> L[Generate Material Text Embeddings]
-    L --> M[Store MathE Embeddings]
-    L --> N[Compute Material-to-Material Recos]
-    N --> O[Store Recos in Redis]
+    J --> L["Embed Material Text with BAAI/bge-m3"]
+    L --> M[Store Document and Video Embeddings in Qdrant]
+    L --> N[Rank Materials of the Same Kind Against Each Other]
+    N --> O["Store Each Material's Ranking in Qdrant"]
 
     classDef trigger fill:#E8F5E9,stroke:#43A047,stroke-width:2px,color:#1B5E20;
     classDef prep fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px,color:#0D47A1;
@@ -45,9 +45,36 @@ dataset_recsys/utils/mathe_syncer.py
 dataset_recsys/workflows/mathe_sync_pipeline.py
 ```
 
-The syncer can now process YouTube video materials by downloading audio and
-transcribing it into text. Transcript entities are normalized as `<video_id>.txt`
-when embeddings and Redis recommendations are rebuilt.
+A sync first checks that the material folders exist and stops with an error if
+one is missing, so an unmounted folder can never be mistaken for removed
+materials.
+
+### Text Extraction Methods
+
+| Material | Method |
+|---|---|
+| PDF | Each page is rendered as an image and transcribed by a vision language model, with equations written in LaTeX and the document's own language kept. The PDF's embedded text layer is not used, because it garbles mathematical notation |
+| DOCX, PPTX | Converted to PDF with LibreOffice, then handled like a PDF |
+| YouTube video | The audio track is downloaded with `yt-dlp` and transcribed with `faster-whisper` (model `base`) |
+
+The OCR backend is selected with `MATHE_OCR_BACKEND`:
+
+| Value | Model | How the document is sent |
+|---|---|---|
+| `scayle` (default) | `qwen3.6` on the SCAYLE model service | One request per rendered page |
+| `bedrock` | Claude Sonnet 4.5 on Amazon Bedrock | The whole PDF in one request |
+
+Both use a sampling temperature of 0. The model that produced a document's
+text is recorded with it (see [Output State](#output-state)), so a corpus
+processed partly with one backend and partly with the other can be told apart.
+
+### Embedding and Ranking
+
+Each completed text is embedded once with `BAAI/bge-m3`. Texts longer than the
+model's 8192-token window are split into paragraphs, and the paragraph
+embeddings are averaged. Within each content kind, every material is ranked
+against all others by cosine similarity, and the complete ranking is stored
+with the material.
 
 The explicit `/dataset-recsys/mathe/recommend/documents` endpoint builds its
 request-time candidate pool from document teaching materials in the same
@@ -93,11 +120,11 @@ The syncer can prepare text from several material sources:
 
 - native PDFs under `<MATHE_PATH>/pdfs`
 - DOCX files under `<MATHE_PATH>/docxs`
-- PPTX files under `<MATHE_PATH>/ppts`
+- PPTX files under `<MATHE_PATH>/pptxs`
 - YouTube videos discovered from the MathE platform registry
 
 DOCX and PPTX materials are converted to temporary PDFs with LibreOffice before
-Claude OCR is applied.
+OCR is applied.
 
 For YouTube materials, the syncer accepts either full YouTube URLs or raw
 11-character YouTube IDs. It uses `yt-dlp` to download audio, `faster-whisper`
@@ -124,13 +151,6 @@ After fetching links, the syncer still validates each value with YouTube
 detection logic. Only values that look like a YouTube URL or an 11-character
 YouTube ID are queued for transcription.
 
-During the embedding refresh, raw YouTube IDs are normalized to Redis/vector
-entity IDs of the form:
-
-```text
-<video_id>.txt
-```
-
 ## Output State
 
 The syncer writes its local processing catalog to:
@@ -151,10 +171,17 @@ type
 source_value
 internal_pdf_path
 claude_ocr_text
+ocr_model
 status
 platform_material_id
 content_subtype
 ```
+
+`claude_ocr_text` holds the extracted text whichever model produced it; the
+column keeps its original name to avoid a schema change. `ocr_model` names the
+model that produced a document's text. It is empty for videos, for failed OCR,
+and for documents processed before the column was introduced, whose model was
+not recorded.
 
 The exact fields depend on the material type:
 
@@ -176,7 +203,7 @@ processing path and is not stored as the material type. The transitional
 migration converts deployed `type: audio` rows to `type: video` in place.
 
 `id` remains the processing key: a document filename or a YouTube ID.
-API-facing identity and the split vector/Redis collections use
+API-facing identity and the document and video collections use
 `platform_material_id`.
 
 Existing SQLite catalogs are migrated in place. Missing columns are added with
@@ -229,7 +256,7 @@ the syncer expects or creates folders/files such as:
 ```text
 pdfs/
 docxs/
-ppts/
+pptxs/
 transcripts/
 syncer.db
 sync_status.json
@@ -247,12 +274,27 @@ DB_DS_PASSWORD
 DATAGEMS_POSTGRES_SCHEMA
 ```
 
-The AWS settings are used by the Claude/Bedrock OCR path for document text
-extraction:
+The document OCR backend and its credentials:
 
 ```text
-AWS_ACCESS_KEY
+MATHE_OCR_BACKEND      scayle (default) or bedrock
+
+SCAYLE_BASE_URL        used when MATHE_OCR_BACKEND=scayle
+SCAYLE_USERNAME
+SCAYLE_PASSWORD
+SCAYLE_VERIFY_SSL
+
+AWS_ACCESS_KEY         used when MATHE_OCR_BACKEND=bedrock
 AWS_SECRET_KEY
+```
+
+The embeddings and rankings are written to Qdrant:
+
+```text
+QDRANT_HOST
+QDRANT_PORT
+QDRANT_API_KEY
+MATHE_EMBEDDING_MODEL  default BAAI/bge-m3
 ```
 
 Video transcription depends on:

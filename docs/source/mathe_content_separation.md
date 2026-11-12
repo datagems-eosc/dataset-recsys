@@ -17,7 +17,7 @@ Collection names are defined centrally by the string-compatible
 `dataset_recsys/mathe_recommenders/constants.py`. The same file maps MathE's
 numeric video types to the dynamic subtype values received during discovery.
 
-The existing `mathe` collection remains active during the staged migration.
+An earlier mixed `mathe` collection has been retired; see Stage 2.
 
 ## API Contract
 
@@ -34,7 +34,7 @@ POST /dataset-recsys/mathe/recommend/documents
 POST /dataset-recsys/mathe/recommend/videos
 ```
 
-The current endpoint will become an alias of the document endpoint. A mixed
+The existing endpoint is an alias of the document endpoint. A mixed
 document-and-video endpoint is intentionally out of scope.
 
 ## Identity Contract
@@ -68,8 +68,8 @@ YouTube ID. The compatibility functions live in `mathe_sync_migrations.py` and
 can be deleted, together with their single syncer call, after every deployed
 catalog has been upgraded.
 
-The existing `id` column remains the processing and legacy-index compatibility
-key, while `type` consistently contains `document` or `video`.
+The existing `id` column remains the processing key, while `type` consistently
+contains `document` or `video`.
 `platform_material_id` is the canonical identity for the split indexes and
 later document and video endpoints.
 

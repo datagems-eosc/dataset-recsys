@@ -10,27 +10,58 @@ The service receives:
 
 It returns MathE material IDs, ranked from most to least relevant.
 
+## Method in Brief
+
+A student or teacher working on a question should be pointed to materials that
+teach what that question is about. The recommender does this in three steps:
+
+1. **Stay inside the curriculum.** Only materials that MathE assigned to the
+   same topic and subtopic as the question are considered.
+2. **Combine two independent signals.** Within that pool, each material is
+   scored by how many of the question's keywords it shares, and by how close
+   its actual content is to the question text.
+3. **Return only materials with a reason to be there.** A material with neither
+   signal is left out, so a list is never padded with arbitrary entries.
+
+```text
+final_score = 0.6 * keyword_jaccard + 0.4 * question_to_material_similarity
+```
+
+## Why This Design
+
+- **Curricular correctness comes first.** Topic and subtopic are assigned by
+  the MathE team. Using them as a hard filter guarantees that a recommendation
+  is never off-topic, which a similarity score alone cannot promise.
+- **Two signals cover each other's gaps.** Keywords are precise but sparse:
+  two materials with the same keywords cannot be told apart, and some materials
+  have none. Content similarity reads the material itself (OCR text or
+  transcript), so it separates materials with identical keywords and still
+  works when keywords are missing. Conversely, a material whose text could not
+  be extracted is still ranked on its keywords.
+- **Every score can be explained.** A result's position follows from two
+  numbers with a plain meaning, and both can be reported per material.
+- **No arbitrary results.** A material without any signal is not returned.
+  A shorter list is preferred to one that contains items in a meaningless
+  order.
+- **Low request cost.** One short question is embedded per request. Materials
+  were embedded ahead of time, and only the materials in the question's pool
+  are scored.
+
 ## Current Scope
 
 This page describes the document recommendation endpoint. Supported document
 formats are PDF, DOCX, and PPTX. Video lessons and reviews are served separately
 by `/dataset-recsys/mathe/recommend/videos` and are never blended into document
-recommendations.
+recommendations. The video endpoint applies the same method to video
+transcripts; see
+[MathE Document and Video Separation](mathe_content_separation.md).
 
-The MathE syncer has been extended to discover and process additional material
-formats before the embedding/recommendation refresh:
+How materials are discovered, converted to text and embedded is described in
+[MathE Workflows](mathe_workflows.md). Document text is indexed under
+`mathe_documents`; video transcripts are indexed under `mathe_videos`.
 
-- native PDFs from the mounted MathE material folder
-- DOCX files converted to PDF with LibreOffice
-- PPTX files converted to PDF with LibreOffice
-- YouTube video materials discovered from the MathE platform registry and
-  transcribed through an audio pipeline
-
-Processed video transcripts are indexed under `mathe_videos`; document OCR text
-is indexed under `mathe_documents`.
-
-The current production system also enforces a hard rule that a recommended
-material must have exactly the same topic and subtopic as the question.
+The production system enforces a hard rule that a recommended material must
+have exactly the same topic and subtopic as the question.
 
 ## Signals Used
 
@@ -214,7 +245,7 @@ QdrantStorageClient.find_similar_by_ids(...)
 from:
 
 ```text
-dataset_recsys/storage/embedding_client.py
+dataset_recsys/storage/qdrant_client.py
 ```
 
 This means the vector query asks:
@@ -309,6 +340,30 @@ The API response returns that same MathE material ID:
 30
 ```
 
+## How the Recommender Is Evaluated
+
+Offline evaluation is described in `evaluation/mathe/README.md`. It uses one
+benchmark question per topic/subtopic pool, chosen from questions that students
+actually attempted, and three kinds of relevance labels that must not be
+confused:
+
+| Label | What it is | What it can show |
+|---|---|---|
+| Expert reference documents | Material IDs that the MathE team marked as relevant for a benchmark question | Agreement with human judgement. This is the only ground truth |
+| Keyword-overlap proxy | Materials whose MathE keywords overlap with the question's | Internal consistency only. The ranker itself uses keyword overlap, so this cannot count as independent evidence of relevance |
+| Click proxy | The most-clicked material of the pool, from a global click counter | Whether a popular material is surfaced. Clicks are not tied to a question |
+
+The reported measures are precision at 5 and at `k`, hit rate at `k`, and a
+weighted nDCG at `k`. Questions without expert labels are excluded from the
+expert-reference averages and counted separately.
+
+Because zero-score materials are left out, a result list can be shorter than
+`k`. Precision is computed over the returned list, so results obtained before
+and after that rule was introduced are not directly comparable.
+
+The video recommender has not been evaluated yet. Its keyword weight is the
+document default.
+
 ## What Changed From The Previous Hybrid Version
 
 The previous hybrid recommender used three sources:
@@ -346,7 +401,7 @@ content namespace.
 | Keyword score | `dataset_recsys/mathe_recommenders/seed_scoring.py` | `compute_keyword_jaccard` | Computes question/material keyword overlap. |
 | Question embedding | `dataset_recsys/mathe_recommenders/question_embedding.py` | `encode_question` | Embeds the MathE question text. |
 | Question similarity | `dataset_recsys/mathe_recommenders/question_embedding.py` | `score_question_similarity_for_material_ids` | Scores eligible materials against the question embedding. |
-| Vector scoring by IDs | `dataset_recsys/storage/embedding_client.py` | `find_similar_by_ids` | Scores only the material IDs already in the eligible pool. |
+| Vector scoring by IDs | `dataset_recsys/storage/qdrant_client.py` | `find_similar_by_ids` | Scores only the material IDs already in the eligible pool. |
 | Comparison CLI | `dataset_recsys/utils/mathe_recsys_compare_cli.py` | `main` | Runs selected recommender approaches for validation and CSV/JSON export. |
 
 ## Configuration

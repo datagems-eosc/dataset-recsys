@@ -165,7 +165,7 @@ async def get_recommendations(
                 detail=f"The dataset ID '{lookup_id}' was not found in our system.",
             )
         
-        authorized_entities = await security.get_authorized_entity_ids(token)
+        authorized_entities = await security.get_authorized_entity_ids(claims, token)
         
         log.warning(
             "Fetched authorized entity IDs for user",

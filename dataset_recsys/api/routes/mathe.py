@@ -129,7 +129,7 @@ async def _get_content_recommendations(
                 detail="Question ID must be an integer.",
             )
 
-        authorized_entities = await security.get_authorized_entity_ids(token)
+        authorized_entities = await security.get_authorized_entity_ids(claims, token)
         if MATHE_DATASET_ID not in authorized_entities:
             log.warning(
                 "User %s not authorized for MathE dataset %s",

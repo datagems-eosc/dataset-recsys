@@ -30,6 +30,9 @@ dataset_recsys/pipelines/temp.py
 outputs/
 s3/*
 
+# MkDocs build output
+/docs/site/
+
 # Local provider submissions / evaluation references
 evaluation/mathe/mathe_provider_reference_submission/
 api_request_logs.db

@@ -48,6 +48,30 @@ curl -s -X POST "http://127.0.0.1:8001/dataset-recsys/mathe/recommend/videos" \
   }' | jq
 ```
 
+## Local Qdrant connection
+
+Replace the placeholders with the Kubernetes context, namespace, and Qdrant
+deployment for your test environment. Run the port-forward in a terminal and
+leave it open while testing.
+
+```bash
+kubectl --context '<CONTEXT>' -n '<NAMESPACE>' port-forward \
+  deployment/'<QDRANT_DEPLOYMENT>' 6333:6333
+```
+
+In another terminal, check that the MathE collection is available.
+
+```bash
+curl -fsS http://127.0.0.1:6333/collections
+```
+
+Look for `mathe_embeddings`. Point the local client at `QDRANT_HOST=localhost`
+and `QDRANT_PORT=6333`, or open the
+[Qdrant dashboard](http://localhost:6333/dashboard#/collections).
+
+Press Ctrl+C in the first terminal to stop the tunnel. If the connection drops
+or Kubernetes replaces the pod, rerun the same command.
+
 ## Deployed API
 
 Use the deployed API base URL for the environment you want to test:

@@ -14,6 +14,7 @@ class QdrantStorageClient:
 
     COLLECTION_DATASET = "dataset_embeddings"
     COLLECTION_MATHE = "mathe_embeddings"
+    MATHE_QUESTION_RANKINGS = "mathe_question_rankings"
     SCROLL_PAGE_SIZE = 1000
 
     def __init__(
@@ -59,6 +60,23 @@ class QdrantStorageClient:
             with_payload=True,
         )
         return points[0] if points else None
+
+    def get_mathe_question_ranking(
+        self, question_id: int, content_type: str
+    ) -> dict[str, Any] | None:
+        """Read the active question ranking without transferring its candidate scores."""
+        collection = self.MATHE_QUESTION_RANKINGS
+        if not 0 <= question_id < 2**64 or not self._collection_exists(collection):
+            return None
+        points = self.client.retrieve(
+            collection_name=collection,
+            ids=[question_id],
+            with_vectors=False,
+            with_payload=[
+                "question_hash", "sync_generation", "scoring_version", content_type
+            ],
+        )
+        return points[0].payload if points else None
 
     def _resolve_collection(self, application: str, explicit_collection: Optional[str] = None) -> str:
         """Route MathE applications to COLLECTION_MATHE by default if unspecified."""

@@ -16,6 +16,10 @@ from dataset_recsys.api.analytical_patterns.models import (
 from dataset_recsys.mathe_recommenders.curricular_pool_ranker import (
     recommend_from_curricular_pool,
 )
+from dataset_recsys.mathe_recommenders.precomputed_rankings import (
+    get_precomputed_ranking,
+    precomputed_rankings_enabled,
+)
 from dataset_recsys.mathe_recommenders.video_pool_ranker import (
     recommend_videos_for_question,
 )
@@ -138,12 +142,27 @@ async def _get_content_recommendations(
             )
 
         def run_recommender() -> list[str]:
+            qdrant = get_qdrant_client()
+            if precomputed_rankings_enabled():
+                try:
+                    ranking = get_precomputed_ranking(
+                        qdrant,
+                        question_id_int,
+                        question,
+                        content_type,
+                        request.n,
+                        syncer.get_sync_status(),
+                    )
+                    if ranking is not None:
+                        return ranking
+                except Exception:
+                    log.warning("Could not read precomputed MathE ranking", exc_info=True)
             return recommender(
                 question_id=question_id_int,
                 question=question,
                 k=request.n,
                 mathe_mirror_client=get_mathe_client(),
-                qdrant_client=get_qdrant_client(),
+                qdrant_client=qdrant,
             )
 
         recommended_material_ids = await run_in_threadpool(run_recommender)
@@ -336,6 +355,7 @@ async def get_status(
         "last_sync_started_at": sync_status.get("last_sync_started_at"),
         "last_sync_heartbeat_at": sync_status.get("last_sync_heartbeat_at"),
         "last_sync_completed_at": sync_status.get("last_sync_completed_at"),
+        "ranking_refresh": sync_status.get("ranking_refresh"),
         "total_materials": total,
         "ocr_completed_materials": completed,
         "ocr_pending_materials": pending,

@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import closing
 from datetime import datetime, timezone
 from typing import Any, TypedDict
 
 from dataset_recsys.mathe_recommenders.constants import MatheApplication
+from dataset_recsys.mathe_recommenders.precomputed_rankings import (
+    precomputed_rankings_enabled,
+    refresh_question_rankings,
+)
+from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from dataset_recsys.retrieval import rank_similar_entities
 from dataset_recsys.utils.mathe_syncer import MathE_Syncer
@@ -212,6 +218,37 @@ def _save_sync_status(syncer: MathE_Syncer, **updates: Any) -> dict[str, Any]:
 
     return current_status
 
+
+def _refresh_precomputed_rankings(
+    syncer: MathE_Syncer, qdrant: QdrantStorageClient, started_at: str
+) -> None:
+    if not precomputed_rankings_enabled():
+        _save_sync_status(syncer, ranking_refresh={"status": "disabled"})
+        return
+    refresh_started = _utc_now()
+    _save_sync_status(syncer, ranking_refresh={"status": "running", "started_at": refresh_started})
+    try:
+        with closing(MatheMirrorClient()) as mirror:
+            count = refresh_question_rankings(
+                mirror,
+                qdrant,
+                syncer.get_sync_status,
+                sync_generation=started_at,
+                heartbeat=lambda: _save_sync_status(syncer, last_sync_heartbeat_at=_utc_now()),
+            )
+        _save_sync_status(syncer, ranking_refresh={
+            "status": "completed", "started_at": refresh_started,
+            "completed_at": _utc_now(), "question_count": count,
+        })
+    except Exception:
+        # Material writes have already succeeded. Requests for this generation
+        # can use live scoring until the ranking snapshot is refreshed.
+        logger.exception("Could not refresh precomputed MathE question rankings")
+        _save_sync_status(syncer, ranking_refresh={
+            "status": "failed", "started_at": refresh_started, "completed_at": _utc_now(),
+        })
+
+
 def run_full_mathe_pipeline(syncer: MathE_Syncer) -> dict:
     """Full catalog rebuild pipeline from scratch (reprocesses and re-embeds everything)."""
     if getattr(syncer, "is_running", False):
@@ -329,6 +366,7 @@ def run_full_mathe_pipeline(syncer: MathE_Syncer) -> dict:
             collection["qdrant_records_updated"]
             for collection in collection_summaries.values()
         )
+        _refresh_precomputed_rankings(syncer, qdrant_client, started_at)
         completed_at = _utc_now()
         _save_sync_status(
             syncer,
@@ -501,6 +539,7 @@ def run_incremental_mathe_pipeline(syncer: MathE_Syncer) -> dict:
 
                 processed_count += 1
 
+        _refresh_precomputed_rankings(syncer, qdrant_client, started_at)
         completed_at = _utc_now()
         _save_sync_status(
             syncer,

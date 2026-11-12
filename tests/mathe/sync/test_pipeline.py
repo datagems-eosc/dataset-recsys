@@ -792,6 +792,7 @@ def test_status_endpoint_returns_sync_metadata_and_failed_material_ids(monkeypat
             "last_sync_started_at": "2026-05-13T10:24:18Z",
             "last_sync_completed_at": "2026-05-13T10:31:42Z",
             "embeddings_created": 461,
+            "ranking_refresh": {"status": "completed", "question_count": 12},
         },
         get=lambda: pd.DataFrame(
             [
@@ -812,6 +813,30 @@ def test_status_endpoint_returns_sync_metadata_and_failed_material_ids(monkeypat
     assert response["ocr_pending_materials"] == 1
     assert response["ocr_failed_material_ids"] == ["70.pdf"]
     assert response["embeddings_created"] == 461
+    assert response["ranking_refresh"] == {"status": "completed", "question_count": 12}
+
+
+@pytest.mark.parametrize("should_fail", [False, True])
+def test_ranking_refresh_reports_outcome_without_failing_sync(tmp_path, monkeypatch, should_fail):
+    fake_syncer = FakeSyncer(tmp_path / "unused.db")
+    fake_syncer.status = {"sync_status": "running", "last_sync_started_at": "generation"}
+    mirror = types.SimpleNamespace(close=lambda: None)
+    monkeypatch.setattr(mathe_sync_pipeline, "precomputed_rankings_enabled", lambda: True)
+    monkeypatch.setattr(mathe_sync_pipeline, "MatheMirrorClient", lambda: mirror)
+
+    def refresh(*args, **kwargs):
+        if should_fail:
+            raise RuntimeError("refresh failed")
+        return 12
+
+    monkeypatch.setattr(mathe_sync_pipeline, "refresh_question_rankings", refresh)
+    mathe_sync_pipeline._refresh_precomputed_rankings(fake_syncer, object(), "generation")
+
+    result = fake_syncer.status["ranking_refresh"]
+    assert result["status"] == ("failed" if should_fail else "completed")
+    assert result["started_at"] and result["completed_at"]
+    if not should_fail:
+        assert result["question_count"] == 12
 
 # It simulates a scenario where the last sync was marked as "running" but the heartbeat timestamp is old,
 # indicating that the sync process may have stalled.

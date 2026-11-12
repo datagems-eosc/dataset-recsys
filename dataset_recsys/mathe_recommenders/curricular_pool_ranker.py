@@ -59,7 +59,7 @@ def _score_candidates(
             candidate["exclusion_reason"] = ZERO_SCORE_NO_EMBEDDING
 
 
-def _rank_candidates(
+def rank_scored_document_candidates(
     candidates: list[dict[str, Any]],
     k: int,
 ) -> list[dict[str, Any]]:
@@ -185,7 +185,7 @@ def rank_curricular_pool_candidates(
         question_embedding=question_embedding,
     )
     _log_zero_score_candidates("document", question_id, candidates)
-    return _rank_candidates(candidates, k)
+    return rank_scored_document_candidates(candidates, k)
 
 
 def _log_zero_score_candidates(

@@ -154,7 +154,14 @@ def rank_video_pool_candidates(
         question_embedding=question_embedding,
     )
     _log_zero_score_candidates("video", question_id, candidates)
+    return rank_scored_video_candidates(candidates, k)
 
+
+def rank_scored_video_candidates(
+    candidates: list[dict[str, Any]],
+    k: int,
+) -> list[dict[str, Any]]:
+    """Return the top-k scored videos, keeping pool order on exact ties."""
     candidate_order = {
         candidate["material_id"]: index
         for index, candidate in enumerate(candidates)

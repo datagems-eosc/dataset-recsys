@@ -1,11 +1,13 @@
 """Tests for MathE sync catalog metadata and material discovery."""
 
 import sqlite3
+from unittest.mock import MagicMock
 
 import pytest
 
 from dataset_recsys.utils import mathe_sync_migrations
 import dataset_recsys.utils.mathe_syncer as mathe_syncer_module
+from dataset_recsys.storage import mathe_mirror_client
 
 
 LEGACY_SYNC_SCHEMA = """
@@ -43,6 +45,20 @@ def test_syncer_passes_configured_schema_to_mathe_client(tmp_path, monkeypatch):
 
     assert syncer._get_mathe_client() is client
     assert captured == {"schema": "mathe_dev"}
+
+
+def test_mirror_client_uses_configured_schema_by_default(monkeypatch):
+    monkeypatch.setenv("DATAGEMS_POSTGRES_SCHEMA", "mathe_dev")
+    connection = MagicMock()
+    monkeypatch.setattr(mathe_mirror_client.psycopg2, "connect", lambda **kwargs: connection)
+
+    client = mathe_mirror_client.MatheMirrorClient()
+
+    assert client.schema == "mathe_dev"
+    statement = connection.cursor.return_value.__enter__.return_value.execute.call_args.args[0]
+    assert statement == mathe_mirror_client.sql.SQL("SET search_path TO {};").format(
+        mathe_mirror_client.sql.Identifier("mathe_dev")
+    )
 
 
 def test_sync_catalog_migrates_and_backfills_legacy_entries(tmp_path, monkeypatch):

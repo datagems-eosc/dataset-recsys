@@ -85,6 +85,41 @@ The separate `/dataset-recsys/mathe/recommend/videos` endpoint builds the same
 hard topic/subtopic pool using only video types `1` and `2`, then scores those
 platform material IDs against `mathe_videos`.
 
+### Precomputed Question Rankings
+
+To avoid embedding and scoring a known question on every request, build a
+snapshot in the environment that owns the MathE mirror, Qdrant index, and sync
+status file:
+
+```bash
+poetry run python -m dataset_recsys.utils.mathe_precompute
+```
+
+The job uses the catalog's question text and the same document and video
+rankers as the API. It stores each eligible candidate's cosine similarity,
+keyword overlap, final score, and exclusion reason alongside the ordered
+material IDs. The Qdrant alias `mathe_question_rankings` switches only after
+the entire snapshot is written.
+
+By default the API uses the snapshot and refreshes it after successful full
+and incremental MathE syncs. Set `MATHE_PRECOMPUTED_RANKINGS=false` to disable
+both behaviors. The API still checks authorization. It uses live scoring for unknown or edited questions,
+an incompatible scoring configuration, or a missing or outdated snapshot.
+An empty stored ranking is a valid result.
+
+The CLI must use the same `MATHE_PATH`, Qdrant instance, model, and weights as
+the API. Run one publisher at a time. The mirror is maintained outside this
+repository: arrange for its update process to run the CLI after metadata edits,
+or run it manually. Until then, changes to topics, keywords, and material
+eligibility may leave rankings stale even when question text is unchanged.
+
+Snapshots do not expire by age. The API skips a snapshot associated with an
+earlier sync or incompatible question text or scoring configuration. The sync
+status endpoint reports `ranking_refresh` as `disabled`, `running`, `completed`,
+or `failed`, with timestamps and a question count after a successful refresh.
+If refresh fails, material sync can still complete and the API uses live scoring.
+CLI refresh results are reported in its logs.
+
 ## Sync Endpoints
 
 Two endpoints start the workflow as a background task and return immediately.

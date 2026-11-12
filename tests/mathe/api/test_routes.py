@@ -160,3 +160,27 @@ def test_recommend_endpoints_return_an_empty_list_when_nothing_is_recommended(
         assert isinstance(response, mathe.MatheRecsResponse)
         assert response.question_id == "272"
         assert response.recommendations == []
+
+
+def test_cached_empty_result_does_not_open_mirror_or_run_live_ranker(monkeypatch):
+    async def authorized(_token):
+        return {mathe.MATHE_DATASET_ID: "dg_ds-browse"}
+
+    def fail_live(*args, **kwargs):
+        raise AssertionError("cache hit must skip live ranking")
+
+    monkeypatch.setenv("MATHE_PRECOMPUTED_RANKINGS", "true")
+    monkeypatch.setattr(mathe.security, "get_authorized_entity_ids", authorized)
+    monkeypatch.setattr(mathe.syncer, "get_sync_status", lambda: {})
+    monkeypatch.setattr(mathe, "get_qdrant_client", lambda: object())
+    monkeypatch.setattr(mathe, "get_precomputed_ranking", lambda *args: [])
+    monkeypatch.setattr(mathe, "get_mathe_client", fail_live)
+    monkeypatch.setattr(mathe, "recommend_from_curricular_pool", fail_live)
+
+    response = asyncio.run(mathe.get_document_recommendations(
+        request=mathe.MatheRecsRequest(question_id="42", question="A question", n=3),
+        claims={"sub": "user-1"},
+        token="token",
+    ))
+
+    assert response.recommendations == []

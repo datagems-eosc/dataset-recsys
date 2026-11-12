@@ -37,7 +37,7 @@ class MatheMirrorClient:
             user=user or os.getenv("DB_DS_USER", "ds_writer"),
             password=password or os.getenv("DB_DS_PASSWORD", "postgres"),
         )
-        self.schema = schema or "public"
+        self.schema = schema or os.getenv("DATAGEMS_POSTGRES_SCHEMA", "public")
         self.conn.autocommit = True
         
         with self.conn.cursor() as cur:
@@ -141,6 +141,17 @@ class MatheMirrorClient:
 
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, params)
+            return list(cur.fetchall())
+
+    def get_recommendation_questions(self) -> list[Dict[str, Any]]:
+        """Return the catalog questions and canonical text for precomputation."""
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT id AS question_id, question
+                FROM platform__sna__questions
+                WHERE NULLIF(BTRIM(question), '') IS NOT NULL
+                ORDER BY id
+            """)
             return list(cur.fetchall())
 
     def get_evaluation_benchmark_questions(self) -> list[Dict[str, Any]]:

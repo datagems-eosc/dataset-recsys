@@ -144,9 +144,11 @@ never return a video, and the reverse.
 ## Design Principles
 
 - **Reuse stored embeddings and rankings.** Dataset requests read a precomputed
-  ranking from Qdrant. MathE requests read the eligible material pool from the
-  PostgreSQL mirror, embed the submitted question, and combine Qdrant similarity
-  scores with keyword overlap. Material embeddings are prepared during sync.
+  ranking from Qdrant. MathE can also serve a precomputed question ranking.
+  When one is unavailable, MathE reads the eligible material pool from the
+  PostgreSQL mirror, embeds the submitted question, and combines Qdrant
+  similarity scores with keyword overlap. Material embeddings are prepared
+  during sync.
 - **Access control at serving time.** Rankings are computed over the whole
   catalog and filtered per user when they are returned, so one index serves
   users with different permissions.

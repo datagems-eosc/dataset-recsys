@@ -9,7 +9,7 @@ def test_video_recommend_endpoint_uses_video_pool_ranker(monkeypatch):
     fake_mathe_client = object()
     fake_qdrant_client = object()
 
-    async def fake_authorized_entity_ids(token):
+    async def fake_authorized_entity_ids(claims, token):
         calls["token"] = token
         return {mathe.MATHE_DATASET_ID: "dg_ds-browse"}
 
@@ -81,7 +81,7 @@ def test_recommendation_ranking_does_not_block_event_loop(monkeypatch):
     recommender_started = Event()
     release_recommender = Event()
 
-    async def fake_authorized_entity_ids(token):
+    async def fake_authorized_entity_ids(claims, token):
         return {mathe.MATHE_DATASET_ID: "dg_ds-browse"}
 
     def blocking_recommender(**kwargs):
@@ -131,7 +131,7 @@ def test_recommendation_ranking_does_not_block_event_loop(monkeypatch):
 def test_recommend_endpoints_return_an_empty_list_when_nothing_is_recommended(
     monkeypatch,
 ):
-    async def fake_authorized_entity_ids(token):
+    async def fake_authorized_entity_ids(claims, token):
         return {mathe.MATHE_DATASET_ID: "dg_ds-browse"}
 
     monkeypatch.setattr(
@@ -163,7 +163,7 @@ def test_recommend_endpoints_return_an_empty_list_when_nothing_is_recommended(
 
 
 def test_cached_empty_result_does_not_open_mirror_or_run_live_ranker(monkeypatch):
-    async def authorized(_token):
+    async def authorized(_claims, _token):
         return {mathe.MATHE_DATASET_ID: "dg_ds-browse"}
 
     def fail_live(*args, **kwargs):

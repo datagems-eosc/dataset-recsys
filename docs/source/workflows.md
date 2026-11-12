@@ -116,10 +116,11 @@ flowchart TB
 ```
 
 This is the request-time path of `POST /dataset-recsys/recommend`. No model is
-called: the ranking was computed ahead of time, and the API only authenticates
-the requester, filters, and cuts the list to the requested length. The caller
-needs the `dg_admin`, `dg_dataset-curator` or `dg_system` role, and browse
-access to the requested dataset.
+called: the ranking was computed ahead of time, and the API authenticates the
+requester, filters, and cuts the list to the requested length. Users with the
+`dg_admin`, `dg_dataset-curator` or `dg_system` realm role can access all
+datasets. Other users need the `dg_user` realm role and a `dg_ds-browse` grant for the source
+dataset and receive only recommendations for datasets they can also browse.
 
 | Situation | Response |
 |---|---|

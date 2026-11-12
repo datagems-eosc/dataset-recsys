@@ -737,7 +737,7 @@ def test_document_recommend_endpoint_uses_curricular_pool_ranker(monkeypatch):
     fake_mathe_client = object()
     fake_qdrant_client = object()
 
-    async def fake_authorized_entity_ids(token):
+    async def fake_authorized_entity_ids(claims, token):
         calls["token"] = token
         return {mathe.MATHE_DATASET_ID: "dg_ds-browse"}
 

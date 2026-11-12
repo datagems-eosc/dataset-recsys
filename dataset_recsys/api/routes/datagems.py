@@ -112,7 +112,7 @@ Retrieve the top-N recommendations for a given dataset.
 async def get_recommendations(
     entity_id: str = Query(..., description="The dataset identifier.", required=True),
     n: int = Query(10, gt=0, description="Number of similar items to return"),
-    claims: dict = Depends(security.require_role(["dg_admin", "dg_dataset-curator", "dg_system"])),
+    claims: dict = Depends(security.require_role(["dg_user"])),
     token: str = Depends(security.oauth2_scheme),
 ):
     request = RecsRequest(entity_id=entity_id, n=n)
@@ -222,7 +222,10 @@ async def get_recommendations(
         if authorized_entities is None:
             authorized_recs = raw_recs
         else:
-            authorized_recs = [item for item in raw_recs if item in authorized_entities]
+            authorized_recs = [
+                item for item in raw_recs
+                if authorized_entities.get(item) == "dg_ds-browse"
+            ]
 
         dropped_count = len(raw_recs) - len(authorized_recs)
         if dropped_count > 0:
@@ -338,7 +341,7 @@ async def get_recommendations_ap(
             }
         },
     ),
-    claims: dict = Depends(security.require_role(["dg_admin", "dg_dataset-curator", "dg_system"])),
+    claims: dict = Depends(security.require_role(["dg_user"])),
     token: str = Depends(security.oauth2_scheme),
 ):
     try:

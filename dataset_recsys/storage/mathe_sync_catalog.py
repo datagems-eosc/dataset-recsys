@@ -56,6 +56,26 @@ class VideoSyncSource:
     linked_materials: tuple[VideoMaterialLink, ...] = ()
 
 
+# Why a document is in only one of the MathE registry and the sync catalog.
+MISSING_SOURCE_FILE = "missing_source_file"
+UNSUPPORTED_EXTENSION = "unsupported_extension"
+NOT_IN_REGISTRY = "not_in_registry"
+
+
+@dataclass(frozen=True)
+class DocumentRegistryGap:
+    """A document that is in the MathE registry or the catalog, not both.
+
+    ``missing_source_file`` and ``unsupported_extension`` are registry
+    documents the sync cannot process. ``not_in_registry`` is a catalogued
+    source file that matches no registry document; it is still indexed.
+    """
+
+    platform_material_id: str
+    file_ext: str
+    reason: str
+
+
 def has_completed_processing(entry: Mapping[str, Any]) -> bool:
     """Return whether an entry contains a successful completed text result."""
     text = str(entry.get("claude_ocr_text") or "").strip()
@@ -115,6 +135,17 @@ class MathESyncCatalog:
                 )
                 """
             )
+            # Documents in only one of the MathE registry and the catalog,
+            # from the last sync that could read the registry.
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS document_registry_gaps (
+                    platform_material_id TEXT PRIMARY KEY,
+                    file_ext TEXT NOT NULL,
+                    reason TEXT NOT NULL
+                )
+                """
+            )
             # TRANSITIONAL: Remove with mathe_sync_migrations after every
             # deployed sync catalog has been upgraded and backfilled.
             migrate_sync_catalog(conn)
@@ -161,6 +192,36 @@ class MathESyncCatalog:
                 SELECT platform_material_id, video_id, content_subtype
                 FROM video_material_links
                 ORDER BY video_id, platform_material_id
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def replace_document_registry_gaps(
+        self,
+        gaps: Sequence[DocumentRegistryGap],
+    ) -> None:
+        """Store the document mismatches found against a loaded registry."""
+        with self.connection() as conn:
+            conn.execute("DELETE FROM document_registry_gaps")
+            conn.executemany(
+                """
+                INSERT INTO document_registry_gaps (
+                    platform_material_id,
+                    file_ext,
+                    reason
+                ) VALUES (?, ?, ?)
+                """,
+                [(gap.platform_material_id, gap.file_ext, gap.reason) for gap in gaps],
+            )
+
+    def list_document_registry_gaps(self) -> list[dict[str, Any]]:
+        """Return the recorded document mismatches with the registry."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT platform_material_id, file_ext, reason
+                FROM document_registry_gaps
+                ORDER BY CAST(platform_material_id AS INTEGER), platform_material_id
                 """
             ).fetchall()
         return [dict(row) for row in rows]
@@ -431,6 +492,10 @@ class MathESyncCatalog:
 
 
 __all__ = [
+    "MISSING_SOURCE_FILE",
+    "NOT_IN_REGISTRY",
+    "UNSUPPORTED_EXTENSION",
+    "DocumentRegistryGap",
     "DocumentSyncSource",
     "MathESyncCatalog",
     "VideoMaterialLink",

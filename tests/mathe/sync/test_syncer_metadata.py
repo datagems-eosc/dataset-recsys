@@ -965,3 +965,160 @@ def test_completed_video_without_links_uses_its_own_material_id(tmp_path):
     assert catalog.list_completed_materials() == [
         {"id": "abcdefghijk", "type": "video", "platform_material_id": "598", "claude_ocr_text": "transcript"},
     ]
+
+
+class _RegistryClient:
+    """A MathE registry with no videos and the given document rows."""
+
+    def __init__(self, documents):
+        self.documents = documents
+
+    def get_video_materials(self):
+        return []
+
+    def get_document_materials(self):
+        if isinstance(self.documents, Exception):
+            raise self.documents
+        return self.documents
+
+    def close(self):
+        pass
+
+
+def test_registry_documents_without_a_source_file_are_recorded(
+    tmp_path,
+    monkeypatch,
+    caplog,
+):
+    pdf_dir = tmp_path / "pdfs"
+    pdf_dir.mkdir()
+    (pdf_dir / "221.pdf").write_bytes(b"present")
+    # On disk but not in the registry: still indexed, and reported.
+    (pdf_dir / "230.pdf").write_bytes(b"unlisted")
+
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    registry = _RegistryClient(
+        [
+            {"platform_material_id": 221, "file_ext": "pdf"},
+            {"platform_material_id": 222, "file_ext": "pdf"},
+            {"platform_material_id": 223, "file_ext": "docx"},
+            {"platform_material_id": 224, "file_ext": "doc"},
+            {"platform_material_id": 225, "file_ext": ""},
+        ]
+    )
+    monkeypatch.setattr(syncer, "_get_mathe_client", lambda: registry)
+
+    with caplog.at_level("WARNING", logger=mathe_syncer_module.__name__):
+        syncer.reconcile_sources()
+
+    assert syncer.get_document_registry_gaps() == [
+        {"platform_material_id": "222", "file_ext": "pdf", "reason": "missing_source_file"},
+        {"platform_material_id": "223", "file_ext": "docx", "reason": "missing_source_file"},
+        {"platform_material_id": "224", "file_ext": "doc", "reason": "unsupported_extension"},
+        {"platform_material_id": "225", "file_ext": "", "reason": "unsupported_extension"},
+        {"platform_material_id": "230", "file_ext": "pdf", "reason": "not_in_registry"},
+    ]
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("missing_source_file" in m and "222, 223" in m for m in messages)
+    assert any("unsupported_extension" in m and "224, 225" in m for m in messages)
+    assert any("not_in_registry" in m and "230" in m for m in messages)
+    # Discovery itself is unchanged.
+    assert {entry["id"] for entry in syncer.get_raw()} == {"221.pdf", "230.pdf"}
+
+
+def test_document_gaps_clear_once_the_file_is_mounted(tmp_path, monkeypatch):
+    pdf_dir = tmp_path / "pdfs"
+    pdf_dir.mkdir()
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    registry = _RegistryClient([{"platform_material_id": 222, "file_ext": "pdf"}])
+    monkeypatch.setattr(syncer, "_get_mathe_client", lambda: registry)
+
+    syncer.reconcile_sources()
+    assert [gap["platform_material_id"] for gap in syncer.get_document_registry_gaps()] == ["222"]
+
+    (pdf_dir / "222.pdf").write_bytes(b"now mounted")
+    syncer.reconcile_sources()
+    assert syncer.get_document_registry_gaps() == []
+
+
+def test_failed_document_registry_lookup_keeps_previous_gaps(tmp_path, monkeypatch):
+    (tmp_path / "pdfs").mkdir()
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    registry = _RegistryClient([{"platform_material_id": 222, "file_ext": "pdf"}])
+    monkeypatch.setattr(syncer, "_get_mathe_client", lambda: registry)
+    syncer.reconcile_sources()
+
+    registry.documents = RuntimeError("registry unavailable")
+    syncer.reconcile_sources()
+
+    assert [gap["platform_material_id"] for gap in syncer.get_document_registry_gaps()] == ["222"]
+
+
+def test_catalogued_legacy_document_is_not_reported_as_a_gap(tmp_path, monkeypatch):
+    pdf_dir = tmp_path / "pdfs"
+    pdf_dir.mkdir()
+    (pdf_dir / "221.pdf").write_bytes(b"present")
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    with syncer.catalog.connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO sync_entries (
+                id, type, internal_pdf_path, claude_ocr_text, status,
+                platform_material_id, content_subtype
+            ) VALUES ('./221.pdf', 'document', './221.pdf', 'text', 'completed', '221', 'pdf')
+            """
+        )
+    registry = _RegistryClient([{"platform_material_id": 221, "file_ext": "pdf"}])
+    monkeypatch.setattr(syncer, "_get_mathe_client", lambda: registry)
+
+    syncer.reconcile_sources()
+
+    assert syncer.get_document_registry_gaps() == []
+
+
+def test_unregistered_material_in_several_formats_is_reported_once(tmp_path, monkeypatch):
+    pdf_dir = tmp_path / "pdfs"
+    pdf_dir.mkdir()
+    (pdf_dir / "271.pdf").write_bytes(b"pdf copy")
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    with syncer.catalog.connection() as conn:
+        # A converted DOCX of the same material already in the catalog.
+        conn.execute(
+            """
+            INSERT INTO sync_entries (
+                id, type, internal_pdf_path, status,
+                platform_material_id, content_subtype
+            ) VALUES ('271.docx', 'document', '/tmp/271_docx.pdf', 'pending', '271', 'docx')
+            """
+        )
+    registry = _RegistryClient([{"platform_material_id": 221, "file_ext": "pdf"}])
+    monkeypatch.setattr(syncer, "_get_mathe_client", lambda: registry)
+
+    syncer.reconcile_sources()
+
+    assert syncer.get_document_registry_gaps() == [
+        {"platform_material_id": "221", "file_ext": "pdf", "reason": "missing_source_file"},
+        {"platform_material_id": "271", "file_ext": "docx, pdf", "reason": "not_in_registry"},
+    ]
+
+
+def test_unregistered_file_stops_being_reported_once_registered(tmp_path, monkeypatch):
+    pdf_dir = tmp_path / "pdfs"
+    pdf_dir.mkdir()
+    (pdf_dir / "271.pdf").write_bytes(b"present")
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    registry = _RegistryClient([])
+    monkeypatch.setattr(syncer, "_get_mathe_client", lambda: registry)
+
+    syncer.reconcile_sources()
+    assert [gap["reason"] for gap in syncer.get_document_registry_gaps()] == ["not_in_registry"]
+
+    registry.documents = [{"platform_material_id": 271, "file_ext": "pdf"}]
+    syncer.reconcile_sources()
+    assert syncer.get_document_registry_gaps() == []

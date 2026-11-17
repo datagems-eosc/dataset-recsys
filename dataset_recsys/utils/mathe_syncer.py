@@ -14,6 +14,10 @@ from faster_whisper import WhisperModel
 
 from dataset_recsys.mathe_recommenders.constants import VIDEO_TYPE_TO_SUBTYPE
 from dataset_recsys.storage.mathe_sync_catalog import (
+    MISSING_SOURCE_FILE,
+    NOT_IN_REGISTRY,
+    UNSUPPORTED_EXTENSION,
+    DocumentRegistryGap,
     DocumentSyncSource,
     MathESyncCatalog,
     VideoMaterialLink,
@@ -48,6 +52,11 @@ BEDROCK_OCR_PROMPT = (
     "Follow the native language of the document. Do not add any commentary or "
     "explanations, just return the raw extracted text."
 )
+
+
+# Document file types the sync can convert and OCR, as stored in
+# platform_materials.file_ext.
+SUPPORTED_DOCUMENT_EXTENSIONS = ("pdf", "docx", "pptx")
 
 
 def resolve_ocr_backend(ocr_backend: Optional[str] = None) -> str:
@@ -309,6 +318,7 @@ class MathE_Syncer:
         print("Syncing video assets from PostgreSQL platform registry...")
         mathe_client = None
         video_catalog_loaded = False
+        registry_documents: Optional[list[Dict[str, str]]] = None
         try:
             mathe_client = self._get_mathe_client()
             db_videos = [
@@ -320,6 +330,22 @@ class MathE_Syncer:
                 for row in mathe_client.get_video_materials()
             ]
             video_catalog_loaded = True
+            # The document list only serves to report registry documents the
+            # sync cannot process, so its failure must not stop video sync.
+            try:
+                registry_documents = [
+                    {
+                        "platform_material_id": str(row["platform_material_id"]),
+                        "file_ext": str(row["file_ext"] or "").strip().lower(),
+                    }
+                    for row in mathe_client.get_document_materials()
+                ]
+            except Exception as e:
+                logger.warning(
+                    "Could not load MathE document registry; keeping the "
+                    "previous list of documents without a source file: %s",
+                    e,
+                )
         except Exception as e:
             print(f"Warning: PostgreSQL lookup failed. Relying on local data cache. Exception: {e}")
             db_videos = []
@@ -460,11 +486,80 @@ class MathE_Syncer:
                 removed_count,
             )
 
+        if registry_documents is not None:
+            self._record_document_registry_gaps(registry_documents)
+
         total_entries = self.catalog.count_entries()
         print(
             f"Discovered {total_entries} total entries, with "
             f"{self.count_available_pdfs()} available PDFs."
         )
+
+    def _record_document_registry_gaps(
+        self,
+        registry_documents: list[Dict[str, str]],
+    ) -> None:
+        """Record documents that are in only one of the registry and the catalog.
+
+        Documents are discovered from the mounted source directories by file
+        name (``<platform_material_id>.<ext>``), not from the registry. Without
+        this check, a registry document without such a file would be absent
+        from the index, and a file without a registry document would be
+        indexed, both without any trace. Indexing itself is not changed.
+        """
+        catalogued_extensions: dict[str, set[str]] = {}
+        for row in self.catalog.list_entries():
+            material_id = row.get("platform_material_id")
+            if row.get("type") != "document" or not material_id:
+                continue
+            extension = str(
+                row.get("content_subtype")
+                or Path(str(row["id"])).suffix.lstrip(".")
+            ).lower()
+            catalogued_extensions.setdefault(str(material_id), set()).add(extension)
+
+        registry_ids = {document["platform_material_id"] for document in registry_documents}
+        gaps = [
+            DocumentRegistryGap(
+                platform_material_id=document["platform_material_id"],
+                file_ext=document["file_ext"],
+                reason=(
+                    MISSING_SOURCE_FILE
+                    if document["file_ext"] in SUPPORTED_DOCUMENT_EXTENSIONS
+                    else UNSUPPORTED_EXTENSION
+                ),
+            )
+            for document in registry_documents
+            if document["platform_material_id"] not in catalogued_extensions
+        ]
+        gaps.extend(
+            DocumentRegistryGap(
+                platform_material_id=material_id,
+                file_ext=", ".join(sorted(extensions)),
+                reason=NOT_IN_REGISTRY,
+            )
+            for material_id, extensions in catalogued_extensions.items()
+            if material_id not in registry_ids
+        )
+        self.catalog.replace_document_registry_gaps(gaps)
+
+        for reason in (MISSING_SOURCE_FILE, UNSUPPORTED_EXTENSION, NOT_IN_REGISTRY):
+            material_ids = sorted(
+                (gap.platform_material_id for gap in gaps if gap.reason == reason),
+                key=lambda material_id: (len(material_id), material_id),
+            )
+            if material_ids:
+                logger.warning(
+                    "%d MathE documents are in only one of the registry and "
+                    "the catalog (%s): %s",
+                    len(material_ids),
+                    reason,
+                    ", ".join(material_ids),
+                )
+
+    def get_document_registry_gaps(self) -> List[Dict[str, Any]]:
+        """Return documents in only one of the registry and the catalog."""
+        return self.catalog.list_document_registry_gaps()
 
     def get_sync_status(self) -> Dict[str, Any]:
         if not self.status_file.exists():

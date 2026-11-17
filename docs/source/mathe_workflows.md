@@ -160,6 +160,22 @@ The syncer can prepare text from several material sources:
 DOCX and PPTX materials are converted to temporary PDFs with LibreOffice before
 OCR is applied.
 
+Documents are discovered from these directories by file name: the file
+`<platform_material_id>.<ext>` is the source of that MathE material. Each sync
+also reads the document materials (`type = 3`) from the platform registry and
+records every document that is in only one of the registry and the catalog,
+with a reason:
+
+- `missing_source_file`: in the registry with extension `pdf`, `docx` or
+  `pptx`, but no matching file is mounted;
+- `unsupported_extension`: in the registry with any other extension;
+- `not_in_registry`: a mounted file that matches no registry document. It is
+  still indexed.
+
+The sync logs a warning per reason, and `GET /dataset-recsys/mathe/status`
+returns the list as `document_registry_gaps`. If the registry cannot be read,
+the previous list is kept.
+
 For YouTube materials, the syncer accepts either full YouTube URLs or raw
 11-character YouTube IDs. It uses `yt-dlp` to download audio, `faster-whisper`
 to transcribe speech, and `<MATHE_PATH>/transcripts/<video_id>.txt` as a local

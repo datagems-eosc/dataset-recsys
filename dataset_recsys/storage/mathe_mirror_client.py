@@ -66,6 +66,25 @@ class MatheMirrorClient:
             cur.execute(query)
             return list(cur.fetchall())
 
+    def get_document_materials(self) -> list[Dict[str, Any]]:
+        """Retrieve every MathE document material and its file extension.
+
+        Unlike the recommendation queries, this does not filter by extension:
+        the sync uses it to report documents it cannot index.
+        """
+        query = """
+        SELECT
+            id AS platform_material_id,
+            LOWER(BTRIM(COALESCE(file_ext, ''))) AS file_ext
+        FROM platform_materials
+        WHERE type = 3
+        ORDER BY id;
+        """
+
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query)
+            return list(cur.fetchall())
+
     def get_question_metadata(self, question_id: int) -> Optional[Dict[str, Any]]:
         """Retrieve topic, subtopic, and keywords for a question."""
         query = """

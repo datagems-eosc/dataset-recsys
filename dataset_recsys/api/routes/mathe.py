@@ -358,6 +358,15 @@ async def get_status(
         else []
     )
     sync_status = syncer.get_sync_status()
+    get_document_registry_gaps = getattr(syncer, "get_document_registry_gaps", None)
+    document_registry_gaps = [
+        {
+            "material_id": gap["platform_material_id"],
+            "file_ext": gap["file_ext"],
+            "reason": gap["reason"],
+        }
+        for gap in (get_document_registry_gaps() if get_document_registry_gaps else [])
+    ]
     
     return {
         "sync_status": _resolve_sync_status(sync_status),
@@ -369,5 +378,6 @@ async def get_status(
         "ocr_completed_materials": completed,
         "ocr_pending_materials": pending,
         "ocr_failed_material_ids": failed_material_ids,
+        "document_registry_gaps": document_registry_gaps,
         "embeddings_created": sync_status.get("embeddings_created", 0),
     }

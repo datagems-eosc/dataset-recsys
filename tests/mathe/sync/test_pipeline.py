@@ -814,6 +814,30 @@ def test_status_endpoint_returns_sync_metadata_and_failed_material_ids(monkeypat
     assert response["ocr_failed_material_ids"] == ["70.pdf"]
     assert response["embeddings_created"] == 461
     assert response["ranking_refresh"] == {"status": "completed", "question_count": 12}
+    # A syncer without the registry check reports no gaps.
+    assert response["document_registry_gaps"] == []
+
+
+def test_status_endpoint_lists_document_registry_gaps(monkeypatch):
+    fake_syncer = types.SimpleNamespace(
+        is_running=False,
+        get_sync_status=lambda: {"sync_status": "completed"},
+        get=lambda: pd.DataFrame([{"status": "completed", "material_id": "6.pdf"}]),
+        get_document_registry_gaps=lambda: [
+            {"platform_material_id": "222", "file_ext": "pdf", "reason": "missing_source_file"},
+            {"platform_material_id": "224", "file_ext": "doc", "reason": "unsupported_extension"},
+            {"platform_material_id": "271", "file_ext": "pdf", "reason": "not_in_registry"},
+        ],
+    )
+    monkeypatch.setattr(mathe, "syncer", fake_syncer)
+
+    response = asyncio.run(mathe.get_status())
+
+    assert response["document_registry_gaps"] == [
+        {"material_id": "222", "file_ext": "pdf", "reason": "missing_source_file"},
+        {"material_id": "224", "file_ext": "doc", "reason": "unsupported_extension"},
+        {"material_id": "271", "file_ext": "pdf", "reason": "not_in_registry"},
+    ]
 
 
 @pytest.mark.parametrize("should_fail", [False, True])

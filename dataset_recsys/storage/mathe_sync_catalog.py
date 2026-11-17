@@ -14,6 +14,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any
 
@@ -76,6 +77,29 @@ class DocumentRegistryGap:
     reason: str
 
 
+# Why a MathE registry video material is not indexed.
+UNRECOGNISED_LINK = "unrecognised_link"
+VIDEO_UNAVAILABLE = "video_unavailable"
+TRANSCRIPTION_FAILED = "transcription_failed"
+PENDING = "pending"
+
+# yt-dlp errors for a video that YouTube no longer serves to anyone: removed,
+# made private, or its account terminated. Retrying cannot recover these.
+_UNAVAILABLE_VIDEO_ERROR = re.compile(
+    r"video unavailable|video is unavailable|has been removed|private video"
+    r"|video is private|been terminated|no longer available",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class VideoLinkGap:
+    """A MathE registry video material whose link names no YouTube video."""
+
+    platform_material_id: str
+    link: str
+
+
 def has_completed_processing(entry: Mapping[str, Any]) -> bool:
     """Return whether an entry contains a successful completed text result."""
     text = str(entry.get("claude_ocr_text") or "").strip()
@@ -132,6 +156,16 @@ class MathESyncCatalog:
                     platform_material_id TEXT PRIMARY KEY,
                     video_id TEXT NOT NULL,
                     content_subtype TEXT
+                )
+                """
+            )
+            # MathE video materials whose link names no YouTube video, from
+            # the last sync that could read the registry.
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS video_link_gaps (
+                    platform_material_id TEXT PRIMARY KEY,
+                    link TEXT NOT NULL
                 )
                 """
             )
@@ -195,6 +229,74 @@ class MathESyncCatalog:
                 """
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def replace_video_link_gaps(self, gaps: Sequence[VideoLinkGap]) -> None:
+        """Store the video materials of a loaded registry with unusable links."""
+        with self.connection() as conn:
+            conn.execute("DELETE FROM video_link_gaps")
+            conn.executemany(
+                "INSERT INTO video_link_gaps (platform_material_id, link) VALUES (?, ?)",
+                [(gap.platform_material_id, gap.link) for gap in gaps],
+            )
+
+    def list_video_registry_gaps(self) -> list[dict[str, Any]]:
+        """Return every registry video material that is not indexed, and why.
+
+        Each MathE material is listed, so a material that shares a video with
+        another one appears with that video's reason.
+        """
+        with self.connection() as conn:
+            link_gaps = conn.execute(
+                "SELECT platform_material_id, link FROM video_link_gaps"
+            ).fetchall()
+            unprocessed = conn.execute(
+                """
+                SELECT
+                    l.platform_material_id,
+                    l.video_id,
+                    e.source_value,
+                    e.status,
+                    e.claude_ocr_text
+                FROM video_material_links AS l
+                JOIN sync_entries AS e
+                  ON e.id = l.video_id AND e.type = 'video'
+                """
+            ).fetchall()
+
+        gaps = [
+            {
+                "platform_material_id": str(row["platform_material_id"]),
+                "video_id": None,
+                "link": row["link"],
+                "reason": UNRECOGNISED_LINK,
+            }
+            for row in link_gaps
+        ]
+        for row in unprocessed:
+            entry = dict(row)
+            if has_completed_processing(entry):
+                continue
+            if entry["status"] == "pending":
+                reason = PENDING
+            elif _UNAVAILABLE_VIDEO_ERROR.search(str(entry["claude_ocr_text"] or "")):
+                reason = VIDEO_UNAVAILABLE
+            else:
+                reason = TRANSCRIPTION_FAILED
+            gaps.append(
+                {
+                    "platform_material_id": str(entry["platform_material_id"]),
+                    "video_id": entry["video_id"],
+                    "link": entry["source_value"],
+                    "reason": reason,
+                }
+            )
+        return sorted(
+            gaps,
+            key=lambda gap: (
+                len(gap["platform_material_id"]),
+                gap["platform_material_id"],
+            ),
+        )
 
     def replace_document_registry_gaps(
         self,
@@ -492,6 +594,11 @@ class MathESyncCatalog:
 
 
 __all__ = [
+    "PENDING",
+    "TRANSCRIPTION_FAILED",
+    "UNRECOGNISED_LINK",
+    "VIDEO_UNAVAILABLE",
+    "VideoLinkGap",
     "MISSING_SOURCE_FILE",
     "NOT_IN_REGISTRY",
     "UNSUPPORTED_EXTENSION",

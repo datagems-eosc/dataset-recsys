@@ -20,6 +20,7 @@ from dataset_recsys.storage.mathe_sync_catalog import (
     DocumentRegistryGap,
     DocumentSyncSource,
     MathESyncCatalog,
+    VideoLinkGap,
     VideoMaterialLink,
     VideoSyncSource,
     has_completed_processing,
@@ -53,6 +54,16 @@ BEDROCK_OCR_PROMPT = (
     "explanations, just return the raw extracted text."
 )
 
+
+_RAW_VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
+_YOUTUBE_URL_VIDEO_ID = re.compile(
+    r"(?:"
+    r"youtu\.be/"
+    r"|youtube(?:-nocookie)?\.com/(?:embed|v|e|shorts|live)/"
+    r"|youtube(?:-nocookie)?\.com/(?:watch|attribution_link)?\?(?:[^#\s]*?&(?:amp;)?)?v="
+    r")([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])",
+    re.IGNORECASE,
+)
 
 # Document file types the sync can convert and OCR, as stored in
 # platform_materials.file_ext.
@@ -148,14 +159,23 @@ class MathE_Syncer:
 
     def _is_youtube_asset(self, link_value: str) -> bool:
         """Determines if the raw string input points to a video stream asset."""
-        if len(link_value) == 11 and re.match(r'^[a-zA-Z0-9_-]{11}$', link_value):
+        if _RAW_VIDEO_ID.fullmatch(link_value.strip()):
             return True
-        return "youtube.com" in link_value or "youtu.be" in link_value
+        lowered = link_value.lower()
+        return "youtube" in lowered or "youtu.be" in lowered
 
     def _extract_video_id(self, link_value: str) -> str:
-        if len(link_value) == 11 and re.match(r'^[a-zA-Z0-9_-]{11}$', link_value):
-            return link_value
-        id_match = re.search(r'(?:v=|\/v\/|youtu\.be\/|\/embed\/)([a-zA-Z0-9_-]{11})', link_value)
+        """Return the 11-character YouTube video ID of a link or raw ID.
+
+        Accepts watch URLs (``v=`` anywhere in the query), ``youtu.be``
+        short links, and ``/embed/``, ``/v/``, ``/e/``, ``/shorts/`` and
+        ``/live/`` paths, on youtube.com, its ``www``/``m``/``music``
+        subdomains and youtube-nocookie.com, with or without a scheme.
+        """
+        value = link_value.strip()
+        if _RAW_VIDEO_ID.fullmatch(value):
+            return value
+        id_match = _YOUTUBE_URL_VIDEO_ID.search(value)
         if id_match:
             return id_match.group(1)
         raise ValueError(f"Could not parse valid YouTube identifier: {link_value}")
@@ -360,24 +380,22 @@ class MathE_Syncer:
         # linked to every MathE material that points to it. The registry is
         # ordered by material ID, so the lowest ID is the video's primary.
         video_sources_by_id: dict[str, VideoSyncSource] = {}
+        video_link_gaps: list[VideoLinkGap] = []
         for video in db_videos:
             link = video["link"]
             platform_material_id = video["platform_material_id"]
-            if not self._is_youtube_asset(link):
-                logger.warning(
-                    "Skipping MathE video material %s: link is not a "
-                    "recognised YouTube URL or ID",
-                    platform_material_id,
-                )
-                continue
             try:
+                if not self._is_youtube_asset(link):
+                    raise ValueError("not a YouTube URL or ID")
                 video_id = self._extract_video_id(link)
             except ValueError:
                 logger.warning(
-                    "Skipping MathE video material %s: could not parse a "
-                    "YouTube video ID from its link",
+                    "Skipping MathE video material %s: link %r names no "
+                    "YouTube video",
                     platform_material_id,
+                    link,
                 )
+                video_link_gaps.append(VideoLinkGap(platform_material_id, link))
                 continue
 
             material_link = VideoMaterialLink(
@@ -412,6 +430,7 @@ class MathE_Syncer:
         # An empty successful registry result means there are no videos. A
         # failed query is not authoritative and must preserve the local cache.
         if video_catalog_loaded:
+            self.catalog.replace_video_link_gaps(video_link_gaps)
             removed_count = self.catalog.reconcile_videos(video_sources)
             if removed_count:
                 logger.info(
@@ -556,6 +575,10 @@ class MathE_Syncer:
                     reason,
                     ", ".join(material_ids),
                 )
+
+    def get_video_registry_gaps(self) -> List[Dict[str, Any]]:
+        """Return registry video materials that are not indexed, and why."""
+        return self.catalog.list_video_registry_gaps()
 
     def get_document_registry_gaps(self) -> List[Dict[str, Any]]:
         """Return documents in only one of the registry and the catalog."""

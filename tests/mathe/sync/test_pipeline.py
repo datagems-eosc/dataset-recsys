@@ -814,7 +814,29 @@ def test_status_endpoint_returns_sync_metadata_and_failed_material_ids(monkeypat
     assert response["ocr_failed_material_ids"] == ["70.pdf"]
     assert response["embeddings_created"] == 461
     assert response["ranking_refresh"] == {"status": "completed", "question_count": 12}
-    # A syncer without the registry check reports no gaps.
+    # A syncer without the registry checks reports no gaps.
+    assert response["document_registry_gaps"] == []
+    assert response["video_registry_gaps"] == []
+
+
+def test_status_endpoint_lists_video_registry_gaps(monkeypatch):
+    fake_syncer = types.SimpleNamespace(
+        is_running=False,
+        get_sync_status=lambda: {"sync_status": "completed"},
+        get=lambda: pd.DataFrame([{"status": "completed", "material_id": "6.pdf"}]),
+        get_video_registry_gaps=lambda: [
+            {"platform_material_id": "487", "video_id": None, "link": "https://vimeo.com/1", "reason": "unrecognised_link"},
+            {"platform_material_id": "515", "video_id": "removedVid1", "link": "removedVid1", "reason": "video_unavailable"},
+        ],
+    )
+    monkeypatch.setattr(mathe, "syncer", fake_syncer)
+
+    response = asyncio.run(mathe.get_status())
+
+    assert response["video_registry_gaps"] == [
+        {"material_id": "487", "video_id": None, "link": "https://vimeo.com/1", "reason": "unrecognised_link"},
+        {"material_id": "515", "video_id": "removedVid1", "link": "removedVid1", "reason": "video_unavailable"},
+    ]
     assert response["document_registry_gaps"] == []
 
 

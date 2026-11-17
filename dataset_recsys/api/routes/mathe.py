@@ -358,6 +358,16 @@ async def get_status(
         else []
     )
     sync_status = syncer.get_sync_status()
+    get_video_registry_gaps = getattr(syncer, "get_video_registry_gaps", None)
+    video_registry_gaps = [
+        {
+            "material_id": gap["platform_material_id"],
+            "video_id": gap["video_id"],
+            "link": gap["link"],
+            "reason": gap["reason"],
+        }
+        for gap in (get_video_registry_gaps() if get_video_registry_gaps else [])
+    ]
     get_document_registry_gaps = getattr(syncer, "get_document_registry_gaps", None)
     document_registry_gaps = [
         {
@@ -378,6 +388,7 @@ async def get_status(
         "ocr_completed_materials": completed,
         "ocr_pending_materials": pending,
         "ocr_failed_material_ids": failed_material_ids,
+        "video_registry_gaps": video_registry_gaps,
         "document_registry_gaps": document_registry_gaps,
         "embeddings_created": sync_status.get("embeddings_created", 0),
     }

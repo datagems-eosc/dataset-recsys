@@ -176,10 +176,29 @@ The sync logs a warning per reason, and `GET /dataset-recsys/mathe/status`
 returns the list as `document_registry_gaps`. If the registry cannot be read,
 the previous list is kept.
 
-For YouTube materials, the syncer accepts either full YouTube URLs or raw
-11-character YouTube IDs. It uses `yt-dlp` to download audio, `faster-whisper`
-to transcribe speech, and `<MATHE_PATH>/transcripts/<video_id>.txt` as a local
-transcript cache.
+For YouTube materials, the syncer accepts raw 11-character YouTube IDs and
+YouTube URLs: watch links (`v=` anywhere in the query), `youtu.be` links, and
+`/embed/`, `/v/`, `/e/`, `/shorts/` and `/live/` paths on youtube.com, its
+subdomains and youtube-nocookie.com, with or without a scheme. It uses
+`yt-dlp` to download audio, `faster-whisper` to transcribe speech, and
+`<MATHE_PATH>/transcripts/<video_id>.txt` as a local transcript cache.
+
+Several MathE materials can point to the same video. The video is transcribed
+and embedded once, and indexed under each of their material IDs.
+
+`GET /dataset-recsys/mathe/status` returns `video_registry_gaps`: every video
+material in the registry that is not indexed, with its video ID, link and a
+reason:
+
+- `unrecognised_link`: the link names no YouTube video; correct it in MathE;
+- `video_unavailable`: YouTube reports the video removed, private or its
+  account terminated. Only a transcript placed in
+  `<MATHE_PATH>/transcripts/<video_id>.txt` can recover it;
+- `transcription_failed`: any other download or transcription error;
+- `pending`: not processed yet.
+
+A material that shares a video is listed with that video's reason. Failed
+videos are retried on every sync.
 
 The MathE platform material types are:
 

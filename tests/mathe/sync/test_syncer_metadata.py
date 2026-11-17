@@ -1122,3 +1122,132 @@ def test_unregistered_file_stops_being_reported_once_registered(tmp_path, monkey
     registry.documents = [{"platform_material_id": 271, "file_ext": "pdf"}]
     syncer.reconcile_sources()
     assert syncer.get_document_registry_gaps() == []
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        "abcdefghijk",
+        " abcdefghijk ",
+        "https://www.youtube.com/watch?v=abcdefghijk",
+        "https://youtube.com/watch?feature=share&v=abcdefghijk&t=10",
+        "https://m.youtube.com/watch?app=desktop&amp;v=abcdefghijk",
+        "https://music.youtube.com/watch?v=abcdefghijk&list=x",
+        "HTTPS://WWW.YOUTUBE.COM/WATCH?V=abcdefghijk",
+        "https://youtu.be/abcdefghijk?si=xyz",
+        "youtu.be/abcdefghijk",
+        "www.youtube.com/v/abcdefghijk",
+        "https://www.youtube.com/shorts/abcdefghijk",
+        "https://www.youtube.com/live/abcdefghijk?feature=share",
+        "https://www.youtube-nocookie.com/embed/abcdefghijk?rel=0",
+        '<iframe src="https://www.youtube.com/embed/abcdefghijk" frameborder="0">',
+    ],
+)
+def test_youtube_link_forms_resolve_to_the_video_id(tmp_path, monkeypatch, link):
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+
+    assert syncer._is_youtube_asset(link)
+    assert syncer._extract_video_id(link) == "abcdefghijk"
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        "https://www.youtube.com/watch?v=abcdefghijkl",
+        "https://www.youtube.com/playlist?list=PLabcdefghijk",
+        "https://www.youtube.com/channel/UCabcdefghij",
+        "https://vimeo.com/123456789",
+        "",
+    ],
+)
+def test_links_naming_no_youtube_video_are_rejected(tmp_path, monkeypatch, link):
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+
+    if syncer._is_youtube_asset(link):
+        with pytest.raises(ValueError):
+            syncer._extract_video_id(link)
+
+
+class _VideoRegistryClient:
+    def __init__(self, videos):
+        self.videos = videos
+
+    def get_video_materials(self):
+        if isinstance(self.videos, Exception):
+            raise self.videos
+        return self.videos
+
+    def get_document_materials(self):
+        return []
+
+    def close(self):
+        pass
+
+
+def test_unindexed_video_materials_are_reported_with_a_reason(
+    tmp_path, monkeypatch
+):
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    (syncer._transcript_dir / "doneVideo01.txt").write_text("transcript", encoding="utf-8")
+    registry = _VideoRegistryClient(
+        [
+            {"platform_material_id": 487, "link": "https://vimeo.com/123", "platform_type": 1},
+            {"platform_material_id": 515, "link": "removedVid1", "platform_type": 1},
+            {"platform_material_id": 609, "link": "pendingVid1", "platform_type": 1},
+            {"platform_material_id": 700, "link": "blockedVid1", "platform_type": 2},
+            {"platform_material_id": 719, "link": "https://youtu.be/removedVid1", "platform_type": 2},
+            {"platform_material_id": 800, "link": "doneVideo01", "platform_type": 1},
+        ]
+    )
+    monkeypatch.setattr(syncer, "_get_mathe_client", lambda: registry)
+    syncer.reconcile_sources()
+    syncer.catalog.update_processing_result(
+        entry_id="removedVid1",
+        status="failed",
+        text=(
+            "Transcription Failed: ERROR: [youtube] removedVid1: Video "
+            "unavailable. This video has been removed by the uploader"
+        ),
+    )
+    syncer.catalog.update_processing_result(
+        entry_id="blockedVid1",
+        status="failed",
+        text="Transcription Failed: Sign in to confirm you're not a bot",
+    )
+
+    assert syncer.get_video_registry_gaps() == [
+        {"platform_material_id": "487", "video_id": None, "link": "https://vimeo.com/123", "reason": "unrecognised_link"},
+        {"platform_material_id": "515", "video_id": "removedVid1", "link": "removedVid1", "reason": "video_unavailable"},
+        {"platform_material_id": "609", "video_id": "pendingVid1", "link": "pendingVid1", "reason": "pending"},
+        {"platform_material_id": "700", "video_id": "blockedVid1", "link": "blockedVid1", "reason": "transcription_failed"},
+        # Shares the removed video of 515.
+        {"platform_material_id": "719", "video_id": "removedVid1", "link": "removedVid1", "reason": "video_unavailable"},
+    ]
+
+
+def test_link_gaps_follow_the_registry_and_survive_a_failed_lookup(
+    tmp_path, monkeypatch
+):
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    registry = _VideoRegistryClient(
+        [{"platform_material_id": 705, "link": "https://example.com/video", "platform_type": 1}]
+    )
+    monkeypatch.setattr(syncer, "_get_mathe_client", lambda: registry)
+    syncer.reconcile_sources()
+    assert [gap["platform_material_id"] for gap in syncer.get_video_registry_gaps()] == ["705"]
+
+    registry.videos = RuntimeError("registry unavailable")
+    syncer.reconcile_sources()
+    assert [gap["platform_material_id"] for gap in syncer.get_video_registry_gaps()] == ["705"]
+
+    registry.videos = [
+        {"platform_material_id": 705, "link": "https://www.youtube.com/shorts/fixedVideo1", "platform_type": 1}
+    ]
+    syncer.reconcile_sources()
+    assert syncer.get_video_registry_gaps() == [
+        {"platform_material_id": "705", "video_id": "fixedVideo1", "link": "https://www.youtube.com/shorts/fixedVideo1", "reason": "pending"},
+    ]

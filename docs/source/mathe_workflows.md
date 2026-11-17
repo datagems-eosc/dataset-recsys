@@ -179,7 +179,10 @@ the previous list is kept.
 For YouTube materials, the syncer accepts raw 11-character YouTube IDs and
 YouTube URLs: watch links (`v=` anywhere in the query), `youtu.be` links, and
 `/embed/`, `/v/`, `/e/`, `/shorts/` and `/live/` paths on youtube.com, its
-subdomains and youtube-nocookie.com, with or without a scheme. It uses
+subdomains and youtube-nocookie.com, with or without a scheme. Two forms
+without the domain, seen in MathE records, are accepted too: a raw ID
+followed by URL parameters (`odkaPgWPQGo&t`) and a bare watch path
+(`watch?v=KQ5tyLxCgb8`). It uses
 `yt-dlp` to download audio, `faster-whisper` to transcribe speech, and
 `<MATHE_PATH>/transcripts/<video_id>.txt` as a local transcript cache.
 

@@ -1159,6 +1159,15 @@ def test_youtube_link_forms_resolve_to_the_video_id(tmp_path, monkeypatch, link)
         "https://www.youtube.com/channel/UCabcdefghij",
         "https://vimeo.com/123456789",
         "",
+        # Incomplete values stored in MathE records.
+        "Test",
+        "Og9zGParQ",
+        "0&p3e:27170",
+        "efficients/",
+        "duction",
+        "ZZGA&t=521s",
+        "abcdefghijkl&t",
+        "a watch?v=abcdefghijk",
     ],
 )
 def test_links_naming_no_youtube_video_are_rejected(tmp_path, monkeypatch, link):
@@ -1251,3 +1260,21 @@ def test_link_gaps_follow_the_registry_and_survive_a_failed_lookup(
     assert syncer.get_video_registry_gaps() == [
         {"platform_material_id": "705", "video_id": "fixedVideo1", "link": "https://www.youtube.com/shorts/fixedVideo1", "reason": "pending"},
     ]
+
+
+@pytest.mark.parametrize(
+    ("link", "video_id"),
+    [
+        # Values stored in MathE records without the YouTube domain.
+        ("odkaPgWPQGo&t", "odkaPgWPQGo"),
+        ("watch?v=KQ5tyLxCgb8", "KQ5tyLxCgb8"),
+        ("KQ5tyLxCgb8?t=10", "KQ5tyLxCgb8"),
+        ("/watch?feature=share&v=KQ5tyLxCgb8&t=5s", "KQ5tyLxCgb8"),
+    ],
+)
+def test_links_without_the_youtube_domain_resolve(tmp_path, monkeypatch, link, video_id):
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+
+    assert syncer._is_youtube_asset(link)
+    assert syncer._extract_video_id(link) == video_id

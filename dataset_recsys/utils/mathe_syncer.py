@@ -56,6 +56,15 @@ BEDROCK_OCR_PROMPT = (
 
 
 _RAW_VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
+# Forms seen in MathE records that omit the YouTube domain: a raw ID followed
+# by URL parameters ("odkaPgWPQGo&t"), and a bare watch path
+# ("watch?v=KQ5tyLxCgb8"). Matched against the whole value, so fragments of
+# other text are not taken for video IDs.
+_RAW_VIDEO_ID_WITH_PARAMS = re.compile(r"([A-Za-z0-9_-]{11})[&?#].*", re.DOTALL)
+_BARE_WATCH_PATH = re.compile(
+    r"/?watch\?(?:[^#\s]*?&(?:amp;)?)?v=([A-Za-z0-9_-]{11})(?:[&#].*)?",
+    re.IGNORECASE | re.DOTALL,
+)
 _YOUTUBE_URL_VIDEO_ID = re.compile(
     r"(?:"
     r"youtu\.be/"
@@ -159,7 +168,12 @@ class MathE_Syncer:
 
     def _is_youtube_asset(self, link_value: str) -> bool:
         """Determines if the raw string input points to a video stream asset."""
-        if _RAW_VIDEO_ID.fullmatch(link_value.strip()):
+        value = link_value.strip()
+        if (
+            _RAW_VIDEO_ID.fullmatch(value)
+            or _RAW_VIDEO_ID_WITH_PARAMS.fullmatch(value)
+            or _BARE_WATCH_PATH.fullmatch(value)
+        ):
             return True
         lowered = link_value.lower()
         return "youtube" in lowered or "youtu.be" in lowered
@@ -170,11 +184,17 @@ class MathE_Syncer:
         Accepts watch URLs (``v=`` anywhere in the query), ``youtu.be``
         short links, and ``/embed/``, ``/v/``, ``/e/``, ``/shorts/`` and
         ``/live/`` paths, on youtube.com, its ``www``/``m``/``music``
-        subdomains and youtube-nocookie.com, with or without a scheme.
+        subdomains and youtube-nocookie.com, with or without a scheme. Also
+        accepts a raw ID followed by URL parameters (``odkaPgWPQGo&t``) and a
+        watch path without the domain (``watch?v=KQ5tyLxCgb8``).
         """
         value = link_value.strip()
         if _RAW_VIDEO_ID.fullmatch(value):
             return value
+        for pattern in (_RAW_VIDEO_ID_WITH_PARAMS, _BARE_WATCH_PATH):
+            bare_match = pattern.fullmatch(value)
+            if bare_match:
+                return bare_match.group(1)
         id_match = _YOUTUBE_URL_VIDEO_ID.search(value)
         if id_match:
             return id_match.group(1)

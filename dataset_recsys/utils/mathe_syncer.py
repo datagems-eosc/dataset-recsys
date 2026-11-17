@@ -515,9 +515,11 @@ class MathE_Syncer:
 
     # --- OCR Logic ---
 
-    def process_pending_materials(self, limit: Optional[int] = None, retry_failed: bool = False) -> None:
+    def process_pending_materials(self, limit: Optional[int] = None, retry_failed: bool = True) -> None:
         """Run document OCR or video transcription for pending catalog entries."""
 
+        # TODO: Add a configurable delay for retrying transient failures; see the
+        # retry policy TODO in docs/source/mathe_workflows.md.
         if retry_failed:
             requeued = self.catalog.requeue_failed_entries()
             if requeued:

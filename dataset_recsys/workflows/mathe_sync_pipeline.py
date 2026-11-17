@@ -89,6 +89,15 @@ def _resolve_application(sync_entry_id: str, material_type: str) -> MatheApplica
         return MatheApplication.DOCUMENTS
     return None
 
+def _source_key(material: CompletedMaterial) -> tuple[str, str]:
+    """Identify the processed source (document file or video) of a material.
+
+    MathE materials that point to the same YouTube video share one catalog
+    entry, so they share this key, their text and their embedding.
+    """
+    return (material.get("type", "").lower(), material["sync_entry_id"])
+
+
 def _build_collection_indices(
     materials: list[CompletedMaterial],
 ) -> dict[MatheApplication, dict[str, int]]:
@@ -173,7 +182,13 @@ def _replace_embedding_and_recommendation_collection(
         # that are no longer in the catalog.
         replace=True,
     )
-    recommendations = rank_similar_entities(entity_ids, collection_embeddings)
+    # Materials that share a video have identical embeddings; they are not
+    # recommended as each other's neighbours.
+    recommendations = rank_similar_entities(
+        entity_ids,
+        collection_embeddings,
+        groups=[_source_key(materials[index]) for index in indices],
+    )
     qdrant_records_updated = qdrant_client.store_recommendations(
         application=application,
         data=recommendations,
@@ -293,9 +308,21 @@ def run_full_mathe_pipeline(syncer: MathE_Syncer) -> dict:
         embeddings = np.empty((0, 0), dtype=float)
 
         if materials:
-            texts = [material["text"] for material in materials]
+            # Encode each processed source once; materials that share a video
+            # reuse its embedding.
+            source_positions: dict[tuple[str, str], int] = {}
+            texts = []
+            material_positions = []
+            for material in materials:
+                key = _source_key(material)
+                if key not in source_positions:
+                    source_positions[key] = len(texts)
+                    texts.append(material["text"])
+                material_positions.append(source_positions[key])
             logger.info(
-                "Generating MathE OCR text embeddings for %d materials",
+                "Generating MathE OCR text embeddings for %d sources "
+                "(%d materials)",
+                len(texts),
                 len(materials),
             )
 
@@ -326,7 +353,7 @@ def run_full_mathe_pipeline(syncer: MathE_Syncer) -> dict:
                     batch_number,
                 )
 
-            embeddings = np.vstack(all_embeddings)
+            embeddings = np.vstack(all_embeddings)[material_positions]
         else:
             # A successful empty catalog is authoritative. Publish empty
             # collections so removed materials cannot remain recommendable.
@@ -493,12 +520,23 @@ def run_incremental_mathe_pipeline(syncer: MathE_Syncer) -> dict:
                 len(current),
             )
 
+            # Materials that share a video are not each other's neighbours.
+            pids_by_source: dict[tuple[str, str], set[str]] = {}
+            for pid, material in current.items():
+                pids_by_source.setdefault(_source_key(material), set()).add(pid)
+            vectors_by_source: dict[tuple[str, str], Any] = {}
+
             # 2. Embed new materials and link them to their neighbours.
             for pid in new_ids:
                 material = current[pid]
-                encodings = encode_texts([material["text"]], model_name=DEFAULT_MATHE_EMBEDDING_MODEL)
-                vector = encodings[0]
-                embeddings_created += 1
+                source_key = _source_key(material)
+                vector = vectors_by_source.get(source_key)
+                if vector is None:
+                    encodings = encode_texts([material["text"]], model_name=DEFAULT_MATHE_EMBEDDING_MODEL)
+                    vector = encodings[0]
+                    vectors_by_source[source_key] = vector
+                    embeddings_created += 1
+                same_source_pids = pids_by_source[source_key]
 
                 qdrant_client.store_embeddings(
                     application=app,
@@ -520,7 +558,12 @@ def run_incremental_mathe_pipeline(syncer: MathE_Syncer) -> dict:
                 )
 
                 # Format recommendations {neighbor_id: score}
-                recs_map = {res["dataset_id"]: float(res["score"]) for res in similar_results if res["dataset_id"] != pid}
+                recs_map = {
+                    res["dataset_id"]: float(res["score"])
+                    for res in similar_results
+                    if res["dataset_id"] != pid
+                    and res["dataset_id"] not in same_source_pids
+                }
                 logger.info("Neighbours of material %s in %s: %s", pid, app, sorted(recs_map))
 
                 # Store recommendations for the new material

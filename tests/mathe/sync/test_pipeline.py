@@ -1024,3 +1024,118 @@ def test_full_rebuild_removes_materials_that_left_the_catalog():
         MatheApplication.DOCUMENTS, "221", collection_name=mathe
     ) == ["222"]
     assert qdrant.list_entities(MatheApplication.VIDEOS, mathe) == ["900", "901"]
+
+
+def _syncer_with_materials(db_path, rows):
+    """A FakeSyncer whose catalog lists (id, type, platform_id, text) rows.
+
+    Rows may share an id, as videos shared by several MathE materials do.
+    """
+    syncer = FakeSyncer(db_path)
+    syncer.get_completed_materials = lambda: [
+        {
+            "id": entry_id,
+            "type": material_type,
+            "platform_material_id": platform_id,
+            "claude_ocr_text": text,
+        }
+        for entry_id, material_type, platform_id, text in rows
+    ]
+    return syncer
+
+
+SHARED_VIDEO_ROWS = [
+    ("abcdefghijk", "video", "598", "shared lesson"),
+    ("abcdefghijk", "video", "657", "shared lesson"),
+    ("zyxwvutsrqp", "video", "700", "other lesson"),
+]
+SHARED_VIDEO_VECTORS = {"shared lesson": [1.0, 0.0], "other lesson": [0.8, 0.6]}
+
+
+def test_full_pipeline_indexes_every_material_of_a_shared_video_once(
+    tmp_path, monkeypatch, qdrant
+):
+    encoded_texts = []
+    monkeypatch.setattr(
+        mathe_sync_pipeline,
+        "encode_texts",
+        _encode_from(SHARED_VIDEO_VECTORS, encoded_texts),
+    )
+
+    summary = mathe_sync_pipeline.run_full_mathe_pipeline(
+        _syncer_with_materials(tmp_path / "syncer.db", SHARED_VIDEO_ROWS)
+    )
+
+    # The shared transcript is encoded once and stored under both IDs.
+    assert encoded_texts == ["shared lesson", "other lesson"]
+    assert summary["embeddings_created"] == 2
+    assert summary["collections"]["mathe_videos"]["embeddings_stored"] == 3
+    assert qdrant.list_entities("mathe_videos", MATHE) == ["598", "657", "700"]
+    # Materials of the same video are not each other's neighbours.
+    assert qdrant.get_recommendations("mathe_videos", "598", collection_name=MATHE) == ["700"]
+    assert qdrant.get_recommendations("mathe_videos", "657", collection_name=MATHE) == ["700"]
+    assert sorted(
+        qdrant.get_recommendations("mathe_videos", "700", collection_name=MATHE)
+    ) == ["598", "657"]
+
+
+def test_incremental_pipeline_matches_full_rebuild_for_a_shared_video(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        mathe_sync_pipeline,
+        "encode_texts",
+        _encode_from(SHARED_VIDEO_VECTORS, []),
+    )
+
+    def run(pipeline, rows, storage):
+        monkeypatch.setattr(mathe_sync_pipeline, "_build_qdrant_client", lambda: storage)
+        return pipeline(_syncer_with_materials(tmp_path / "syncer.db", rows))
+
+    # The deployed index holds the first material of the video only; the
+    # fix then adds the second one incrementally.
+    incremental = QdrantStorageClient(client=QdrantClient(":memory:"))
+    run(
+        mathe_sync_pipeline.run_incremental_mathe_pipeline,
+        [SHARED_VIDEO_ROWS[0], SHARED_VIDEO_ROWS[2]],
+        incremental,
+    )
+    summary = run(
+        mathe_sync_pipeline.run_incremental_mathe_pipeline,
+        SHARED_VIDEO_ROWS,
+        incremental,
+    )
+    assert summary["processed_new_materials"] == 1
+
+    full = QdrantStorageClient(client=QdrantClient(":memory:"))
+    run(mathe_sync_pipeline.run_full_mathe_pipeline, SHARED_VIDEO_ROWS, full)
+
+    incremental_rankings = _stored_rankings(incremental, "mathe_videos")
+    full_rankings = _stored_rankings(full, "mathe_videos")
+    assert set(incremental_rankings) == {"598", "657", "700"}
+    for material_id, ranking in full_rankings.items():
+        assert sorted(n for n, _ in incremental_rankings[material_id]) == sorted(
+            n for n, _ in ranking
+        )
+    assert [n for n, _ in incremental_rankings["657"]] == ["700"]
+
+
+def test_incremental_pipeline_encodes_a_new_shared_video_once(
+    tmp_path, monkeypatch, qdrant
+):
+    encoded_texts = []
+    monkeypatch.setattr(
+        mathe_sync_pipeline,
+        "encode_texts",
+        _encode_from(SHARED_VIDEO_VECTORS, encoded_texts),
+    )
+
+    summary = mathe_sync_pipeline.run_incremental_mathe_pipeline(
+        _syncer_with_materials(tmp_path / "syncer.db", SHARED_VIDEO_ROWS)
+    )
+
+    assert sorted(encoded_texts) == ["other lesson", "shared lesson"]
+    assert summary["processed_new_materials"] == 3
+    assert summary["embeddings_created"] == 2
+    assert qdrant.get_recommendations("mathe_videos", "598", collection_name=MATHE) == ["700"]
+    assert qdrant.get_recommendations("mathe_videos", "657", collection_name=MATHE) == ["700"]

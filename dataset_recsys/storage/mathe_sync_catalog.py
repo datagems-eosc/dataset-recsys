@@ -31,14 +31,29 @@ class DocumentSyncSource:
 
 
 @dataclass(frozen=True)
+class VideoMaterialLink:
+    """One MathE platform material that points to a video."""
+
+    platform_material_id: str
+    content_subtype: str | None
+
+
+@dataclass(frozen=True)
 class VideoSyncSource:
-    """One video currently present in the MathE platform registry."""
+    """One video currently present in the MathE platform registry.
+
+    Several MathE materials can point to the same YouTube video. The video is
+    transcribed once; ``linked_materials`` lists every MathE material that
+    points to it, so each one is indexed with the shared transcript. When it is
+    empty, the video's own ``platform_material_id`` is its only material.
+    """
 
     entry_id: str
     source_value: str
     platform_material_id: str
     content_subtype: str | None
     transcript_backup: str | None
+    linked_materials: tuple[VideoMaterialLink, ...] = ()
 
 
 def has_completed_processing(entry: Mapping[str, Any]) -> bool:
@@ -88,6 +103,18 @@ class MathESyncCatalog:
                 )
                 """
             )
+            # Every MathE material that points to a video. sync_entries keeps
+            # one row per YouTube video, so a video shared by several MathE
+            # materials is transcribed once and indexed under each of them.
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS video_material_links (
+                    platform_material_id TEXT PRIMARY KEY,
+                    video_id TEXT NOT NULL,
+                    content_subtype TEXT
+                )
+                """
+            )
             # TRANSITIONAL: Remove with mathe_sync_migrations after every
             # deployed sync catalog has been upgraded and backfilled.
             migrate_sync_catalog(conn)
@@ -98,16 +125,42 @@ class MathESyncCatalog:
         return [dict(row) for row in rows]
 
     def list_completed_materials(self) -> list[dict[str, Any]]:
+        """Return one row per MathE material with completed text.
+
+        A video shared by several MathE materials yields one row per material,
+        each with the video's ``id`` and transcript. A video without recorded
+        links (a catalog not yet reconciled by this version) falls back to its
+        own ``platform_material_id``.
+        """
         with self.connection() as conn:
             rows = conn.execute(
                 """
-                SELECT id, type, platform_material_id, claude_ocr_text
-                FROM sync_entries
-                WHERE status = 'completed'
-                  AND type IN ('document', 'video')
-                  AND claude_ocr_text IS NOT NULL
-                  AND claude_ocr_text != ''
-                ORDER BY type, id
+                SELECT
+                    e.id,
+                    e.type,
+                    COALESCE(l.platform_material_id, e.platform_material_id)
+                        AS platform_material_id,
+                    e.claude_ocr_text
+                FROM sync_entries AS e
+                LEFT JOIN video_material_links AS l
+                  ON e.type = 'video' AND l.video_id = e.id
+                WHERE e.status = 'completed'
+                  AND e.type IN ('document', 'video')
+                  AND e.claude_ocr_text IS NOT NULL
+                  AND e.claude_ocr_text != ''
+                ORDER BY e.type, e.id, platform_material_id
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_video_material_links(self) -> list[dict[str, Any]]:
+        """Return every recorded MathE material -> video link."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT platform_material_id, video_id, content_subtype
+                FROM video_material_links
+                ORDER BY video_id, platform_material_id
                 """
             ).fetchall()
         return [dict(row) for row in rows]
@@ -203,6 +256,31 @@ class MathESyncCatalog:
             conn.executemany(
                 "DELETE FROM sync_entries WHERE id = ? AND type = 'video'",
                 [(entry_id,) for entry_id in removed_ids],
+            )
+
+            # The loaded registry is authoritative for the material links too.
+            conn.execute("DELETE FROM video_material_links")
+            conn.executemany(
+                """
+                INSERT INTO video_material_links (
+                    platform_material_id,
+                    video_id,
+                    content_subtype
+                ) VALUES (?, ?, ?)
+                """,
+                [
+                    (link.platform_material_id, source.entry_id, link.content_subtype)
+                    for source in sources
+                    for link in (
+                        source.linked_materials
+                        or (
+                            VideoMaterialLink(
+                                source.platform_material_id,
+                                source.content_subtype,
+                            ),
+                        )
+                    )
+                ],
             )
 
         return len(removed_ids)
@@ -355,6 +433,7 @@ class MathESyncCatalog:
 __all__ = [
     "DocumentSyncSource",
     "MathESyncCatalog",
+    "VideoMaterialLink",
     "VideoSyncSource",
     "has_completed_processing",
 ]

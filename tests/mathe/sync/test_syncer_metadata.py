@@ -821,3 +821,147 @@ def test_empty_catalog_table_lists_the_ocr_model_column(tmp_path):
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path, ocr_backend="scayle")
 
     assert "ocr_model" in syncer.get().columns
+
+
+def test_materials_sharing_a_video_are_all_kept_with_one_transcript(
+    tmp_path,
+    monkeypatch,
+    caplog,
+):
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    (syncer._transcript_dir / "abcdefghijk.txt").write_text(
+        "shared transcript",
+        encoding="utf-8",
+    )
+    video_rows = [
+        {
+            "platform_material_id": 598,
+            "link": "https://www.youtube.com/watch?v=abcdefghijk",
+            "platform_type": 1,
+        },
+        {
+            "platform_material_id": 657,
+            "link": "https://youtu.be/abcdefghijk",
+            "platform_type": 2,
+        },
+        {
+            "platform_material_id": 700,
+            "link": "Zyxwvutsrqp",
+            "platform_type": 1,
+        },
+        {
+            "platform_material_id": 812,
+            "link": "https://example.com/not-youtube",
+            "platform_type": 1,
+        },
+    ]
+
+    class FakeMatheClient:
+        def get_video_materials(self):
+            return video_rows
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(syncer, "_get_mathe_client", FakeMatheClient)
+    with caplog.at_level("WARNING", logger=mathe_syncer_module.__name__):
+        syncer.reconcile_sources()
+
+    # One catalog entry, and so one transcription, per YouTube video.
+    entries = {entry["id"]: entry for entry in syncer.get_raw()}
+    assert set(entries) == {"abcdefghijk", "Zyxwvutsrqp"}
+    assert entries["abcdefghijk"]["platform_material_id"] == "598"
+
+    # Every MathE material is linked to its video with its own subtype.
+    assert syncer.catalog.list_video_material_links() == [
+        {"platform_material_id": "700", "video_id": "Zyxwvutsrqp", "content_subtype": "video_lesson"},
+        {"platform_material_id": "598", "video_id": "abcdefghijk", "content_subtype": "video_lesson"},
+        {"platform_material_id": "657", "video_id": "abcdefghijk", "content_subtype": "video_review"},
+    ]
+
+    # Both materials of the shared video are indexed with its transcript;
+    # the pending video is not yet.
+    assert syncer.get_completed_materials() == [
+        {"id": "abcdefghijk", "type": "video", "platform_material_id": "598", "claude_ocr_text": "shared transcript"},
+        {"id": "abcdefghijk", "type": "video", "platform_material_id": "657", "claude_ocr_text": "shared transcript"},
+    ]
+
+    # A skipped link is reported, not dropped silently.
+    assert any("812" in record.getMessage() for record in caplog.records)
+
+
+def test_video_links_follow_the_registry(tmp_path, monkeypatch):
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    video_rows = [
+        {"platform_material_id": 598, "link": "abcdefghijk", "platform_type": 1},
+        {"platform_material_id": 657, "link": "abcdefghijk", "platform_type": 2},
+    ]
+
+    class FakeMatheClient:
+        def get_video_materials(self):
+            return video_rows
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(syncer, "_get_mathe_client", FakeMatheClient)
+    syncer.reconcile_sources()
+    video_rows[:] = [video_rows[1]]
+    syncer.reconcile_sources()
+
+    assert syncer.catalog.list_video_material_links() == [
+        {"platform_material_id": "657", "video_id": "abcdefghijk", "content_subtype": "video_review"},
+    ]
+    assert syncer.get_raw()[0]["platform_material_id"] == "657"
+
+
+def test_failed_registry_lookup_keeps_video_links(tmp_path, monkeypatch):
+    _disable_bedrock(monkeypatch)
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+
+    class FakeMatheClient:
+        def get_video_materials(self):
+            return [
+                {"platform_material_id": 598, "link": "abcdefghijk", "platform_type": 1},
+                {"platform_material_id": 657, "link": "abcdefghijk", "platform_type": 2},
+            ]
+
+        def close(self):
+            pass
+
+    class FailingMatheClient:
+        def get_video_materials(self):
+            raise RuntimeError("registry unavailable")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(syncer, "_get_mathe_client", FakeMatheClient)
+    syncer.reconcile_sources()
+    monkeypatch.setattr(syncer, "_get_mathe_client", FailingMatheClient)
+    syncer.reconcile_sources()
+
+    assert [
+        link["platform_material_id"]
+        for link in syncer.catalog.list_video_material_links()
+    ] == ["598", "657"]
+
+
+def test_completed_video_without_links_uses_its_own_material_id(tmp_path):
+    # A catalog written before links existed has no rows in the link table
+    # until the next reconciliation.
+    catalog = mathe_syncer_module.MathESyncCatalog(tmp_path / "syncer.db")
+    with catalog.connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO sync_entries (
+                id, type, claude_ocr_text, status, platform_material_id
+            ) VALUES ('abcdefghijk', 'video', 'transcript', 'completed', '598')
+            """
+        )
+
+    assert catalog.list_completed_materials() == [
+        {"id": "abcdefghijk", "type": "video", "platform_material_id": "598", "claude_ocr_text": "transcript"},
+    ]

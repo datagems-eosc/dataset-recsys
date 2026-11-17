@@ -1,4 +1,5 @@
 import signal
+from dataclasses import replace
 import subprocess
 import boto3
 import json
@@ -15,6 +16,7 @@ from dataset_recsys.mathe_recommenders.constants import VIDEO_TYPE_TO_SUBTYPE
 from dataset_recsys.storage.mathe_sync_catalog import (
     DocumentSyncSource,
     MathESyncCatalog,
+    VideoMaterialLink,
     VideoSyncSource,
     has_completed_processing,
 )
@@ -328,40 +330,58 @@ class MathE_Syncer:
                 except Exception as e:
                     logger.warning("Failed to close MathE PostgreSQL client: %s", e)
 
-        seen_video_ids: dict[str, str] = {}
-        video_sources: list[VideoSyncSource] = []
+        # One source per YouTube video, so each video is transcribed once,
+        # linked to every MathE material that points to it. The registry is
+        # ordered by material ID, so the lowest ID is the video's primary.
+        video_sources_by_id: dict[str, VideoSyncSource] = {}
         for video in db_videos:
             link = video["link"]
+            platform_material_id = video["platform_material_id"]
             if not self._is_youtube_asset(link):
+                logger.warning(
+                    "Skipping MathE video material %s: link is not a "
+                    "recognised YouTube URL or ID",
+                    platform_material_id,
+                )
                 continue
             try:
                 video_id = self._extract_video_id(link)
             except ValueError:
-                continue
-
-            platform_material_id = video["platform_material_id"]
-            if video_id in seen_video_ids:
                 logger.warning(
-                    "Multiple MathE materials reference YouTube video %s; "
-                    "keeping platform material %s and skipping %s",
-                    video_id,
-                    seen_video_ids[video_id],
+                    "Skipping MathE video material %s: could not parse a "
+                    "YouTube video ID from its link",
                     platform_material_id,
                 )
                 continue
 
-            seen_video_ids[video_id] = platform_material_id
-            video_sources.append(
-                VideoSyncSource(
-                    entry_id=video_id,
-                    source_value=link,
-                    platform_material_id=platform_material_id,
-                    content_subtype=VIDEO_TYPE_TO_SUBTYPE.get(
-                        video["platform_type"]
-                    ),
-                    transcript_backup=self._read_transcript_backup(video_id),
-                )
+            material_link = VideoMaterialLink(
+                platform_material_id=platform_material_id,
+                content_subtype=VIDEO_TYPE_TO_SUBTYPE.get(video["platform_type"]),
             )
+            existing = video_sources_by_id.get(video_id)
+            if existing is not None:
+                logger.info(
+                    "MathE materials %s and %s share YouTube video %s; "
+                    "indexing both with one transcript",
+                    existing.platform_material_id,
+                    platform_material_id,
+                    video_id,
+                )
+                video_sources_by_id[video_id] = replace(
+                    existing,
+                    linked_materials=existing.linked_materials + (material_link,),
+                )
+                continue
+
+            video_sources_by_id[video_id] = VideoSyncSource(
+                entry_id=video_id,
+                source_value=link,
+                platform_material_id=platform_material_id,
+                content_subtype=material_link.content_subtype,
+                transcript_backup=self._read_transcript_backup(video_id),
+                linked_materials=(material_link,),
+            )
+        video_sources = list(video_sources_by_id.values())
 
         # An empty successful registry result means there are no videos. A
         # failed query is not authoritative and must preserve the local cache.

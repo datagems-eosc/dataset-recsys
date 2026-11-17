@@ -517,6 +517,8 @@ class MathE_Syncer:
 
     def process_pending_materials(self, limit: Optional[int] = None) -> None:
         """Run document OCR or video transcription for pending catalog entries."""
+        # TODO: Retry transient failures after a configurable delay; see the
+        # retry policy TODO in docs/source/mathe_workflows.md.
         pending_entries = self.catalog.list_pending_entries(limit=limit)
 
         if not pending_entries:

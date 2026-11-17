@@ -257,6 +257,14 @@ deleted after all deployed catalogs have been upgraded.
 - `failed` means OCR or transcription failed and the entry is skipped by the
   current batch processing loop.
 
+**TODO: Retry transient failures.** Record the last attempt time and failure
+reason, and make transient failures eligible for retry after a configurable
+delay (for example, a few hours) during a subsequent sync. Limit attempts or
+use backoff, and distinguish temporary failures from unavailable or removed
+materials and configuration or access errors. Surface the retry state and
+provide a way to retry manually. Re-embed recovered materials and refresh the
+question rankings after a successful retry. This is not implemented yet.
+
 Only completed entries with non-empty `claude_ocr_text` are used by the refresh
 pipeline. Each text is embedded once. The pipeline publishes strict
 `mathe_documents` and `mathe_videos` collections. They use

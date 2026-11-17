@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 from dataset_recsys.ingestion.fetch_gems_datasets import DatasetProfile
 
-# load_dotenv()
+load_dotenv()
 
 # The SCAYLE server uses a self-signed certificate
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)

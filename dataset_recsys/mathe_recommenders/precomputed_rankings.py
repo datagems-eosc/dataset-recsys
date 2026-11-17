@@ -136,7 +136,27 @@ def _delete_inactive_snapshot(qdrant: QdrantStorageClient, collection: str) -> N
     except Exception:
         logger.warning("Could not remove inactive MathE ranking snapshot %s", collection, exc_info=True)
 
+def _delete_stale_snapshots(qdrant: QdrantStorageClient) -> None:
+    """Delete every versioned ranking collection the active alias does not point at."""
+    try:
+        active = _alias_target(qdrant)
+        if active is None:
+            return  # no published snapshot: never delete anything
+        prefix = f"{qdrant.MATHE_QUESTION_RANKINGS}_"
+        names = [c.name for c in qdrant.client.get_collections().collections]
+    except Exception:
+        logger.warning("Could not list MathE ranking snapshots for cleanup", exc_info=True)
+        return
 
+    for name in names:
+        if name.startswith(prefix) and name != active:
+            try:
+                qdrant.client.delete_collection(name)
+                logger.info("Deleted stale MathE ranking snapshot %s", name)
+            except Exception:
+                logger.warning("Could not delete stale MathE ranking snapshot %s", name, exc_info=True)
+
+                
 def refresh_question_rankings(
     mirror: MatheMirrorClient,
     qdrant: QdrantStorageClient,
@@ -193,7 +213,6 @@ def refresh_question_rankings(
         _delete_inactive_snapshot(qdrant, collection)
         raise
 
-    if previous is not None:
-        _delete_inactive_snapshot(qdrant, previous)
+    _delete_stale_snapshots(qdrant)
     logger.info("Published precomputed MathE rankings for %d questions", len(questions))
     return len(questions)

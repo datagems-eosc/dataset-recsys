@@ -278,6 +278,18 @@ class MathESyncCatalog:
             rows = conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
+    def requeue_failed_entries(self) -> int:
+        """Return all failed entries to the queue so the next batch retries them."""
+        with self.connection() as conn:
+            cur = conn.execute(
+                """
+                UPDATE sync_entries
+                SET status = 'pending', claude_ocr_text = NULL, ocr_model = NULL
+                WHERE status = 'failed'
+                """
+            )
+            return cur.rowcount
+
     def update_processing_result(
         self,
         entry_id: str,

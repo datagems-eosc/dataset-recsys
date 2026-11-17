@@ -142,7 +142,9 @@ again and replaces both collections, so it also picks up changed text.
 
 Both pipelines store the complete neighbor ranking for each material, so an
 index built by incremental syncs matches one built by a full rebuild of the
-same catalog. `GET /dataset-recsys/mathe/status` reports the progress of
+same catalog. Materials that point to the same video have identical
+embeddings and are left out of each other's neighbor lists; question rankings
+keep both. `GET /dataset-recsys/mathe/status` reports the progress of
 either run.
 
 The recommendation endpoints answer `200` with an empty `recommendations` list
@@ -219,9 +221,10 @@ ORDER BY id;
 ```
 
 This selects both video categories and excludes `type = 3` teaching materials.
-After fetching links, the syncer still validates each value with YouTube
-detection logic. Only values that look like a YouTube URL or an 11-character
-YouTube ID are queued for transcription.
+After fetching links, the syncer extracts the YouTube ID from each value in
+the forms listed above. Values without a recognisable ID are not queued; they
+are logged and reported as `unrecognised_link` in `video_registry_gaps`.
+Materials whose links name the same video share one catalog entry.
 
 ## Output State
 
@@ -264,10 +267,19 @@ The exact fields depend on the material type:
 - YouTube entries use `type: video`, keep the original platform link in
   `source_value`, and store the transcript text in `claude_ocr_text`. Their
   `content_subtype` distinguishes `video_lesson` from `video_review`;
-  `platform_material_id` stores `platform_materials.id`; and the existing `id`
-  stores the YouTube ID. PostgreSQL discovery is exposed by
-  `MatheMirrorClient.get_video_materials()`; the syncer does not contain or
+  `platform_material_id` stores the lowest `platform_materials.id` that
+  points to the video; and the existing `id` stores the YouTube ID. There is
+  one entry per video, so a shared video is transcribed once.
+  `video_material_links` maps every MathE video material to its YouTube ID,
+  with its own subtype; the material's text and embedding come from that
+  entry. PostgreSQL discovery is exposed by
+  `MatheMirrorClient.get_video_materials()` and
+  `MatheMirrorClient.get_document_materials()`; the syncer does not contain or
   execute platform SQL directly.
+
+`syncer.db` also holds the registry checks of the last sync that could read
+the registry: `video_link_gaps` (video materials whose link names no video)
+and `document_registry_gaps`. They are reported by the status endpoint.
 
 `type` is the recommendation boundary: it is either `document` or `video`.
 Audio is only an intermediate artifact in the video-to-audio-to-transcript
@@ -292,19 +304,20 @@ deleted after all deployed catalogs have been upgraded.
 - `pending` means the material has been discovered but not successfully
   processed yet.
 - `completed` means usable text exists in `claude_ocr_text`.
-- `failed` means OCR or transcription failed and the entry is skipped by the
-  current batch processing loop.
+- `failed` means OCR or transcription failed. Every sync returns failed
+  entries to `pending` and tries them again, so a video that YouTube no
+  longer serves is retried, and fails, on each sync.
 
-**TODO: Retry transient failures.** Record the last attempt time and failure
-reason, and make transient failures eligible for retry after a configurable
-delay (for example, a few hours) during a subsequent sync. Limit attempts or
-use backoff, and distinguish temporary failures from unavailable or removed
-materials and configuration or access errors. Surface the retry state and
-provide a way to retry manually. Re-embed recovered materials and refresh the
-question rankings after a successful retry. This is not implemented yet.
+**TODO: Retry transient failures selectively.** Record the last attempt time,
+and retry transient failures only after a configurable delay (for example, a
+few hours), with a limit or backoff. Stop retrying materials that are
+unavailable or removed, and configuration or access errors. The status
+endpoint already separates `video_unavailable` from `transcription_failed`;
+the retry policy does not use that yet.
 
 Only completed entries with non-empty `claude_ocr_text` are used by the refresh
-pipeline. Each text is embedded once. The pipeline publishes strict
+pipeline. Each text is embedded once and stored under every MathE material
+linked to its entry. The pipeline publishes strict
 `mathe_documents` and `mathe_videos` collections. They use
 `platform_material_id` keys and compute neighbors independently, so their
 recommendation lists cannot cross the document/video boundary. A completed

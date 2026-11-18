@@ -290,6 +290,8 @@ def run_full_mathe_pipeline(syncer: MathE_Syncer) -> dict:
         )
 
         syncer.require_source_directories()
+        requeued = syncer.requeue_documents_for_reprocessing()
+        logger.info("Requeued %d documents for OCR re-run", requeued)
 
         logger.info("Reconciling MathE document and video sources")
         syncer.reconcile_sources()

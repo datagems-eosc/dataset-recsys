@@ -648,6 +648,25 @@ class MathE_Syncer:
 
     # --- OCR Logic ---
 
+    def requeue_documents_for_reprocessing(self) -> int:
+        """Mark every document entry pending so the next OCR pass redoes it.
+
+        Existing text is kept until the new OCR result overwrites it, so a
+        shutdown mid-run does not leave a document with no text.
+        """
+        requeued = 0
+        for row in self.catalog.list_entries():
+            if row.get("type") != "document":
+                continue
+            self.catalog.update_processing_result(
+                entry_id=row["id"],
+                status="pending",
+                text=row.get("claude_ocr_text") or "",
+                ocr_model=None,
+            )
+            requeued += 1
+        return requeued
+
     def process_pending_materials(self, limit: Optional[int] = None, retry_failed: bool = True) -> None:
         """Run document OCR or video transcription for pending catalog entries."""
 

@@ -306,9 +306,9 @@ async def rebuild_catalog(
     token: str = Depends(security.oauth2_scheme),
 ):
     """
-    Triggers a full rebuild: sync, OCR of pending materials, and re-embedding
-    of every completed material, replacing the stored document and video
-    collections. Use /sync for the cheaper incremental update.
+    Triggers a full rebuild: sync, re-OCR of every document, transcription of
+    pending videos, and re-embedding of every completed material, replacing the
+    stored document and video collections. Use /sync for the cheaper incremental update.
     Uses BackgroundTasks so the API returns immediately.
     """
     claims = claims if isinstance(claims, dict) else {}

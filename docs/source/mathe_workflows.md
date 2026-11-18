@@ -135,7 +135,7 @@ their content kind, and materials no longer in the catalog are removed
 together with every reference to them. A material that is already stored is
 not embedded again, even if its text changed.
 
-`/sync/rebuild` runs the full pipeline. It embeds every completed material
+`/sync/rebuild` runs the full pipeline. It reruns OCR for each material, embeds every completed material
 again and replaces both collections, so it also picks up changed text.
 
 Both pipelines store the complete neighbor ranking for each material, so an

@@ -1,6 +1,6 @@
 from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from datetime import datetime, timezone
-from dataset_recsys.utils.bedrock import enrich_batch
+from dataset_recsys.utils.scayle import DEFAULT_LLM as DEFAULT_ENRICHMENT_LLM, enrich_batch
 import os
 import requests
 from dotenv import load_dotenv
@@ -34,7 +34,7 @@ def get_access_token() -> str:
 async def process_incremental_update(
     dataset_profile,
     application: str,
-    enrichment_llm: str = "claude-sonnet-4-6",
+    enrichment_llm: str = DEFAULT_ENRICHMENT_LLM,
     prompt_version: str = "catalog_summary_v1",
     embedding_model: str = "allenai/specter2_base",
     qdrant_client: QdrantStorageClient | None = None,
@@ -47,7 +47,11 @@ async def process_incremental_update(
         return False
 
     # 2. LLM Enrichment
-    enriched_list = enrich_batch([dataset_profile])
+    # Enrich with the same model and prompt that are recorded with the
+    # embedding below.
+    enriched_list = enrich_batch(
+        [dataset_profile], llm=enrichment_llm, prompt_version=prompt_version
+    )
     enriched_profile = enriched_list[0]
 
     # 3. Embedding Generation
@@ -105,7 +109,7 @@ async def process_incremental_update(
 
 if __name__ == "__main__":
     # Example usage for testing
-    enrichment_llm = "claude-sonnet-4-6"
+    enrichment_llm = DEFAULT_ENRICHMENT_LLM
     prompt_version = "catalog_summary_v1"
     embedding_model = "allenai/specter2_base"
     application = "ds2ds"

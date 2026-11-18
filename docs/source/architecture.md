@@ -65,8 +65,8 @@ flowchart TB
 |---|---|---|
 | API layer | Authenticates the caller, checks roles, applies per-user authorization, and returns ranked IDs | FastAPI, OIDC bearer tokens |
 | Vector store | Holds one embedding per dataset or material, its provenance, and its stored ranking of related items | Qdrant |
-| Dataset pipeline | Builds the dataset index from the DataGEMS catalog | DMM API, Claude on Amazon Bedrock, `allenai/specter2_base` |
-| MathE pipeline | Turns material files and videos into text, embeds them, and builds the MathE index | LibreOffice, SCAYLE or Bedrock OCR, `faster-whisper`, `BAAI/bge-m3` |
+| Dataset pipeline | Builds the dataset index from the DataGEMS catalog | DMM API, SCAYLE model service (`qwen3.6`), `allenai/specter2_base` |
+| MathE pipeline | Turns material files and videos into text, embeds them, and builds the MathE index | LibreOffice, SCAYLE OCR, `faster-whisper`, `BAAI/bge-m3` |
 | MathE sync catalog | Checkpoint of every discovered material: status, extracted text, and the model that produced it | SQLite file under `MATHE_PATH` |
 | MathE mirror database | Read-only source of question and material metadata: topic, subtopic, keywords | PostgreSQL |
 | Request log | One record per dataset recommendation request, kept for six months | SQLite file at `REQUEST_LOG_DB_PATH` |
@@ -172,11 +172,9 @@ never return a video, and the reverse.
 | `QDRANT_HOST`, `QDRANT_PORT`, `QDRANT_API_KEY` | Connection to Qdrant |
 | `DMM_BASE_URL` | DMM instance whose dataset catalog this environment reads. Required; there is no default |
 | `DATAGEMS_AUTH_URL`, `DATAGEMS_CLIENT_ID`, `DATAGEMS_USER`, `DATAGEMS_PASSWORD` | Service account used by the dataset pipeline to read the catalog |
-| `AWS_ACCESS_KEY`, `AWS_SECRET_KEY` | Amazon Bedrock: dataset summaries, and document OCR when `MATHE_OCR_BACKEND=bedrock` |
 | `DATAGEMS_POSTGRES_HOST`, `DATAGEMS_POSTGRES_PORT`, `DB_DS_NAME`, `DB_DS_USER`, `DB_DS_PASSWORD`, `DATAGEMS_POSTGRES_SCHEMA` | MathE mirror database |
 | `MATHE_PATH` | Root folder of the MathE material files and the sync catalog |
-| `MATHE_OCR_BACKEND` | Document OCR backend: `scayle` (default) or `bedrock` |
-| `SCAYLE_BASE_URL`, `SCAYLE_USERNAME`, `SCAYLE_PASSWORD`, `SCAYLE_VERIFY_SSL` | SCAYLE model service, used when `MATHE_OCR_BACKEND=scayle` |
+| `SCAYLE_BASE_URL`, `SCAYLE_USERNAME`, `SCAYLE_PASSWORD`, `SCAYLE_VERIFY_SSL` | SCAYLE model service: dataset summaries and MathE document OCR. The service calls no other LLM provider |
 | `MATHE_EMBEDDING_MODEL` | Embedding model for MathE text. Default `BAAI/bge-m3` |
 | `MATHE_CURRICULAR_KEYWORD_WEIGHT`, `MATHE_VIDEO_KEYWORD_WEIGHT` | Keyword weight `w` for documents and for videos. Default `0.6` each |
 | `REQUEST_LOG_DB_PATH` | Location of the request log file. Point it at persistent storage |

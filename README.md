@@ -52,9 +52,11 @@ Update the image in the
 and roll it out to the dev API deployment. Keep the dev cluster's existing
 configuration and storage mounts when applying an image update.
 
-Set `DMM_BASE_URL` to the dev catalog before running dataset ingestion. For
-MathE document OCR, select `MATHE_OCR_BACKEND=bedrock` if dev uses its existing
-AWS configuration, or configure `SCAYLE_*` for the SCAYLE backend.
+Set `DMM_BASE_URL` to the dev catalog before running dataset ingestion, and
+configure `SCAYLE_*`: dataset summaries and MathE document OCR run on the
+SCAYLE model service. Images up to `v0.4.47` used Amazon Bedrock for dataset
+summaries (and for OCR when `MATHE_OCR_BACKEND=bedrock`); later images do not
+read `MATHE_OCR_BACKEND` or the `AWS_*` settings.
 
 After rollout, check `/dataset-recsys/health` for Qdrant connectivity and
 `/dataset-recsys/docs` for the API reference served by the new image. The

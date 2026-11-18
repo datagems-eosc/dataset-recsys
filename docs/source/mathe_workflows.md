@@ -57,16 +57,14 @@ materials.
 | DOCX, PPTX | Converted to PDF with LibreOffice, then handled like a PDF |
 | YouTube video | The audio track is downloaded with `yt-dlp` and transcribed with `faster-whisper` (model `base`) |
 
-The OCR backend is selected with `MATHE_OCR_BACKEND`:
-
-| Value | Model | How the document is sent |
-|---|---|---|
-| `scayle` (default) | `qwen3.6` on the SCAYLE model service | One request per rendered page |
-| `bedrock` | Claude Sonnet 4.5 on Amazon Bedrock | The whole PDF in one request |
-
-Both use a sampling temperature of 0. The model that produced a document's
-text is recorded with it (see [Output State](#output-state)), so a corpus
-processed partly with one backend and partly with the other can be told apart.
+Document OCR runs on the SCAYLE model service with `qwen3.6`, one request per
+rendered page, at a sampling temperature of 0. The model that produced a
+document's text is recorded with it (see [Output State](#output-state)).
+Images up to `v0.4.47` could also OCR with Claude Sonnet 4.5 on Amazon Bedrock
+(`MATHE_OCR_BACKEND=bedrock`); text produced that way keeps its recorded model
+until the document is processed again. `MATHE_OCR_BACKEND` is no longer read:
+if it is set to anything other than `scayle`, the syncer logs a warning and
+still uses SCAYLE.
 
 ### Embedding and Ranking
 
@@ -367,18 +365,13 @@ DB_DS_PASSWORD
 DATAGEMS_POSTGRES_SCHEMA
 ```
 
-The document OCR backend and its credentials:
+The SCAYLE credentials used for document OCR:
 
 ```text
-MATHE_OCR_BACKEND      scayle (default) or bedrock
-
-SCAYLE_BASE_URL        used when MATHE_OCR_BACKEND=scayle
+SCAYLE_BASE_URL
 SCAYLE_USERNAME
 SCAYLE_PASSWORD
 SCAYLE_VERIFY_SSL
-
-AWS_ACCESS_KEY         used when MATHE_OCR_BACKEND=bedrock
-AWS_SECRET_KEY
 ```
 
 The embeddings and rankings are written to Qdrant:

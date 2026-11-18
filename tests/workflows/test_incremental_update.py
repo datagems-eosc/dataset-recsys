@@ -9,6 +9,7 @@ from qdrant_client import QdrantClient
 from dataset_recsys import embeddings
 from dataset_recsys.ingestion.fetch_gems_datasets import DatasetProfile
 from dataset_recsys.storage.qdrant_client import QdrantStorageClient
+from dataset_recsys.utils import scayle
 from dataset_recsys.workflows import incremental_update
 
 
@@ -22,7 +23,9 @@ def add_dataset(monkeypatch, qdrant):
     """Add a dataset with a chosen embedding, without calling an LLM or a model."""
     vectors_by_id = {}
 
-    monkeypatch.setattr(incremental_update, "enrich_batch", lambda profiles: profiles)
+    monkeypatch.setattr(
+        incremental_update, "enrich_batch", lambda profiles, **kwargs: profiles
+    )
     monkeypatch.setattr(embeddings, "build_embedding_text", lambda profile: profile.id)
     monkeypatch.setattr(
         embeddings,
@@ -96,3 +99,23 @@ def test_new_dataset_stores_its_ranking_against_every_other_dataset(add_dataset,
     assert qdrant.get_recommendations("ds2ds", "new") == existing_ids
     for dataset_id in (existing_ids[0], existing_ids[-1]):
         assert qdrant.get_recommendations("ds2ds", dataset_id) == ["new"]
+
+
+def test_new_dataset_is_enriched_with_the_scayle_model_it_records(
+    add_dataset, monkeypatch, qdrant
+):
+    calls = []
+
+    def fake_enrich_batch(profiles, **kwargs):
+        calls.append(kwargs)
+        return profiles
+
+    monkeypatch.setattr(incremental_update, "enrich_batch", fake_enrich_batch)
+
+    add_dataset("a", [1.0, 0.0])
+
+    assert calls == [
+        {"llm": scayle.DEFAULT_LLM, "prompt_version": "catalog_summary_v1"}
+    ]
+    stored = qdrant._retrieve_point(QdrantStorageClient.COLLECTION_DATASET, "a")
+    assert stored.payload["enrichment_llm"] == scayle.DEFAULT_LLM

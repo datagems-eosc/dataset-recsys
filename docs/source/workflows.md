@@ -37,7 +37,7 @@ deployment, after a larger metadata update, or after a model change.
 | Step | What happens |
 |---|---|
 | Fetch | The complete catalog is read from the DMM instance set by `DMM_BASE_URL`, page by page. If that setting is missing, the rebuild stops before it requests anything |
-| Summarise | A language model (Claude on Amazon Bedrock, prompt version `catalog_summary_v1`) writes an 80 to 150 word catalog summary from each dataset's title, headline, description, keywords and field of science |
+| Summarise | A language model (`qwen3.6` on the SCAYLE model service, prompt version `catalog_summary_v1`) writes an 80 to 150 word catalog summary from each dataset's title, headline, description, keywords and field of science |
 | Embed | Title and summary are embedded with `allenai/specter2_base`, using mean pooling over at most 512 tokens |
 | Store | The new embeddings are written, then datasets that are no longer in the catalog are deleted, so the index always matches the catalog |
 | Rank | Cosine similarity between all pairs of datasets; each dataset stores its complete ranking with scores |

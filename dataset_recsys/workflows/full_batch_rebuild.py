@@ -12,7 +12,7 @@ from typing import Any, Callable
 import numpy as np
 
 from dataset_recsys.ingestion.fetch_gems_datasets import DatasetProfile, fetch_catalog
-from dataset_recsys.utils.bedrock import enrich_batch
+from dataset_recsys.utils.scayle import DEFAULT_LLM as DEFAULT_ENRICHMENT_LLM, enrich_batch
 from dataset_recsys.embeddings import build_embedding_text, encode_texts
 from dataset_recsys.retrieval import RankedNeighbors, rank_similar_entities
 from dataset_recsys.storage.qdrant_client import QdrantStorageClient
@@ -234,7 +234,7 @@ def run_full_batch_rebuild(
     qdrant_host="localhost",
     qdrant_port=6333,
     application: str = "ds2ds",
-    enrichment_llm: str = "claude-sonnet-4-6",
+    enrichment_llm: str = DEFAULT_ENRICHMENT_LLM,
     prompt_version: str = "catalog_summary_v1",
     embedding_model: str = "allenai/specter2_base",
 ) -> BatchRebuildArtifacts:
@@ -325,12 +325,12 @@ __all__ = ["BatchRebuildArtifacts", "FullBatchRebuildWorkflow"]
 
 if __name__ == "__main__":
     
-    enrichment_llm = "claude-sonnet-4-6"
+    enrichment_llm = DEFAULT_ENRICHMENT_LLM
     prompt_version = "catalog_summary_v1"
     embedding_model = "allenai/specter2_base"
     application = "ds2ds"
 
-    # TODO: support a "load from existing artifacts" mode to skip Bedrock and
+    # TODO: support a "load from existing artifacts" mode to skip LLM enrichment and
     # embedding recomputation during local debugging.
     TEST_MODE = False
     test_limit = 1 if TEST_MODE else None

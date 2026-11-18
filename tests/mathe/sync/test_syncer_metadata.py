@@ -22,16 +22,7 @@ LEGACY_SYNC_SCHEMA = """
 """
 
 
-def _disable_bedrock(monkeypatch):
-    monkeypatch.setattr(
-        mathe_syncer_module.boto3,
-        "client",
-        lambda *args, **kwargs: object(),
-    )
-
-
 def test_syncer_passes_configured_schema_to_mathe_client(tmp_path, monkeypatch):
-    _disable_bedrock(monkeypatch)
     monkeypatch.setenv("DATAGEMS_POSTGRES_SCHEMA", "mathe_dev")
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     client = object()
@@ -103,7 +94,6 @@ def test_sync_catalog_migrates_and_backfills_legacy_entries(tmp_path, monkeypatc
             ],
         )
 
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
 
     with syncer.catalog.connection() as conn:
@@ -179,7 +169,6 @@ def test_discovery_preserves_platform_id_and_video_subtype(tmp_path, monkeypatch
     pdf_dir.mkdir()
     (pdf_dir / "221.pdf").write_bytes(b"placeholder")
 
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     with syncer.catalog.connection() as conn:
         conn.execute(
@@ -271,7 +260,6 @@ def test_discovery_reconciles_added_updated_and_removed_materials(
     (pdf_dir / "221.pdf").write_bytes(b"first")
     (pdf_dir / "222.pdf").write_bytes(b"second")
 
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     video_rows = [
         {
@@ -334,7 +322,6 @@ def test_discovery_reconciles_added_updated_and_removed_materials(
 
 
 def test_video_registry_failure_preserves_cached_catalog(tmp_path, monkeypatch):
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     with syncer.catalog.connection() as conn:
         conn.execute(
@@ -377,7 +364,6 @@ def test_document_reconciliation_only_uses_available_source_directories(
     pdf_dir = tmp_path / "pdfs"
     pdf_dir.mkdir()
 
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     with syncer.catalog.connection() as conn:
         conn.executemany(
@@ -425,7 +411,6 @@ def test_reconciliation_preserves_completed_legacy_document_row(
     source_pdf = pdf_dir / "221.pdf"
     source_pdf.write_bytes(b"current source")
 
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     with syncer.catalog.connection() as conn:
         conn.execute(
@@ -459,7 +444,6 @@ def test_reconciliation_preserves_completed_legacy_document_row(
 
 
 def test_empty_video_transcript_is_requeued(tmp_path, monkeypatch):
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     with syncer.catalog.connection() as conn:
         conn.execute(
@@ -505,7 +489,6 @@ def test_empty_video_transcript_is_requeued(tmp_path, monkeypatch):
 
 
 def test_source_reconciliation_propagates_catalog_failure(tmp_path, monkeypatch):
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
 
     def fail_catalog_read():
@@ -520,22 +503,11 @@ def test_source_reconciliation_propagates_catalog_failure(tmp_path, monkeypatch)
 SOURCE_DIRECTORY_NAMES = ("pdfs", "docxs", "pptxs", "transcripts")
 
 
-def _build_syncer(ocr_backend):
-    def build(tmp_path, monkeypatch):
-        _disable_bedrock(monkeypatch)
-        return mathe_syncer_module.MathE_Syncer(
-            base_dir=tmp_path,
-            ocr_backend=ocr_backend,
-        )
-
-    return build
+def _build_syncer(tmp_path, monkeypatch):
+    return mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
 
 
-SYNCER_BUILDERS = pytest.mark.parametrize(
-    "build_syncer",
-    [_build_syncer("bedrock"), _build_syncer("scayle")],
-    ids=["bedrock", "scayle"],
-)
+SYNCER_BUILDERS = pytest.mark.parametrize("build_syncer", [_build_syncer])
 
 
 # The API builds the syncer at import time, so construction must not depend on
@@ -578,55 +550,57 @@ def test_require_source_directories_passes_when_all_exist(
     assert syncer.require_source_directories() is None
 
 
-def _fail_if_bedrock_client_is_created(monkeypatch):
-    def fail(*args, **kwargs):
-        raise AssertionError("The Bedrock client must not be created")
-
-    monkeypatch.setattr(mathe_syncer_module.boto3, "client", fail)
-
-
 def _document_entry(tmp_path):
     pdf_path = tmp_path / "221.pdf"
     pdf_path.write_bytes(b"%PDF-1.4 test")
     return {"id": "221.pdf", "internal_pdf_path": str(pdf_path)}
 
 
-def test_syncer_uses_scayle_ocr_by_default(tmp_path, monkeypatch):
+def test_syncer_uses_scayle_ocr_model(tmp_path, monkeypatch):
     monkeypatch.delenv("MATHE_OCR_BACKEND", raising=False)
-    _fail_if_bedrock_client_is_created(monkeypatch)
 
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
 
-    assert syncer.ocr_backend == "scayle"
     assert syncer.ocr_model == mathe_syncer_module.OCR_LLM
-    assert syncer.bedrock is None
 
 
-def test_syncer_reads_ocr_backend_from_environment(tmp_path, monkeypatch):
-    monkeypatch.setenv("MATHE_OCR_BACKEND", " Bedrock ")
-    _disable_bedrock(monkeypatch)
+# MATHE_OCR_BACKEND used to select Bedrock. A value left in a deployment's
+# configuration must not route OCR away from SCAYLE.
+@pytest.mark.parametrize("value", ["bedrock", " Bedrock ", "tesseract"])
+def test_retired_ocr_backend_setting_still_ocrs_with_scayle(
+    value, tmp_path, monkeypatch, caplog
+):
+    monkeypatch.setenv("MATHE_OCR_BACKEND", value)
+    calls = []
 
-    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    def fake_ocr_file(path, **kwargs):
+        calls.append(kwargs["llm"])
+        return "scayle text"
 
-    assert syncer.ocr_backend == "bedrock"
-    assert syncer.ocr_model == mathe_syncer_module.BEDROCK_OCR_MODEL_ID
-    assert syncer.bedrock is not None
+    monkeypatch.setattr(mathe_syncer_module, "ocr_file", fake_ocr_file)
+
+    with caplog.at_level("WARNING", logger=mathe_syncer_module.__name__):
+        syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    entry = _document_entry(tmp_path)
+    syncer._process_document_entry(entry)
+
+    assert "MATHE_OCR_BACKEND" in caplog.text
+    assert "always uses SCAYLE" in caplog.text
+    assert entry["status"] == "completed"
+    assert entry["claude_ocr_text"] == "scayle text"
+    assert entry["ocr_model"] == mathe_syncer_module.OCR_LLM
+    assert calls == [mathe_syncer_module.OCR_LLM]
 
 
-def test_ocr_backend_argument_overrides_environment(tmp_path, monkeypatch):
-    monkeypatch.setenv("MATHE_OCR_BACKEND", "bedrock")
-    _fail_if_bedrock_client_is_created(monkeypatch)
+def test_scayle_setting_for_retired_ocr_backend_does_not_warn(
+    tmp_path, monkeypatch, caplog
+):
+    monkeypatch.setenv("MATHE_OCR_BACKEND", "scayle")
 
-    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path, ocr_backend="scayle")
-
-    assert syncer.ocr_backend == "scayle"
-
-
-def test_syncer_rejects_unknown_ocr_backend(tmp_path, monkeypatch):
-    monkeypatch.setenv("MATHE_OCR_BACKEND", "tesseract")
-
-    with pytest.raises(ValueError, match="Unsupported MathE OCR backend 'tesseract'"):
+    with caplog.at_level("WARNING", logger=mathe_syncer_module.__name__):
         mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+
+    assert "MATHE_OCR_BACKEND" not in caplog.text
 
 
 def test_scayle_document_ocr_skips_text_layer_and_uses_math_prompt(
@@ -639,7 +613,7 @@ def test_scayle_document_ocr_skips_text_layer_and_uses_math_prompt(
         return "$x^2$"
 
     monkeypatch.setattr(mathe_syncer_module, "ocr_file", fake_ocr_file)
-    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path, ocr_backend="scayle")
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     entry = _document_entry(tmp_path)
 
     syncer._process_document_entry(entry)
@@ -658,48 +632,13 @@ def test_scayle_document_ocr_skips_text_layer_and_uses_math_prompt(
 
 def test_scayle_document_ocr_marks_empty_text_as_failed(tmp_path, monkeypatch):
     monkeypatch.setattr(mathe_syncer_module, "ocr_file", lambda path, **kwargs: "  \n")
-    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path, ocr_backend="scayle")
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     entry = _document_entry(tmp_path)
 
     syncer._process_document_entry(entry)
 
     assert entry["status"] == "failed"
     assert entry["claude_ocr_text"] == "OCR Failed: SCAYLE OCR returned empty text"
-
-
-def test_bedrock_document_ocr_sends_whole_pdf_to_configured_model(
-    tmp_path, monkeypatch
-):
-    requests = []
-
-    class FakeBedrock:
-        def converse(self, **kwargs):
-            requests.append(kwargs)
-            return {"output": {"message": {"content": [{"text": "$y^2$"}]}}}
-
-    monkeypatch.setattr(
-        mathe_syncer_module.boto3,
-        "client",
-        lambda *args, **kwargs: FakeBedrock(),
-    )
-    monkeypatch.setattr(
-        mathe_syncer_module,
-        "ocr_file",
-        lambda *args, **kwargs: pytest.fail("SCAYLE must not be called"),
-    )
-    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path, ocr_backend="bedrock")
-    entry = _document_entry(tmp_path)
-
-    syncer._process_document_entry(entry)
-
-    assert entry["status"] == "completed"
-    assert entry["claude_ocr_text"] == "$y^2$"
-    assert len(requests) == 1
-    assert requests[0]["modelId"] == mathe_syncer_module.BEDROCK_OCR_MODEL_ID
-    assert requests[0]["inferenceConfig"] == {"temperature": 0.0}
-    content = requests[0]["messages"][0]["content"]
-    assert content[0]["document"]["source"]["bytes"] == b"%PDF-1.4 test"
-    assert content[1] == {"text": mathe_syncer_module.BEDROCK_OCR_PROMPT}
 
 
 def _insert_pending_entry(syncer, entry_id, entry_type, pdf_path=None):
@@ -730,7 +669,6 @@ def test_migration_adds_ocr_model_column_without_backfilling(tmp_path, monkeypat
             """
         )
 
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
 
     entry = _entries_by_id(syncer)["221.pdf"]
@@ -744,29 +682,11 @@ def test_migration_adds_ocr_model_column_without_backfilling(tmp_path, monkeypat
     assert _entries_by_id(reopened)["221.pdf"] == entry
 
 
-@pytest.mark.parametrize(
-    ("ocr_backend", "expected_model"),
-    [
-        ("scayle", mathe_syncer_module.OCR_LLM),
-        ("bedrock", mathe_syncer_module.BEDROCK_OCR_MODEL_ID),
-    ],
-)
-def test_completed_document_records_the_ocr_model(
-    ocr_backend, expected_model, tmp_path, monkeypatch
-):
-    class FakeBedrock:
-        def converse(self, **kwargs):
-            return {"output": {"message": {"content": [{"text": "bedrock text"}]}}}
-
-    monkeypatch.setattr(
-        mathe_syncer_module.boto3, "client", lambda *args, **kwargs: FakeBedrock()
-    )
+def test_completed_document_records_the_ocr_model(tmp_path, monkeypatch):
     monkeypatch.setattr(
         mathe_syncer_module, "ocr_file", lambda path, **kwargs: "scayle text"
     )
-    syncer = mathe_syncer_module.MathE_Syncer(
-        base_dir=tmp_path, ocr_backend=ocr_backend
-    )
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     pdf_path = _document_entry(tmp_path)["internal_pdf_path"]
     _insert_pending_entry(syncer, "221.pdf", "document", pdf_path)
 
@@ -774,8 +694,8 @@ def test_completed_document_records_the_ocr_model(
 
     entry = _entries_by_id(syncer)["221.pdf"]
     assert entry["status"] == "completed"
-    assert entry["claude_ocr_text"] == f"{ocr_backend} text"
-    assert entry["ocr_model"] == expected_model
+    assert entry["claude_ocr_text"] == "scayle text"
+    assert entry["ocr_model"] == mathe_syncer_module.OCR_LLM
 
 
 def test_failed_document_ocr_does_not_record_a_model(tmp_path, monkeypatch):
@@ -783,7 +703,7 @@ def test_failed_document_ocr_does_not_record_a_model(tmp_path, monkeypatch):
         raise RuntimeError("SCAYLE unavailable")
 
     monkeypatch.setattr(mathe_syncer_module, "ocr_file", failing_ocr_file)
-    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path, ocr_backend="scayle")
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     pdf_path = _document_entry(tmp_path)["internal_pdf_path"]
     _insert_pending_entry(syncer, "221.pdf", "document", pdf_path)
 
@@ -806,7 +726,7 @@ def test_video_transcript_does_not_record_an_ocr_model(tmp_path, monkeypatch):
         "_process_video_entry",
         fake_process_video_entry,
     )
-    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path, ocr_backend="scayle")
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     _insert_pending_entry(syncer, "abcdefghijk", "video")
 
     syncer.process_pending_materials()
@@ -818,7 +738,7 @@ def test_video_transcript_does_not_record_an_ocr_model(tmp_path, monkeypatch):
 
 
 def test_empty_catalog_table_lists_the_ocr_model_column(tmp_path):
-    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path, ocr_backend="scayle")
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
 
     assert "ocr_model" in syncer.get().columns
 
@@ -828,7 +748,6 @@ def test_materials_sharing_a_video_are_all_kept_with_one_transcript(
     monkeypatch,
     caplog,
 ):
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     (syncer._transcript_dir / "abcdefghijk.txt").write_text(
         "shared transcript",
@@ -892,7 +811,6 @@ def test_materials_sharing_a_video_are_all_kept_with_one_transcript(
 
 
 def test_video_links_follow_the_registry(tmp_path, monkeypatch):
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     video_rows = [
         {"platform_material_id": 598, "link": "abcdefghijk", "platform_type": 1},
@@ -918,7 +836,6 @@ def test_video_links_follow_the_registry(tmp_path, monkeypatch):
 
 
 def test_failed_registry_lookup_keeps_video_links(tmp_path, monkeypatch):
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
 
     class FakeMatheClient:
@@ -996,7 +913,6 @@ def test_registry_documents_without_a_source_file_are_recorded(
     # On disk but not in the registry: still indexed, and reported.
     (pdf_dir / "230.pdf").write_bytes(b"unlisted")
 
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     registry = _RegistryClient(
         [
@@ -1030,7 +946,6 @@ def test_registry_documents_without_a_source_file_are_recorded(
 def test_document_gaps_clear_once_the_file_is_mounted(tmp_path, monkeypatch):
     pdf_dir = tmp_path / "pdfs"
     pdf_dir.mkdir()
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     registry = _RegistryClient([{"platform_material_id": 222, "file_ext": "pdf"}])
     monkeypatch.setattr(syncer, "_get_mathe_client", lambda: registry)
@@ -1045,7 +960,6 @@ def test_document_gaps_clear_once_the_file_is_mounted(tmp_path, monkeypatch):
 
 def test_failed_document_registry_lookup_keeps_previous_gaps(tmp_path, monkeypatch):
     (tmp_path / "pdfs").mkdir()
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     registry = _RegistryClient([{"platform_material_id": 222, "file_ext": "pdf"}])
     monkeypatch.setattr(syncer, "_get_mathe_client", lambda: registry)
@@ -1061,7 +975,6 @@ def test_catalogued_legacy_document_is_not_reported_as_a_gap(tmp_path, monkeypat
     pdf_dir = tmp_path / "pdfs"
     pdf_dir.mkdir()
     (pdf_dir / "221.pdf").write_bytes(b"present")
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     with syncer.catalog.connection() as conn:
         conn.execute(
@@ -1084,7 +997,6 @@ def test_unregistered_material_in_several_formats_is_reported_once(tmp_path, mon
     pdf_dir = tmp_path / "pdfs"
     pdf_dir.mkdir()
     (pdf_dir / "271.pdf").write_bytes(b"pdf copy")
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     with syncer.catalog.connection() as conn:
         # A converted DOCX of the same material already in the catalog.
@@ -1111,7 +1023,6 @@ def test_unregistered_file_stops_being_reported_once_registered(tmp_path, monkey
     pdf_dir = tmp_path / "pdfs"
     pdf_dir.mkdir()
     (pdf_dir / "271.pdf").write_bytes(b"present")
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     registry = _RegistryClient([])
     monkeypatch.setattr(syncer, "_get_mathe_client", lambda: registry)
@@ -1144,7 +1055,6 @@ def test_unregistered_file_stops_being_reported_once_registered(tmp_path, monkey
     ],
 )
 def test_youtube_link_forms_resolve_to_the_video_id(tmp_path, monkeypatch, link):
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
 
     assert syncer._is_youtube_asset(link)
@@ -1171,7 +1081,6 @@ def test_youtube_link_forms_resolve_to_the_video_id(tmp_path, monkeypatch, link)
     ],
 )
 def test_links_naming_no_youtube_video_are_rejected(tmp_path, monkeypatch, link):
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
 
     if syncer._is_youtube_asset(link):
@@ -1198,7 +1107,6 @@ class _VideoRegistryClient:
 def test_unindexed_video_materials_are_reported_with_a_reason(
     tmp_path, monkeypatch
 ):
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     (syncer._transcript_dir / "doneVideo01.txt").write_text("transcript", encoding="utf-8")
     registry = _VideoRegistryClient(
@@ -1240,7 +1148,6 @@ def test_unindexed_video_materials_are_reported_with_a_reason(
 def test_link_gaps_follow_the_registry_and_survive_a_failed_lookup(
     tmp_path, monkeypatch
 ):
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     registry = _VideoRegistryClient(
         [{"platform_material_id": 705, "link": "https://example.com/video", "platform_type": 1}]
@@ -1273,7 +1180,6 @@ def test_link_gaps_follow_the_registry_and_survive_a_failed_lookup(
     ],
 )
 def test_links_without_the_youtube_domain_resolve(tmp_path, monkeypatch, link, video_id):
-    _disable_bedrock(monkeypatch)
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
 
     assert syncer._is_youtube_asset(link)

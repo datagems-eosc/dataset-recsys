@@ -707,11 +707,6 @@ def test_sync_endpoints_schedule_their_mathe_pipeline(
         "structlog",
         types.SimpleNamespace(get_logger=lambda *args, **kwargs: fake_logger),
     )
-    monkeypatch.setattr(
-        mathe_syncer_module.boto3,
-        "client",
-        lambda *args, **kwargs: object(),
-    )
 
     background_tasks = BackgroundTasks()
     response = asyncio.run(getattr(mathe, endpoint_name)(background_tasks))
@@ -911,11 +906,6 @@ def test_status_endpoint_marks_old_running_sync_as_stale(monkeypatch):
 
 # Completed and failed entries are terminal states for the current batch processor.
 def test_batch_processing_skips_completed_and_failed_entries(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        mathe_syncer_module.boto3,
-        "client",
-        lambda *args, **kwargs: object(),
-    )
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     with syncer.catalog.connection() as conn:
         conn.executemany(
@@ -959,11 +949,6 @@ def test_batch_processing_skips_completed_and_failed_entries(monkeypatch, tmp_pa
 
 
 def test_batch_processing_retries_failed_entries_by_default(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        mathe_syncer_module.boto3,
-        "client",
-        lambda *args, **kwargs: object(),
-    )
     syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
     with syncer.catalog.connection() as conn:
         conn.executemany(
@@ -998,11 +983,6 @@ def test_batch_processing_retries_failed_entries_by_default(monkeypatch, tmp_pat
 
 
 def test_batch_processing_routes_video_type_to_transcription(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        mathe_syncer_module.boto3,
-        "client",
-        lambda *args, **kwargs: object(),
-    )
     whisper_model = object()
     monkeypatch.setattr(
         mathe_syncer_module,

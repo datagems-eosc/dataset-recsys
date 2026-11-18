@@ -1,7 +1,6 @@
 import signal
 from dataclasses import replace
 import subprocess
-import boto3
 import json
 import logging
 import os
@@ -28,31 +27,20 @@ from dataset_recsys.storage.mathe_sync_catalog import (
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
 from dataset_recsys.utils.scayle import OCR_LLM, ocr_file
 
-AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
-AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
 logger = logging.getLogger(__name__)
 
-# Document OCR backends. Select one with the MATHE_OCR_BACKEND environment
-# variable or the ``ocr_backend`` constructor argument.
-OCR_BACKEND_SCAYLE = "scayle"
-OCR_BACKEND_BEDROCK = "bedrock"
-OCR_BACKENDS = (OCR_BACKEND_SCAYLE, OCR_BACKEND_BEDROCK)
-DEFAULT_OCR_BACKEND = OCR_BACKEND_SCAYLE
-
-BEDROCK_OCR_MODEL_ID = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
-BEDROCK_REGION = "eu-central-1"
-
-# SCAYLE receives one rendered page per request; Bedrock receives the whole PDF.
+# Document OCR always runs on SCAYLE. SCAYLE receives one rendered page per
+# request.
 SCAYLE_OCR_PROMPT = (
     "Extract all text from this math document page. Use LaTeX for equations. "
     "Follow the native language of the document. Do not add any commentary or "
     "explanations, just return the raw extracted text."
 )
-BEDROCK_OCR_PROMPT = (
-    "Extract all text from this math document. Use LaTeX for equations. "
-    "Follow the native language of the document. Do not add any commentary or "
-    "explanations, just return the raw extracted text."
-)
+
+# MATHE_OCR_BACKEND used to select SCAYLE or Bedrock. It is no longer read; a
+# leftover value only triggers a warning, so an old setting cannot route OCR
+# to another provider.
+_RETIRED_OCR_BACKEND_ENV = "MATHE_OCR_BACKEND"
 
 
 _RAW_VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
@@ -79,17 +67,14 @@ _YOUTUBE_URL_VIDEO_ID = re.compile(
 SUPPORTED_DOCUMENT_EXTENSIONS = ("pdf", "docx", "pptx")
 
 
-def resolve_ocr_backend(ocr_backend: Optional[str] = None) -> str:
-    """Return the configured document OCR backend, validating its name."""
-    backend = (
-        ocr_backend or os.getenv("MATHE_OCR_BACKEND") or DEFAULT_OCR_BACKEND
-    ).strip().lower()
-    if backend not in OCR_BACKENDS:
-        raise ValueError(
-            f"Unsupported MathE OCR backend '{backend}'. "
-            f"Expected one of: {', '.join(OCR_BACKENDS)}."
+def _warn_if_retired_ocr_backend_is_set() -> None:
+    value = (os.getenv(_RETIRED_OCR_BACKEND_ENV) or "").strip().lower()
+    if value and value != "scayle":
+        logger.warning(
+            "%s=%s is ignored: MathE document OCR always uses SCAYLE.",
+            _RETIRED_OCR_BACKEND_ENV,
+            value,
         )
-    return backend
 
 
 def _progress_bar(current: int, total: int, width: int = 20) -> str:
@@ -102,7 +87,7 @@ def _progress_bar(current: int, total: int, width: int = 20) -> str:
 
 
 class MathE_Syncer:
-    def __init__(self, base_dir: Path, ocr_backend: Optional[str] = None) -> None:
+    def __init__(self, base_dir: Path) -> None:
         self._base_dir = base_dir
         self._pdf_dir = self._base_dir / "pdfs"
         self._docx_dir = self._base_dir / "docxs"
@@ -116,22 +101,12 @@ class MathE_Syncer:
         self.status_file = self._base_dir / "sync_status.json"
         self.cookie_file = self._base_dir / "cookies.txt"
         
-        # Document OCR backend. ``ocr_model`` names the model that produces the
-        # OCR text, so runs can report it for reproducibility.
-        self.ocr_backend = resolve_ocr_backend(ocr_backend)
-        self.bedrock = None
-        if self.ocr_backend == OCR_BACKEND_BEDROCK:
-            self.ocr_model = BEDROCK_OCR_MODEL_ID
-            self.bedrock = boto3.client(
-                "bedrock-runtime",
-                region_name=BEDROCK_REGION,
-                aws_access_key_id=AWS_ACCESS_KEY,
-                aws_secret_access_key=AWS_SECRET_KEY,
-            )
-        else:
-            # Credentials and URL come from the SCAYLE_* environment variables
-            # (see dataset_recsys/utils/scayle.py).
-            self.ocr_model = OCR_LLM
+        # Document OCR runs on SCAYLE; credentials and URL come from the
+        # SCAYLE_* environment variables (see dataset_recsys/utils/scayle.py).
+        # ``ocr_model`` names the model that produces the OCR text, so runs
+        # can report it for reproducibility.
+        _warn_if_retired_ocr_backend_is_set()
+        self.ocr_model = OCR_LLM
         
         # Graceful shutdown handling
         # The top-level MathE pipeline owns this lifecycle guard.
@@ -851,44 +826,24 @@ class MathE_Syncer:
             raise ValueError("SCAYLE OCR returned empty text")
         return text
 
-    def _ocr_document_with_bedrock(self, doc_path: Path) -> str:
-        with open(doc_path, "rb") as f:
-            pdf_bytes = f.read()
-
-        response = self.bedrock.converse(
-            modelId=self.ocr_model,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"document": {"name": doc_path.stem, "format": "pdf", "source": {"bytes": pdf_bytes}}},
-                    {"text": BEDROCK_OCR_PROMPT},
-                ]
-            }],
-            inferenceConfig={"temperature": 0.0}
-        )
-        return response['output']['message']['content'][0]['text']
-
     def _process_document_entry(self, entry: Dict):
         doc_path = Path(entry["internal_pdf_path"])
         try:
             if not doc_path.exists():
                 raise FileNotFoundError(f"Underlying converted PDF file artifact missing from path: {doc_path}")
 
-            if self.ocr_backend == OCR_BACKEND_BEDROCK:
-                text = self._ocr_document_with_bedrock(doc_path)
-            else:
-                text = self._ocr_document_with_scayle(doc_path)
+            text = self._ocr_document_with_scayle(doc_path)
 
             # The column keeps its legacy name ("claude_ocr_text") to avoid a schema change.
             entry["claude_ocr_text"] = text
             entry["ocr_model"] = self.ocr_model
             entry["status"] = "completed"
             print(
-                f"Successfully executed {self.ocr_backend} OCR ({self.ocr_model}) "
+                f"Successfully executed SCAYLE OCR ({self.ocr_model}) "
                 f"for document: {entry['id']}"
             )
         except Exception as e:
-            print(f"Failed {self.ocr_backend} OCR processing for {entry['id']}: {e}")
+            print(f"Failed SCAYLE OCR processing for {entry['id']}: {e}")
             entry["claude_ocr_text"] = f"OCR Failed: {str(e)}"
             entry["ocr_model"] = None
             entry["status"] = "failed"

@@ -50,8 +50,10 @@ curl -s -X POST "http://127.0.0.1:8001/dataset-recsys/mathe/recommend/videos" \
 ## Local Qdrant connection
 
 Replace the placeholders with the Kubernetes context, namespace, and Qdrant
-deployment for your test environment. Run the port-forward in a terminal and
-leave it open while testing.
+deployment for your test environment. Before forwarding, confirm that the
+active VPN, kubeconfig and namespace point at the environment you intend to
+test (dev or prod): the context name alone may not distinguish them. Run the
+port-forward in a terminal and leave it open while testing.
 
 ```bash
 kubectl --context '<CONTEXT>' -n '<NAMESPACE>' port-forward \
@@ -70,6 +72,10 @@ and `QDRANT_PORT=6333`, or open the
 
 Press Ctrl+C in the first terminal to stop the tunnel. If the connection drops
 or Kubernetes replaces the pod, rerun the same command.
+
+If localhost refuses the connection, check that the port-forward is still
+running. If `kubectl` cannot reach the cluster, check the VPN and network
+route; connecting the VPN does not start the port-forward.
 
 ## Deployed API
 

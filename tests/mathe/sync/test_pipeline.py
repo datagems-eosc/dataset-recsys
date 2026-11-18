@@ -941,7 +941,7 @@ def test_batch_processing_skips_completed_and_failed_entries(monkeypatch, tmp_pa
 
     monkeypatch.setattr(syncer, "_process_document_entry", fake_process_document_entry)
 
-    syncer.process_pending_materials()
+    syncer.process_pending_materials(retry_failed=False)
 
     assert processed == ["9.pdf"]
     with syncer.catalog.connection() as conn:
@@ -956,6 +956,45 @@ def test_batch_processing_skips_completed_and_failed_entries(monkeypatch, tmp_pa
     assert rows["8.pdf"]["status"] == "failed"
     assert rows["9.pdf"]["status"] == "completed"
     assert rows["9.pdf"]["claude_ocr_text"] == "new OCR text"
+
+
+def test_batch_processing_retries_failed_entries_by_default(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        mathe_syncer_module.boto3,
+        "client",
+        lambda *args, **kwargs: object(),
+    )
+    syncer = mathe_syncer_module.MathE_Syncer(base_dir=tmp_path)
+    with syncer.catalog.connection() as conn:
+        conn.executemany(
+            """
+            INSERT INTO sync_entries (
+                id, type, internal_pdf_path, claude_ocr_text, status
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                ("6.pdf", "document", "6.pdf", "already done", "completed"),
+                ("8.pdf", "document", "8.pdf", "OCR Failed: timeout", "failed"),
+            ],
+        )
+
+    processed = []
+
+    def fake_process_document_entry(entry):
+        processed.append(entry["id"])
+        entry["claude_ocr_text"] = "recovered OCR text"
+        entry["status"] = "completed"
+
+    monkeypatch.setattr(syncer, "_process_document_entry", fake_process_document_entry)
+
+    syncer.process_pending_materials()
+
+    # Completed entries are never redone; failed ones are retried.
+    assert processed == ["8.pdf"]
+    entries = {entry["id"]: entry for entry in syncer.get_raw()}
+    assert entries["6.pdf"]["claude_ocr_text"] == "already done"
+    assert entries["8.pdf"]["status"] == "completed"
+    assert entries["8.pdf"]["claude_ocr_text"] == "recovered OCR text"
 
 
 def test_batch_processing_routes_video_type_to_transcription(monkeypatch, tmp_path):

@@ -1,4 +1,4 @@
-from evaluation.mathe.evaluate_expert_reference import parse_material_ids
+from evaluation.mathe.expert_reference import parse_material_ids
 
 
 def test_parse_material_ids_handles_common_excel_values():

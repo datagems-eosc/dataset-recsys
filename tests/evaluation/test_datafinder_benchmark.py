@@ -8,11 +8,16 @@ from evaluation.datafinder.benchmark import (
     build_profiles,
     evaluate_rankings,
     link_bucket,
+    most_used_datasets,
     paired_bootstrap,
     per_query_metrics,
+    popularity_rankings,
+    random_rankings,
     restrict_links,
+    restrict_to_tail,
     summarize,
 )
+from evaluation.datafinder import run_benchmark
 from evaluation.datafinder.run_benchmark import read_summaries
 
 
@@ -132,3 +137,81 @@ def test_read_summaries_keeps_success_over_later_failure(tmp_path):
     assert records["a"]["summary"] == "A summary."
     assert records["b"]["summary"] == ""
     assert read_summaries(tmp_path / "missing.jsonl") == {}
+
+
+def test_random_rankings_are_deterministic_unique_and_exclude_self():
+    ids = [f"d{i}" for i in range(30)]
+    first = random_rankings(ids, ["d0", "d5"], top_k=29, seed=42)
+
+    assert first == random_rankings(ids, ["d5", "d0"], top_k=29, seed=42)
+    for query_id, ranked in first.items():
+        assert query_id not in ranked
+        assert len(ranked) == len(set(ranked)) == 29
+    assert first != random_rankings(ids, ["d0", "d5"], top_k=29, seed=7)
+    with pytest.raises(ValueError):
+        random_rankings(ids, ["d0"], top_k=30)
+
+
+def test_popularity_rankings_order_ties_missing_and_self_exclusion():
+    popularity = {"a": 5, "b": 9, "c": 5, "d": float("nan"), "e": 0}
+    ranked = popularity_rankings(popularity, ["b", "c"], top_k=3)
+
+    assert ranked["c"] == ["b", "a", "d"]  # ties by ID; c excluded
+    assert ranked["b"] == ["a", "c", "d"]  # NaN counts as 0, before "e" by ID
+    with pytest.raises(ValueError):
+        popularity_rankings(popularity, ["a"], top_k=5)
+
+
+def test_most_used_datasets_rounds_up_and_breaks_ties_by_id():
+    popularity = {"a": 5, "b": 9, "c": 5, "d": 1}
+
+    assert most_used_datasets(popularity, 0.0) == set()
+    assert most_used_datasets(popularity, 0.25) == {"b"}
+    assert most_used_datasets(popularity, 0.3) == {"b", "a"}  # ceil(1.2) = 2, a before c
+
+
+def test_restrict_to_tail_removes_head_everywhere():
+    links = {"q": {"hub", "t1"}, "hub": {"q"}, "r": {"hub"}}
+    rankings = {"q": ["hub", "x", "t1", "y"], "hub": ["q"], "r": ["hub", "x", "y"]}
+    tail_rankings, tail_links = restrict_to_tail(rankings, links, {"hub"}, top_k=2)
+
+    assert tail_links == {"q": {"t1"}}  # hub query dropped; r left without links
+    assert tail_rankings == {"q": ["x", "t1"]}
+    with pytest.raises(ValueError, match="too short"):
+        restrict_to_tail(rankings, links, {"hub"}, top_k=4)
+
+
+def test_summarize_groups_by_setting_when_present():
+    per_query = pd.DataFrame(
+        {"setting": ["full", "full", "tail"], "system": ["S", "S", "S"],
+         "query_id": ["a", "b", "a"], "recall@10": [1.0, 0.0, 0.5]}
+    )
+    summary = summarize(per_query)
+
+    assert summary[["setting", "n_queries", "recall@10"]].values.tolist() == [["full", 2, 0.5], ["tail", 1, 0.5]]
+
+
+def test_no_tasks_variant_drops_keywords_only(monkeypatch):
+    corpus = pd.DataFrame(
+        [{"id": "MNIST", "title": "Gradient-based learning", "description": "**Digits**.",
+          "tasks": ["Image Classification"]}]
+    )
+
+    class FakeDataFinder:
+        dataset_folder = "unused"
+
+        def get(self):
+            return {"corpus": corpus}
+
+        def get_links_from_queries(self):
+            return {}
+
+    monkeypatch.setattr(run_benchmark, "DataFinder", FakeDataFinder)
+    with_tasks, _, _ = run_benchmark.load_benchmark("with_tasks")
+    no_tasks, _, _ = run_benchmark.load_benchmark("no_tasks")
+
+    assert with_tasks[0].keywords == "Image Classification"
+    assert no_tasks[0].keywords == ""
+    assert no_tasks[0].description == with_tasks[0].description == "Digits."
+    with pytest.raises(ValueError):
+        run_benchmark.load_benchmark("other")

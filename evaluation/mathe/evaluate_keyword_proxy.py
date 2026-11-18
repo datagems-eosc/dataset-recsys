@@ -23,7 +23,7 @@ from recs_metrics.ranked_list import (
 )
 
 
-DEFAULT_OUTPUT = Path(__file__).with_name("mathe_keyword_proxy_evaluation.xlsx")
+DEFAULT_OUTPUT = Path(__file__).parent / "outputs" / "mathe_keyword_proxy_evaluation.xlsx"
 
 
 def _keywords(value: Any) -> list[str]:

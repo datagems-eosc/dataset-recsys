@@ -16,6 +16,13 @@ from dataset_recsys.mathe_recommenders.curricular_pool_ranker import (
 )
 from dataset_recsys.storage.qdrant_client import QdrantStorageClient
 from dataset_recsys.storage.mathe_mirror_client import MatheMirrorClient
+from evaluation.mathe.expert_reference import (
+    REFERENCE_SHEET_NAME,
+    _is_yes,
+    _safe_text,
+    load_reference_rows,
+    parse_material_ids,
+)
 from recs_metrics.ranked_list import (
     binary_precision_at_k,
     mean_defined_metric,
@@ -24,46 +31,8 @@ from recs_metrics.ranked_list import (
 
 
 DEFAULT_REFERENCE_WORKBOOK = Path(__file__).with_name("mathe_reference_alltopics.xlsx")
-DEFAULT_OUTPUT = Path(__file__).with_name("mathe_expert_reference_evaluation.xlsx")
-REFERENCE_SHEET_NAME = "Reference Set"
+DEFAULT_OUTPUT = Path(__file__).parent / "outputs" / "mathe_expert_reference_evaluation.xlsx"
 SAVED_RECOMMENDATIONS_SHEET_NAME = "per_question"
-
-
-def parse_material_ids(value: Any) -> list[str]:
-    """Parse comma/semicolon/whitespace-separated MathE material IDs from Excel."""
-    if value is None or pd.isna(value):
-        return []
-
-    if isinstance(value, int):
-        return [str(value)]
-
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            return []
-        if value.is_integer():
-            return [str(int(value))]
-
-    text = str(value).strip()
-    if not text:
-        return []
-
-    if re.fullmatch(r"\d+\.0+", text):
-        return [text.split(".", maxsplit=1)[0]]
-
-    material_ids = re.findall(r"\d+", text)
-    return list(dict.fromkeys(material_ids))
-
-
-def _is_yes(value: Any) -> bool:
-    if value is None or pd.isna(value):
-        return False
-    return str(value).strip().lower() in {"yes", "y", "true", "1"}
-
-
-def _safe_text(value: Any) -> str:
-    if value is None or pd.isna(value):
-        return ""
-    return str(value)
 
 
 def _median_defined(values: list[float | None]) -> float | None:
@@ -78,11 +47,6 @@ def _percentile_defined(values: list[float | None], percentile: float) -> float 
 
     index = math.ceil((percentile / 100) * len(defined)) - 1
     return defined[min(max(index, 0), len(defined) - 1)]
-
-
-def load_reference_rows(reference_workbook: Path) -> list[dict[str, Any]]:
-    reference_df = pd.read_excel(reference_workbook, sheet_name=REFERENCE_SHEET_NAME)
-    return reference_df.to_dict(orient="records")
 
 
 def load_saved_recommendation_rows(

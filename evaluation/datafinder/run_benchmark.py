@@ -66,6 +66,14 @@ from evaluation.datafinder.benchmark import (
 
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = Path(__file__).resolve().parent / "outputs"
+# Input variants. Each has its own summaries and outputs, so runs never mix.
+#   with_tasks  profile keywords = DataFinder tasks (S1 embeds them; the
+#               summary prompt receives them as "Keywords")
+#   no_tasks    tasks removed from BOTH systems: S1 embeds title. description,
+#               the summary is generated from title and description only and
+#               has to infer use cases itself (the prompt asks for them)
+VARIANTS = ("with_tasks", "no_tasks")
+VARIANT = "with_tasks"
 RESULTS_CSV = ROOT / "data" / "datafinder" / "results.csv"
 
 EMBEDDING_MODEL = "allenai/specter2_base"
@@ -86,7 +94,7 @@ def summaries_path() -> Path:
 # --------------------------------------------------------------------------- #
 # Data
 # --------------------------------------------------------------------------- #
-def load_benchmark() -> tuple[list[DatasetProfile], dict[str, set[str]], DataFinder]:
+def load_benchmark(variant: str | None = None) -> tuple[list[DatasetProfile], dict[str, set[str]], DataFinder]:
     """Corpus profiles (descriptions cleaned) and co-citation links."""
     datafinder = DataFinder()
     corpus = datafinder.get()["corpus"]
@@ -94,6 +102,11 @@ def load_benchmark() -> tuple[list[DatasetProfile], dict[str, set[str]], DataFin
     # Same cleaning of the raw description as notebooks/ds2ds_demo.ipynb:
     # DataFinder descriptions carry markdown (**bold**, links).
     profiles = preprocess_profiles_field(profiles, field_name="description")
+    variant = variant or VARIANT
+    if variant not in VARIANTS:
+        raise ValueError(f"Unknown variant {variant!r}; expected one of {VARIANTS}.")
+    if variant == "no_tasks":
+        profiles = [replace(p, keywords="") for p in profiles]
     links = restrict_links(datafinder.get_links_from_queries(), [p.id for p in profiles])
     return profiles, links, datafinder
 
@@ -355,6 +368,7 @@ def cmd_evaluate(args: argparse.Namespace) -> None:
         },
         "embedding": {"model": EMBEDDING_MODEL, "pooling": "mean", "max_length": 512,
                       "torch": torch.__version__, "transformers": transformers.__version__},
+        "variant": VARIANT,
         "summaries": {"provider": "SCAYLE", "llm": SUMMARY_LLM, "prompt_version": PROMPT_VERSION,
                       "file": summaries_path().name, "with_summary": len(with_summary),
                       "missing_raw_fallback": len(missing) if "S2" in texts else None},
@@ -388,7 +402,16 @@ def main(argv: list[str] | None = None) -> None:
                    help="Run S2 only if at most this many datasets lack a summary; "
                         "those fall back to raw metadata text (default 0).")
     e.set_defaults(func=cmd_evaluate)
+    for sub_parser in (s, e):
+        sub_parser.add_argument("--variant", choices=VARIANTS, default="with_tasks",
+                                help="with_tasks (default, outputs/) or no_tasks (outputs/no_tasks/): "
+                                     "drop DataFinder tasks from both S1 and the summary prompt.")
     args = parser.parse_args(argv)
+    global VARIANT, OUTPUT_DIR
+    VARIANT = args.variant
+    if VARIANT != "with_tasks":
+        OUTPUT_DIR = OUTPUT_DIR / VARIANT
+    print(f"Variant: {VARIANT} -> {OUTPUT_DIR}", flush=True)
     args.func(args)
 
 

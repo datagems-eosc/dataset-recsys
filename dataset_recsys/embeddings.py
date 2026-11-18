@@ -82,7 +82,7 @@ def _encode_with_optional_chunking(
 
     chunk_embeddings = model.encode(
         chunks,
-        batch_size=8,
+        batch_size=2,
         convert_to_numpy=True,
         show_progress_bar=False,
     )
@@ -114,7 +114,7 @@ def _encode_sentence_transformer_texts(
         if short_indices:
             short_embeddings = model.encode(
                 [texts[index] for index in short_indices],
-                batch_size=8,
+                batch_size=2,
                 convert_to_numpy=True,
                 show_progress_bar=False,
             )

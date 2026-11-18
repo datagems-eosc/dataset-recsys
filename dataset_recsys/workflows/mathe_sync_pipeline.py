@@ -328,7 +328,7 @@ def run_full_mathe_pipeline(syncer: MathE_Syncer) -> dict:
                 len(materials),
             )
 
-            batch_size = 32
+            batch_size = 16
             all_embeddings = []
             for i in range(0, len(texts), batch_size):
                 batch = texts[i : i + batch_size]
